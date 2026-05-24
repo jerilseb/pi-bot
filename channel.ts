@@ -104,8 +104,8 @@ const DOCUMENT_PATH_REGEX = new RegExp(
 	"gi",
 );
 const EXTENSION_PATHS = [
-	path.join(import.meta.dirname, ".pi/extensions/tavily-web-search.ts"),
-	path.join(import.meta.dirname, ".pi/extensions/web-fetch"),
+	path.join(import.meta.dirname, "./extensions/tavily-web-search.ts"),
+	path.join(import.meta.dirname, "./extensions/web-fetch"),
 ];
 
 interface TelegramUpdate {
