@@ -26,7 +26,7 @@
  *   PI_CHANNEL_MAX_DOCUMENT_UPLOADS=4
  *   PI_CHANNEL_DOCUMENT_UPLOAD_EXTS=pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,json
  *                                           comma-separated extensions (no dot) the model is allowed to upload
- *   FAL_KEY=...                             enables the create-image skill
+ *   FAL_KEY=...                             enables the create-image skill, if present in skills/
  *   ELEVENLABS_API_KEY=...                  enables voice/audio transcription
  *   ElevenLabs transcription is hardcoded to model scribe_v2 and language en.
  */
@@ -103,10 +103,11 @@ const DOCUMENT_PATH_REGEX = new RegExp(
 	).join("|")})(?=[\\s"'\`<>{}\\[\\]|),.;:!?]|$)`,
 	"gi",
 );
-const EXTENSION_PATHS = [
-	path.join(import.meta.dirname, "./extensions/tavily-web-search.ts"),
-	path.join(import.meta.dirname, "./extensions/web-fetch"),
-];
+const EXTENSION_ENTRYPOINT_EXTS = new Set([".ts", ".js", ".mjs", ".cjs"]);
+const PROJECT_EXTENSIONS_DIR = path.join(import.meta.dirname, "extensions");
+const PROJECT_SKILLS_DIR = path.join(import.meta.dirname, "skills");
+const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
 interface TelegramUpdate {
 	update_id: number;
@@ -195,6 +196,81 @@ interface TranscriptionResult {
 	error?: string;
 }
 
+function discoverExtensionPaths(directory: string): string[] {
+	if (!fs.existsSync(directory)) return [];
+
+	return fs
+		.readdirSync(directory, { withFileTypes: true })
+		.flatMap((entry) => {
+			if (entry.name.startsWith(".") || entry.name === "node_modules") return [];
+
+			const entryPath = path.join(directory, entry.name);
+			if (entry.isFile()) {
+				return EXTENSION_ENTRYPOINT_EXTS.has(
+					path.extname(entry.name).toLowerCase(),
+				)
+					? [entryPath]
+					: [];
+			}
+
+			if (entry.isDirectory() && isExtensionDirectory(entryPath)) {
+				return [entryPath];
+			}
+
+			return [];
+		})
+		.sort((a, b) => a.localeCompare(b));
+}
+
+function isExtensionDirectory(directory: string): boolean {
+	return ["index.ts", "index.js", "index.mjs", "index.cjs", "package.json"].some(
+		(entrypoint) => fs.existsSync(path.join(directory, entrypoint)),
+	);
+}
+
+function discoverSkillPaths(directory: string): string[] {
+	if (!fs.existsSync(directory)) return [];
+
+	const paths: string[] = [];
+	const seen = new Set<string>();
+
+	const add = (skillPath: string) => {
+		const normalized = path.resolve(skillPath);
+		if (seen.has(normalized)) return;
+		seen.add(normalized);
+		paths.push(normalized);
+	};
+
+	const walk = (current: string) => {
+		if (fs.existsSync(path.join(current, "SKILL.md"))) {
+			add(current);
+			return;
+		}
+
+		for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+			if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+
+			const entryPath = path.join(current, entry.name);
+			if (entry.isDirectory()) {
+				walk(entryPath);
+				continue;
+			}
+
+			if (
+				current === directory &&
+				entry.isFile() &&
+				path.extname(entry.name).toLowerCase() === ".md" &&
+				entry.name.toLowerCase() !== "readme.md"
+			) {
+				add(entryPath);
+			}
+		}
+	};
+
+	walk(directory);
+	return paths.sort((a, b) => a.localeCompare(b));
+}
+
 if (!BOT_TOKEN) {
 	console.error(
 		"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node channel.ts",
@@ -274,11 +350,13 @@ class RpcSession {
 			"--mode",
 			"rpc",
 			"--no-extensions",
+			"--no-skills",
 			"--provider",
 			"openrouter",
 			"--model",
 			OPENROUTER_MODEL,
 			...EXTENSION_PATHS.flatMap((p) => ["-e", p]),
+			...SKILL_PATHS.flatMap((p) => ["--skill", p]),
 		];
 
 		this.child = spawn("pi", args, {
@@ -564,6 +642,10 @@ async function pollTelegram(): Promise<void> {
 	);
 	console.log("Provider: openrouter");
 	console.log(`Model: ${OPENROUTER_MODEL}`);
+	console.log(
+		`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
+	);
+	console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`);
 	console.log(
 		`Auto image upload: ${
 			SEND_LOCAL_IMAGES ? LOCAL_IMAGE_UPLOAD_DIRS.join(", ") : "off"

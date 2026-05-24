@@ -1,0 +1,24 @@
+{
+  "name": "pi-bot",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node channel.ts"
+  },
+	"dependencies": {
+		"@earendil-works/pi-agent-core": "^0.75.1",
+		"@earendil-works/pi-ai": "^0.75.1",
+		"@earendil-works/pi-coding-agent": "^0.75.1",
+		"@earendil-works/pi-tui": "^0.75.1",
+		"dotenv": "^17.4.2",
+		"typescript": "^6.0.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.13",
+		"@types/node": "^25.6.0"
+	}
+}
