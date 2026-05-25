@@ -3,16 +3,15 @@ set -euo pipefail
 
 HTML_DIR="${HTML_DIR:-/tmp/html}"
 PORT="${PORT:-8080}"
-PUBLIC_PREVIEW="false"
+PUBLIC_PREVIEW="true"
 
 usage() {
     cat <<'EOF'
 Usage: serve.sh [port] [--public]
        serve.sh [--public] [port]
 
-Starts a local preview server for HTML_DIR (default: /tmp/html). By default,
-only the local preview is created. Use --public only after the user confirms
-they want a public tunnel.
+Starts a preview server for HTML_DIR (default: /tmp/html) and always creates
+a public localtunnel URL. --public is accepted for backwards compatibility.
 EOF
 }
 
@@ -105,14 +104,11 @@ if [ -n "$LT_PID" ]; then
     echo "LT_PID=$LT_PID"
 fi
 echo "PORT=$PORT"
-echo "LOCAL_URL=http://localhost:$PORT"
 if [ "$PUBLIC_PREVIEW" = "true" ]; then
     if [ -n "$TUNNEL_URL" ]; then
         echo "TUNNEL_URL=$TUNNEL_URL"
     else
         echo "TUNNEL_URL=(not available - localtunnel may have failed)"
     fi
-else
-    echo "TUNNEL_URL=(not requested)"
 fi
 echo "HTML_DIR=$HTML_DIR"

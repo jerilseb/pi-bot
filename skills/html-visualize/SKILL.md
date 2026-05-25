@@ -1,15 +1,15 @@
 ---
 name: html-visualize
-description: Create visualizations as self-contained HTML files served locally, with an optional public tunnel created only after asking the user. Use when the user asks to visualize data, create presentation, render charts, build interactive demos, or display anything visually in a browser.
+description: Create visualizations as self-contained HTML files and share a public preview link. Use when the user asks to visualize data, create a presentation, render charts, build interactive demos, or display anything visually in a browser.
 ---
 
 # HTML Visualize
 
-Create a single self-contained HTML file and always serve it locally for preview. Ask the user before creating an optional public tunnel for remote access.
+Create a single self-contained HTML file, serve it, and share a public preview link. No need to ask first and no need to give the user a localhost link.
 
 ## When to Use
 
-- User asks to "visualize" anything (data, charts, diagrams, 3D scenes, layouts, etc.)
+- User asks to "visualize" anything: data, charts, diagrams, 3D scenes, layouts, etc.
 - User wants to see something rendered in a browser
 - User asks for a demo, prototype, or interactive page
 
@@ -19,19 +19,19 @@ Create a single self-contained HTML file and always serve it locally for preview
 
 Write a single self-contained HTML file to `/tmp/html/`. Use a descriptive filename based on what is being visualized.
 
-```
+```text
 /tmp/html/visualization.html
 ```
 
 **Rules for the HTML file:**
 - Must be fully self-contained — all CSS, JS, data, and assets inline
-- No external file references (except CDN libraries like d3, three.js, chart.js, etc.)
+- No external file references, except CDN libraries like d3, three.js, chart.js, etc.
 - Must work when opened directly in a browser
 - Include `<meta charset="UTF-8">` and a `<title>`
 - Use responsive layout where practical
-- Include all data inline (no fetch calls to local files)
+- Include all data inline; no fetch calls to local files
 
-**Recommended CDN libraries (use via `<script src="...">`):**
+**Recommended CDN libraries:**
 
 | Purpose | Library | CDN |
 |---------|---------|-----|
@@ -43,71 +43,41 @@ Write a single self-contained HTML file to `/tmp/html/`. Use a descriptive filen
 | Animation | GSAP | `https://cdn.jsdelivr.net/npm/gsap@3.12/dist/gsap.min.js` |
 | UI widgets | Alpine.js | `https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js` |
 
-### 2. Start the Local Preview Server
+### 2. Start the Public Preview
 
-Run the serve script from the skill directory using a relative path:
+Run the serve script from the skill directory:
 
 ```bash
 ./scripts/serve.sh [port]
 ```
 
-If your current working directory is the project root, use the project-relative path:
+If your current working directory is the project root, use:
 
 ```bash
 .pi/skills/html-visualize/scripts/serve.sh [port]
 ```
 
-Default port is `8080`. By default, the script creates **local preview only**. The script:
-- Creates `/tmp/html/` if it doesn't exist
-- Kills any existing server/tunnel on the port
-- Starts a local preview server on the port
-- Outputs `LOCAL_URL` every time
-- Outputs `TUNNEL_URL=(not requested)` unless public preview was explicitly requested
+Default port is `8080`. The script starts the local backing server and automatically creates a public localtunnel URL.
 
-### 3. Share the Local URL and Ask About Public Preview
+### 3. Share Only the Public URL
 
-After the script runs, always give the user the **local URL** first:
+After the script runs, give the user the public URL to the specific HTML file:
 
-```
-✅ Visualization ready!
-- Local: http://localhost:8080/visualization.html
+```text
+✅ Visualization ready: https://abc123.loca.lt/visualization.html
 ```
 
-Then ask the user whether they want a public preview/tunnel. Use `ask_user` with a yes/no question, for example:
-
-```
-Would you like me to create a public preview link for this visualization?
-```
-
-Do **not** create a public tunnel unless the user says yes.
-
-### 4. Create Public Preview Only If Requested
-
-If the user confirms they want public preview, rerun the serve script with `--public`:
-
-```bash
-./scripts/serve.sh [port] --public
-```
-
-From the project root, use:
-
-```bash
-.pi/skills/html-visualize/scripts/serve.sh [port] --public
-```
-
-Then share both URLs:
-
-```
-✅ Public preview ready!
-- Local:  http://localhost:8080/visualization.html
-- Public: https://abc123.loca.lt/visualization.html
-```
+Do not ask whether they want a public preview. Do not share the localhost URL unless the user explicitly asks for it.
 
 If localtunnel shows a confirmation page, tell the user to click "Click to Continue".
 
-### 5. Cleanup (Optional)
+## Updating the Visualization
 
-When done, kill the server and any tunnel for the port:
+To update the HTML after the server is already running, rewrite the file in `/tmp/html/`. The user can refresh the public preview link to see changes.
+
+## Cleanup Optional
+
+When done, kill the server and tunnel for the port:
 
 ```bash
 kill $(lsof -ti :8080) 2>/dev/null
@@ -116,13 +86,8 @@ pkill -f "localtunnel.*--port 8080" 2>/dev/null
 
 Or let them run — the next `serve.sh` call will replace them.
 
-## Updating the Visualization
-
-To update the HTML after the server is already running, simply rewrite the file in `/tmp/html/`. The user can refresh the browser to see changes — no server restart needed.
-
 ## Tips
 
-- For multiple visualizations, use different filenames (e.g., `chart.html`, `map.html`)
-- If localtunnel shows a confirmation page, tell the user to click "Click to Continue"
+- For multiple visualizations, use different filenames, like `chart.html`, `map.html`, or `demo.html`
 - Prefer SVG or Canvas rendering for crisp visuals at any zoom
-- Add interactivity with Alpine.js or vanilla JS — the user can explore the data
+- Add interactivity with Alpine.js or vanilla JS so the user can explore the data
