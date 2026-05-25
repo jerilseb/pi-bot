@@ -106,6 +106,12 @@ const DOCUMENT_PATH_REGEX = new RegExp(
 const EXTENSION_ENTRYPOINT_EXTS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const PROJECT_EXTENSIONS_DIR = path.join(import.meta.dirname, "extensions");
 const PROJECT_SKILLS_DIR = path.join(import.meta.dirname, "skills");
+const LOCAL_PI_BIN = path.join(
+	import.meta.dirname,
+	"node_modules",
+	".bin",
+	process.platform === "win32" ? "pi.cmd" : "pi",
+);
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
@@ -292,6 +298,11 @@ if (!OPENROUTER_MODEL) {
 	process.exit(1);
 }
 
+if (!fs.existsSync(LOCAL_PI_BIN)) {
+	console.error(`Local pi binary not found at ${LOCAL_PI_BIN}. Run npm install.`);
+	process.exit(1);
+}
+
 fs.mkdirSync(TMP_DIR, { recursive: true });
 
 const chats = new Map<string, ChatState>();
@@ -359,7 +370,7 @@ class RpcSession {
 			...SKILL_PATHS.flatMap((p) => ["--skill", p]),
 		];
 
-		this.child = spawn("pi", args, {
+		this.child = spawn(LOCAL_PI_BIN, args, {
 			cwd: this.cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			env: { ...process.env, OPENROUTER_API_KEY },
@@ -642,6 +653,7 @@ async function pollTelegram(): Promise<void> {
 	);
 	console.log("Provider: openrouter");
 	console.log(`Model: ${OPENROUTER_MODEL}`);
+	console.log(`Pi binary: ${LOCAL_PI_BIN}`);
 	console.log(
 		`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
 	);
