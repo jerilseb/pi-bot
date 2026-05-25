@@ -5,7 +5,7 @@
  *
  * This is a small, Telegram-only replacement for the pi-channels extension:
  * - polls Telegram Bot API for incoming messages
- * - keeps one persistent `pi --mode rpc` session per chat
+ * - keeps one persistent Pi SDK session per chat
  * - queues messages per chat and sends Pi's final response back to Telegram
  * - supports /start, /help, /status, /abort, /new
  * - supports photos as image attachments and other downloaded files as local paths
@@ -32,11 +32,21 @@
  */
 
 import "dotenv/config";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ImageContent, type Model } from "@earendil-works/pi-ai";
+import {
+	AuthStorage,
+	createAgentSession,
+	DefaultResourceLoader,
+	getAgentDir,
+	ModelRegistry,
+	SessionManager,
+	SettingsManager,
+	type AgentSession,
+	type AgentSessionEvent,
+} from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as readline from "node:readline";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "";
@@ -106,12 +116,6 @@ const DOCUMENT_PATH_REGEX = new RegExp(
 const EXTENSION_ENTRYPOINT_EXTS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const PROJECT_EXTENSIONS_DIR = path.join(import.meta.dirname, "extensions");
 const PROJECT_SKILLS_DIR = path.join(import.meta.dirname, "skills");
-const LOCAL_PI_BIN = path.join(
-	import.meta.dirname,
-	"node_modules",
-	".bin",
-	process.platform === "win32" ? "pi.cmd" : "pi",
-);
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
@@ -178,22 +182,15 @@ interface ChatState {
 	chatId: string;
 	queue: IncomingPrompt[];
 	processing: boolean;
-	rpc: RpcSession;
+	pi: SdkPiSession;
 	messageCount: number;
 	startedAt: number;
 	idleTimer?: ReturnType<typeof setTimeout>;
 }
 
-interface RpcPromptResult {
+interface PiPromptResult {
 	text: string;
 	toolOutput: string;
-}
-
-interface PendingRpcRequest {
-	resolve: (value: RpcPromptResult) => void;
-	reject: (error: Error) => void;
-	chunks: string[];
-	toolOutputs: string[];
 }
 
 interface TranscriptionResult {
@@ -298,10 +295,11 @@ if (!OPENROUTER_MODEL) {
 	process.exit(1);
 }
 
-if (!fs.existsSync(LOCAL_PI_BIN)) {
-	console.error(`Local pi binary not found at ${LOCAL_PI_BIN}. Run npm install.`);
-	process.exit(1);
-}
+const AUTH_STORAGE = AuthStorage.create();
+AUTH_STORAGE.setRuntimeApiKey("openrouter", OPENROUTER_API_KEY);
+const MODEL_REGISTRY = ModelRegistry.create(AUTH_STORAGE);
+const AGENT_MODEL = resolveOpenRouterModel();
+const SETTINGS_MANAGER = SettingsManager.create(process.cwd(), getAgentDir());
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -309,11 +307,18 @@ const chats = new Map<string, ChatState>();
 let offset = 0;
 let running = true;
 
-class RpcSession {
-	private child: ChildProcess | null = null;
-	private rl: readline.Interface | null = null;
-	private pending: PendingRpcRequest | null = null;
-	private ready = false;
+function resolveOpenRouterModel(): Model<any> {
+	const model = MODEL_REGISTRY.find("openrouter", OPENROUTER_MODEL);
+	if (!model) {
+		console.error(`Unknown OpenRouter model: ${OPENROUTER_MODEL}`);
+		process.exit(1);
+	}
+	return model;
+}
+
+class SdkPiSession {
+	private session: AgentSession | null = null;
+	private starting: Promise<AgentSession> | null = null;
 	private cwd: string;
 
 	constructor(cwd: string) {
@@ -323,19 +328,40 @@ class RpcSession {
 	async runPrompt(
 		text: string,
 		attachments: Attachment[],
-	): Promise<RpcPromptResult> {
-		await this.start();
-		if (this.pending)
-			throw new Error("RPC session is already processing a prompt");
+	): Promise<PiPromptResult> {
+		const session = await this.start();
+		if (session.isStreaming) {
+			throw new Error("Pi SDK session is already processing a prompt");
+		}
 
-		return new Promise((resolve, reject) => {
-			this.pending = { resolve, reject, chunks: [], toolOutputs: [] };
-			this.send({ type: "prompt", ...buildRpcPrompt(text, attachments) });
+		const chunks: string[] = [];
+		const toolOutputs: string[] = [];
+		let errorMessage = "";
+		const unsubscribe = session.subscribe((event) => {
+			this.collectPromptEvent(event, chunks, toolOutputs, (message) => {
+				errorMessage = message;
+			});
 		});
+
+		try {
+			const prompt = buildPiPrompt(text, attachments);
+			await session.prompt(prompt.message, {
+				...(prompt.images?.length ? { images: prompt.images } : {}),
+			});
+
+			if (errorMessage) throw new Error(errorMessage);
+
+			return {
+				text: chunks.join("").trim() || "(no response)",
+				toolOutput: toolOutputs.join("\n"),
+			};
+		} finally {
+			unsubscribe();
+		}
 	}
 
 	abort(): void {
-		this.send({ type: "abort" });
+		void this.session?.abort();
 	}
 
 	reset(): void {
@@ -343,134 +369,92 @@ class RpcSession {
 	}
 
 	cleanup(): void {
-		this.ready = false;
-		if (this.pending) {
-			this.pending.reject(new Error("RPC session stopped"));
-			this.pending = null;
-		}
-		this.rl?.close();
-		this.rl = null;
-		this.child?.kill("SIGTERM");
-		this.child = null;
+		this.session?.dispose();
+		this.session = null;
+		this.starting = null;
 	}
 
-	private async start(): Promise<void> {
-		if (this.ready && this.child?.stdin?.writable) return;
+	private async start(): Promise<AgentSession> {
+		if (this.session) return this.session;
+		if (this.starting) return this.starting;
 
-		const args = [
-			"--mode",
-			"rpc",
-			"--no-extensions",
-			"--no-skills",
-			"--provider",
-			"openrouter",
-			"--model",
-			OPENROUTER_MODEL,
-			...EXTENSION_PATHS.flatMap((p) => ["-e", p]),
-			...SKILL_PATHS.flatMap((p) => ["--skill", p]),
-		];
-
-		this.child = spawn(LOCAL_PI_BIN, args, {
-			cwd: this.cwd,
-			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env, OPENROUTER_API_KEY },
-		});
-
-		if (!this.child.stdin || !this.child.stdout) {
-			throw new Error("Failed to start pi RPC process");
-		}
-
-		this.rl = readline.createInterface({ input: this.child.stdout });
-		this.rl.on("line", (line) => this.handleLine(line));
-
-		let stderr = "";
-		this.child.stderr?.on("data", (chunk: Buffer) => {
-			stderr += chunk.toString();
-			if (stderr.length > 8000) stderr = stderr.slice(-8000);
-		});
-
-		this.child.on("close", (code) => {
-			this.ready = false;
-			if (this.pending) {
-				const pending = this.pending;
-				this.pending = null;
-				pending.reject(
-					new Error(stderr.trim() || `pi RPC exited with code ${code ?? 1}`),
-				);
-			}
-		});
-
-		this.child.on("error", (error) => {
-			this.ready = false;
-			if (this.pending) {
-				const pending = this.pending;
-				this.pending = null;
-				pending.reject(error);
-			}
-		});
-
-		this.ready = true;
-	}
-
-	private send(command: Record<string, unknown>): void {
-		if (!this.child?.stdin?.writable)
-			throw new Error("pi RPC process is not writable");
-		this.child.stdin.write(`${JSON.stringify(command)}\n`);
-	}
-
-	private handleLine(line: string): void {
-		let event: Record<string, any>;
+		this.starting = this.createSession();
 		try {
-			event = JSON.parse(line);
-		} catch {
-			return;
+			this.session = await this.starting;
+			return this.session;
+		} finally {
+			this.starting = null;
 		}
+	}
 
+	private async createSession(): Promise<AgentSession> {
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: this.cwd,
+			agentDir: getAgentDir(),
+			settingsManager: SETTINGS_MANAGER,
+			noExtensions: true,
+			noSkills: true,
+			additionalExtensionPaths: EXTENSION_PATHS,
+			additionalSkillPaths: SKILL_PATHS,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: this.cwd,
+			model: AGENT_MODEL,
+			authStorage: AUTH_STORAGE,
+			modelRegistry: MODEL_REGISTRY,
+			resourceLoader,
+			sessionManager: SessionManager.inMemory(this.cwd),
+			settingsManager: SETTINGS_MANAGER,
+		});
+
+		return session;
+	}
+
+	private collectPromptEvent(
+		event: AgentSessionEvent,
+		chunks: string[],
+		toolOutputs: string[],
+		setError: (message: string) => void,
+	): void {
 		if (event.type === "message_update") {
 			const delta = event.assistantMessageEvent;
-			if (delta?.type === "text_delta" && typeof delta.delta === "string") {
-				this.pending?.chunks.push(delta.delta);
+			if (delta.type === "text_delta") {
+				chunks.push(delta.delta);
 			}
-			if (delta?.type === "done" && delta.reason === "error" && this.pending) {
-				const pending = this.pending;
-				this.pending = null;
-				pending.reject(
-					new Error("Pi agent failed while generating a response"),
+			if (delta.type === "error") {
+				setError(
+					delta.error.errorMessage ||
+						"Pi agent failed while generating a response",
 				);
 			}
 		}
 
-		if (event.type === "response" && event.success === false && this.pending) {
-			const pending = this.pending;
-			this.pending = null;
-			pending.reject(new Error(event.error || "Pi rejected the prompt"));
-		}
-
-		if (event.type === "tool_execution_end" && this.pending) {
+		if (event.type === "tool_execution_end") {
 			const output = extractToolResultText(event.result);
-			if (output) this.pending.toolOutputs.push(output);
+			if (output) toolOutputs.push(output);
 		}
 
-		if (event.type === "agent_end" && this.pending) {
-			const pending = this.pending;
-			this.pending = null;
-			const text = pending.chunks.join("").trim();
-			pending.resolve({
-				text: text || "(no response)",
-				toolOutput: pending.toolOutputs.join("\n"),
-			});
+		if (event.type === "agent_end") {
+			const failed = event.messages.find(
+				(message) => message.role === "assistant" && message.errorMessage,
+			);
+			if (failed?.role === "assistant" && failed.errorMessage) {
+				setError(failed.errorMessage);
+			}
 		}
 	}
 }
 
-function buildRpcPrompt(
+function buildPiPrompt(
 	text: string,
 	attachments: Attachment[],
 ): {
 	message: string;
-	images?: Array<{ type: "image"; data: string; mimeType: string }>;
+	images?: ImageContent[];
 } {
-	const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+	const images: ImageContent[] = [];
 	const files: string[] = [];
 
 	for (const attachment of attachments) {
@@ -507,7 +491,7 @@ function getChat(chatId: string): ChatState {
 			chatId,
 			queue: [],
 			processing: false,
-			rpc: new RpcSession(process.cwd()),
+			pi: new SdkPiSession(process.cwd()),
 			messageCount: 0,
 			startedAt: Date.now(),
 		};
@@ -520,8 +504,8 @@ function getChat(chatId: string): ChatState {
 function resetIdleTimer(chat: ChatState): void {
 	if (chat.idleTimer) clearTimeout(chat.idleTimer);
 	chat.idleTimer = setTimeout(() => {
-		console.log(`[${chat.chatId}] idle timeout; stopping pi RPC session`);
-		chat.rpc.cleanup();
+		console.log(`[${chat.chatId}] idle timeout; stopping Pi SDK session`);
+		chat.pi.cleanup();
 		chats.delete(chat.chatId);
 	}, IDLE_TIMEOUT_MS);
 }
@@ -589,7 +573,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 	}
 	if (command === "/abort") {
 		chat.queue.length = 0;
-		chat.rpc.abort();
+		chat.pi.abort();
 		await sendTelegramMessage(
 			chat.chatId,
 			"⏹ Aborting current prompt and clearing queue...",
@@ -599,7 +583,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 	if (command === "/new") {
 		chat.queue.length = 0;
 		chat.processing = false;
-		chat.rpc.reset();
+		chat.pi.reset();
 		chat.messageCount = 0;
 		chat.startedAt = Date.now();
 		await sendTelegramMessage(
@@ -623,7 +607,7 @@ async function processQueue(chat: ChatState): Promise<void> {
 		const typing = startTyping(prompt.chatId);
 		try {
 			console.log(`[${prompt.chatId}] prompt: ${prompt.text.slice(0, 120)}`);
-			const response = await chat.rpc.runPrompt(
+			const response = await chat.pi.runPrompt(
 				prompt.text,
 				prompt.attachments,
 			);
@@ -653,7 +637,7 @@ async function pollTelegram(): Promise<void> {
 	);
 	console.log("Provider: openrouter");
 	console.log(`Model: ${OPENROUTER_MODEL}`);
-	console.log(`Pi binary: ${LOCAL_PI_BIN}`);
+	console.log("Pi runtime: SDK");
 	console.log(
 		`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
 	);
@@ -941,7 +925,7 @@ async function downloadTelegramFile(
 
 async function sendPiResponse(
 	chatId: string,
-	response: RpcPromptResult,
+	response: PiPromptResult,
 ): Promise<void> {
 	await sendTelegramMessage(chatId, response.text);
 
@@ -1265,7 +1249,7 @@ async function shutdown(): Promise<void> {
 	console.log("Shutting down...");
 	for (const chat of chats.values()) {
 		if (chat.idleTimer) clearTimeout(chat.idleTimer);
-		chat.rpc.cleanup();
+		chat.pi.cleanup();
 	}
 }
 

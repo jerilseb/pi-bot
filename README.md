@@ -1,6 +1,6 @@
 # pi-bot
 
-A tiny Telegram bot that pipes your chats into [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Send it a message on Telegram, it spins up a Pi RPC session for that chat, and sends the answer back.
+A tiny Telegram bot that pipes your chats into [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Send it a message on Telegram, it spins up a Pi SDK session for that chat, and sends the answer back.
 
 It is basically a personal AI assistant in Telegram, with support for images, files, voice notes, web search, and a couple of handy Pi skills.
 
