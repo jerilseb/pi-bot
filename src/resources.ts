@@ -4,11 +4,9 @@ import * as path from "node:path";
 import {
 	EXTENSION_ENTRYPOINT_EXTS,
 	FILES_DIR,
-	HEARTBEAT_FILE_CONFIGURED,
 	HEARTBEAT_FILE_PATH,
 	HEARTBEAT_NOOP,
 	HEARTBEAT_STATE_PATH,
-	LEGACY_HEATBEAT_FILE_PATH,
 	MEMORY_PATH,
 	SYSTEM_PROMPT_PATH,
 } from "./config.ts";
@@ -124,21 +122,14 @@ function extractHeartbeatInstructions(content: string): string {
 }
 
 export function readHeartbeatInstructions(): { filePath: string; instructions: string } {
-	const candidatePaths = HEARTBEAT_FILE_CONFIGURED
-		? [HEARTBEAT_FILE_PATH]
-		: [HEARTBEAT_FILE_PATH, LEGACY_HEATBEAT_FILE_PATH];
-
-	let firstExistingPath = candidatePaths[0];
-	for (const filePath of candidatePaths) {
-		if (!fs.existsSync(filePath)) continue;
-		firstExistingPath = filePath;
-		const instructions = extractHeartbeatInstructions(
-			fs.readFileSync(filePath, "utf8"),
-		);
-		if (instructions) return { filePath, instructions };
+	if (!fs.existsSync(HEARTBEAT_FILE_PATH)) {
+		return { filePath: HEARTBEAT_FILE_PATH, instructions: "" };
 	}
 
-	return { filePath: firstExistingPath, instructions: "" };
+	const instructions = extractHeartbeatInstructions(
+		fs.readFileSync(HEARTBEAT_FILE_PATH, "utf8"),
+	);
+	return { filePath: HEARTBEAT_FILE_PATH, instructions };
 }
 
 export function buildHeartbeatPrompt(instructions: string, filePath: string): string {

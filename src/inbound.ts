@@ -4,7 +4,7 @@ import {
 	ELEVENLABS_API_KEY,
 	ELEVENLABS_LANGUAGE,
 	ELEVENLABS_MODEL,
-	ALLOWED_CHAT_IDS,
+	ALLOWED_CHAT_ID,
 	TELEGRAM_DOWNLOAD_LIMIT,
 	TELEGRAM_FILE_API,
 	TMP_DIR,
@@ -17,7 +17,7 @@ export async function toIncomingPrompt(
 	message: TelegramMessage,
 ): Promise<IncomingPrompt | null> {
 	const chatId = String(message.chat.id);
-	if (ALLOWED_CHAT_IDS.size > 0 && !ALLOWED_CHAT_IDS.has(chatId)) return null;
+	if (chatId !== ALLOWED_CHAT_ID) return null;
 
 	const caption = message.caption?.trim() ?? "";
 

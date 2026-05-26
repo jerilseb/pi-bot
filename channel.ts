@@ -11,7 +11,7 @@
 
 import * as fs from "node:fs";
 import {
-	ALLOWED_CHAT_IDS,
+	ALLOWED_CHAT_ID,
 	BOT_TOKEN,
 	HEARTBEAT_ENABLED,
 	IDLE_TIMEOUT_MS,
@@ -106,6 +106,13 @@ function validateEnvironment(): void {
 	if (!OPENROUTER_MODEL) {
 		console.error(
 			"Missing OPENROUTER_MODEL. Example: OPENROUTER_MODEL=openai/gpt-5.4-mini",
+		);
+		process.exit(1);
+	}
+
+	if (!ALLOWED_CHAT_ID) {
+		console.error(
+			"Missing TELEGRAM_ALLOWED_CHAT_ID. This bot is restricted to exactly one Telegram chat.",
 		);
 		process.exit(1);
 	}
@@ -277,9 +284,7 @@ async function processQueue(chat: ChatState): Promise<void> {
 
 async function pollTelegram(): Promise<void> {
 	console.log("Telegram → Pi bridge started");
-	console.log(
-		`Allowed chats: ${ALLOWED_CHAT_IDS.size ? [...ALLOWED_CHAT_IDS].join(", ") : "all"}`,
-	);
+	console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
 	console.log("Provider: openrouter");
 	console.log(`Model: ${PI_RUNTIME.modelName}`);
 	console.log("Pi runtime: SDK");

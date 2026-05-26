@@ -29,12 +29,7 @@ export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 export const ELEVENLABS_MODEL = "scribe_v2";
 export const ELEVENLABS_LANGUAGE = "en";
-export const ALLOWED_CHAT_IDS = new Set(
-	(process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? "")
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean),
-);
+export const ALLOWED_CHAT_ID = process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? "";
 
 export const IDLE_TIMEOUT_MS =
 	Number(process.env.PI_CHANNEL_IDLE_TIMEOUT_MINUTES ?? 30) * 60_000;
@@ -104,13 +99,6 @@ export const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
 export const HEARTBEAT_ENABLED = envFlag(process.env.PI_HEARTBEAT_ENABLED, false);
 export const HEARTBEAT_INTERVAL_MS =
 	envNumber(process.env.PI_HEARTBEAT_INTERVAL_SECONDS, 60, 1) * 1000;
-export const HEARTBEAT_CHAT_ID = process.env.PI_HEARTBEAT_CHAT_ID?.trim() ?? "";
-export const HEARTBEAT_FILE_CONFIGURED = Boolean(
-	process.env.PI_HEARTBEAT_FILE?.trim(),
-);
-export const HEARTBEAT_FILE_PATH = HEARTBEAT_FILE_CONFIGURED
-	? resolveConfigPath(process.env.PI_HEARTBEAT_FILE!.trim())
-	: path.join(FILES_DIR, "heartbeat.md");
-export const LEGACY_HEATBEAT_FILE_PATH = path.join(FILES_DIR, "heatbeat.md");
+export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, "heartbeat.md");
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, "heartbeat-state.md");
 export const HEARTBEAT_NOOP = "__HEARTBEAT_NOOP__";

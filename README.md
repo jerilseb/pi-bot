@@ -31,8 +31,8 @@ TELEGRAM_BOT_TOKEN=123456:your-telegram-token
 OPENROUTER_API_KEY=sk-or-your-key
 OPENROUTER_MODEL=openai/gpt-5.4-mini
 
-# optional, but recommended if this is just for you
-TELEGRAM_ALLOWED_CHAT_IDS=123456789
+# required: the only Telegram chat allowed to use this bot
+TELEGRAM_ALLOWED_CHAT_ID=123456789
 ```
 
 Then start it:
@@ -69,8 +69,8 @@ Inside Telegram:
 Add any of these to `.env` if you want the extra features:
 
 ```bash
-# limit access to specific chats/groups
-TELEGRAM_ALLOWED_CHAT_IDS=123456789,-1001234567890
+# required: limit access to one specific chat/group
+TELEGRAM_ALLOWED_CHAT_ID=123456789
 
 # voice/audio transcription
 ELEVENLABS_API_KEY=your-elevenlabs-key
@@ -91,16 +91,14 @@ PI_CHANNEL_MAX_QUEUE_PER_CHAT=5
 PI_CHANNEL_SEND_LOCAL_IMAGES=true
 PI_CHANNEL_SEND_LOCAL_DOCUMENTS=true
 
-# optional scheduled agent wake-up
+# optional scheduled agent wake-up; uses TELEGRAM_ALLOWED_CHAT_ID and files/heartbeat.md
 PI_HEARTBEAT_ENABLED=false
 PI_HEARTBEAT_INTERVAL_SECONDS=60
-PI_HEARTBEAT_CHAT_ID=123456789
-PI_HEARTBEAT_FILE=files/heartbeat.md
 ```
 
 ## Notes
 
 - This uses long polling, not webhooks.
 - Telegram files are downloaded to your system temp directory.
-- Use `TELEGRAM_ALLOWED_CHAT_IDS` if you do not want random people using your bot.
+- `TELEGRAM_ALLOWED_CHAT_ID` is required; the bot always allows exactly one chat.
 - Keep `.env` private. Bot/API keys are not fun to rotate.
