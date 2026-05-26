@@ -603,11 +603,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 		chats.clear();
 		await sendTelegramMessage(
 			chat.chatId,
-			[
-				"🔁 Reloaded extensions and skills. All chats reset.",
-				`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
-				`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`,
-			].join("\n"),
+			"🔁 Reloaded extensions and skills. All chats reset.",
 		);
 		return true;
 	}
@@ -649,6 +645,30 @@ function startTyping(chatId: string): { stop(): void } {
 	return { stop: () => clearInterval(timer) };
 }
 
+async function registerBotCommands(): Promise<void> {
+	try {
+		await telegram("setMyCommands", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				commands: [
+					{ command: "start", description: "Say hi" },
+					{ command: "help", description: "Show commands" },
+					{ command: "status", description: "Show chat session status" },
+					{ command: "abort", description: "Stop the current Pi response" },
+					{ command: "new", description: "Reset this chat's Pi conversation" },
+					{ command: "reload", description: "Re-scan extensions and skills" },
+				],
+			}),
+		});
+	} catch (error) {
+		console.error(
+			"Failed to register bot commands:",
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+}
+
 async function pollTelegram(): Promise<void> {
 	console.log("Telegram → Pi bridge started");
 	console.log(
@@ -673,6 +693,8 @@ async function pollTelegram(): Promise<void> {
 				: "off"
 		}`,
 	);
+
+	await registerBotCommands();
 
 	while (running) {
 		try {
