@@ -43,6 +43,7 @@ import {
 	SettingsManager,
 	type AgentSession,
 	type AgentSessionEvent,
+	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -116,6 +117,9 @@ const DOCUMENT_PATH_REGEX = new RegExp(
 const EXTENSION_ENTRYPOINT_EXTS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const PROJECT_EXTENSIONS_DIR = path.join(import.meta.dirname, "extensions");
 const PROJECT_SKILLS_DIR = path.join(import.meta.dirname, "skills");
+const FILES_DIR = path.join(import.meta.dirname, "files");
+const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, "system.md");
+const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
 let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
@@ -231,6 +235,35 @@ function isExtensionDirectory(directory: string): boolean {
 	);
 }
 
+function readSystemPrompt(): string {
+	return fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8").trim();
+}
+
+function ensureMemoryFile(): void {
+	fs.mkdirSync(FILES_DIR, { recursive: true });
+	if (!fs.existsSync(MEMORY_PATH)) {
+		fs.writeFileSync(MEMORY_PATH, "# Memory\n\n", "utf8");
+	}
+}
+
+function readMemory(): string {
+	ensureMemoryFile();
+	const content = fs.readFileSync(MEMORY_PATH, "utf8").trim();
+	const body = content.replace(/^# Memory\s*/i, "").trim();
+	return body ? content : "";
+}
+
+function appendMemoryToSystemPrompt(systemPrompt: string): string {
+	const memory = readMemory();
+	return `${systemPrompt}\n\n## Long-term memory\nMemory file: ${MEMORY_PATH}\n\n${memory || "(No saved memories yet.)"}`;
+}
+
+function memorySystemPromptExtension(pi: ExtensionAPI): void {
+	pi.on("before_agent_start", async (event) => ({
+		systemPrompt: appendMemoryToSystemPrompt(event.systemPrompt),
+	}));
+}
+
 function discoverSkillPaths(directory: string): string[] {
 	if (!fs.existsSync(directory)) return [];
 
@@ -302,6 +335,7 @@ const AGENT_MODEL = resolveOpenRouterModel();
 const SETTINGS_MANAGER = SettingsManager.create(process.cwd(), getAgentDir());
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
+ensureMemoryFile();
 
 const chats = new Map<string, ChatState>();
 let offset = 0;
@@ -396,6 +430,8 @@ class SdkPiSession {
 			noSkills: true,
 			additionalExtensionPaths: EXTENSION_PATHS,
 			additionalSkillPaths: SKILL_PATHS,
+			extensionFactories: [memorySystemPromptExtension],
+			systemPromptOverride: () => readSystemPrompt(),
 		});
 		await resourceLoader.reload();
 
