@@ -116,8 +116,8 @@ const DOCUMENT_PATH_REGEX = new RegExp(
 const EXTENSION_ENTRYPOINT_EXTS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const PROJECT_EXTENSIONS_DIR = path.join(import.meta.dirname, "extensions");
 const PROJECT_SKILLS_DIR = path.join(import.meta.dirname, "skills");
-const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
+let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
 interface TelegramUpdate {
 	update_id: number;
@@ -551,6 +551,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				"/status — show this chat session status",
 				"/abort — abort the current Pi response",
 				"/new — clear this chat's Pi conversation",
+				"/reload — re-scan extensions/skills and reset all chats",
 				"/help — show this help",
 			].join("\n"),
 		);
@@ -589,6 +590,24 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 		await sendTelegramMessage(
 			chat.chatId,
 			"🔄 Started a fresh Pi conversation for this chat.",
+		);
+		return true;
+	}
+	if (command === "/reload") {
+		EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+		SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
+		for (const existing of chats.values()) {
+			if (existing.idleTimer) clearTimeout(existing.idleTimer);
+			existing.pi.cleanup();
+		}
+		chats.clear();
+		await sendTelegramMessage(
+			chat.chatId,
+			[
+				"🔁 Reloaded extensions and skills. All chats reset.",
+				`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
+				`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`,
+			].join("\n"),
 		);
 		return true;
 	}
