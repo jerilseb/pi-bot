@@ -12,6 +12,7 @@ It is basically a personal AI assistant in Telegram, with support for images, fi
 - Handles photos as image attachments
 - Downloads documents/audio/video to local temp files for Pi to inspect
 - Can transcribe voice/audio with ElevenLabs
+- Can send Telegram voice-note replies with ElevenLabs when the agent decides it is appropriate
 - Can upload generated local images/documents back to Telegram
 - Includes a Tavily `web_search` extension
 - Includes skills for image generation and HTML visualizations
@@ -75,6 +76,14 @@ TELEGRAM_ALLOWED_CHAT_ID=123456789
 # voice/audio transcription
 ELEVENLABS_API_KEY=your-elevenlabs-key
 
+# optional voice-note replies using ElevenLabs TTS
+# gives the agent a send_voice_note tool; it uses it when asked or when appropriate
+ELEVENLABS_TTS_VOICE_ID=your-elevenlabs-voice-id
+# optional overrides:
+# ELEVENLABS_TTS_MODEL=eleven_multilingual_v2
+# ELEVENLABS_TTS_OUTPUT_FORMAT=opus_48000_32
+# PI_CHANNEL_MAX_TTS_CHARS=2500
+
 # Tavily web search extension
 TAVILY_API_KEY_1=tvly-your-key
 # TAVILY_API_KEY_2=another-key-if-you-want
@@ -88,7 +97,6 @@ A few useful knobs:
 ```bash
 PI_CHANNEL_IDLE_TIMEOUT_MINUTES=30
 PI_CHANNEL_MAX_QUEUE_PER_CHAT=5
-PI_CHANNEL_SEND_LOCAL_IMAGES=true
 PI_CHANNEL_SEND_LOCAL_DOCUMENTS=true
 
 # optional scheduled agent wake-up; uses TELEGRAM_ALLOWED_CHAT_ID and files/heartbeat.md

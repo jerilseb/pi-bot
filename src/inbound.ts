@@ -1,17 +1,21 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+	ALLOWED_CHAT_ID,
 	ELEVENLABS_API_KEY,
 	ELEVENLABS_LANGUAGE,
 	ELEVENLABS_MODEL,
-	ALLOWED_CHAT_ID,
 	TELEGRAM_DOWNLOAD_LIMIT,
 	TELEGRAM_FILE_API,
 	TMP_DIR,
 	TRANSCRIPTION_MAX_FILE_SIZE,
 } from "./config.ts";
 import { sendChatAction, telegram } from "./telegram.ts";
-import type { IncomingPrompt, TelegramMessage, TranscriptionResult } from "./types.ts";
+import type {
+	IncomingPrompt,
+	TelegramMessage,
+	TranscriptionResult,
+} from "./types.ts";
 
 export async function toIncomingPrompt(
 	message: TelegramMessage,

@@ -4,7 +4,10 @@ import {
 	HEARTBEAT_FILE_PATH,
 	HEARTBEAT_INTERVAL_MS,
 } from "./config.ts";
-import { buildHeartbeatPrompt, readHeartbeatInstructions } from "./resources.ts";
+import {
+	buildHeartbeatPrompt,
+	readHeartbeatInstructions,
+} from "./resources.ts";
 import type { IncomingPrompt } from "./types.ts";
 
 export interface HeartbeatController {
@@ -48,10 +51,7 @@ export function createHeartbeatController(options: {
 			console.log(
 				`Heartbeat: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${chatId}`,
 			);
-			timer = setInterval(
-				() => void runOnce(chatId),
-				HEARTBEAT_INTERVAL_MS,
-			);
+			timer = setInterval(() => void runOnce(chatId), HEARTBEAT_INTERVAL_MS);
 		},
 
 		stop(): void {

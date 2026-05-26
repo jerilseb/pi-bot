@@ -1,7 +1,4 @@
-import {
-	TELEGRAM_API,
-	TELEGRAM_MAX_MESSAGE,
-} from "./config.ts";
+import { TELEGRAM_API, TELEGRAM_MAX_MESSAGE } from "./config.ts";
 
 export async function registerBotCommands(): Promise<void> {
 	try {
@@ -59,7 +56,7 @@ export async function sendChatAction(chatId: string): Promise<void> {
 	}
 }
 
-export async function telegram<T = any>(
+export async function telegram<T = unknown>(
 	methodAndQuery: string,
 	init?: RequestInit,
 ): Promise<T> {

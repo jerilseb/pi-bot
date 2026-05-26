@@ -1,22 +1,28 @@
-import { type ImageContent, type Model } from "@earendil-works/pi-ai";
+import * as fs from "node:fs";
+import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
 import {
+	type AgentSession,
+	type AgentSessionEvent,
 	AuthStorage,
 	createAgentSession,
 	DefaultResourceLoader,
+	type ExtensionAPI,
 	getAgentDir,
 	ModelRegistry,
 	SessionManager,
 	SettingsManager,
-	type AgentSession,
-	type AgentSessionEvent,
-	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import * as fs from "node:fs";
+import { SEND_LOCAL_DOCUMENTS, SEND_LOCAL_IMAGES } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
+import {
+	telegramDocumentExtension,
+	telegramImageExtension,
+} from "./uploads.ts";
+import { telegramVoiceNoteExtension } from "./voice.ts";
 
 export interface PiRuntime {
 	modelName: string;
-	model: Model<any>;
+	model: Model<Api>;
 	authStorage: ReturnType<typeof AuthStorage.create>;
 	modelRegistry: ReturnType<typeof ModelRegistry.create>;
 	settingsManager: ReturnType<typeof SettingsManager.create>;
@@ -60,7 +66,7 @@ export function createPiRuntime(options: {
 function resolveOpenRouterModel(
 	modelRegistry: ReturnType<typeof ModelRegistry.create>,
 	modelName: string,
-): Model<any> {
+): Model<Api> {
 	const model = modelRegistry.find("openrouter", modelName);
 	if (!model) {
 		throw new Error(`Unknown OpenRouter model: ${modelName}`);
@@ -72,9 +78,11 @@ export class SdkPiSession {
 	private session: AgentSession | null = null;
 	private starting: Promise<AgentSession> | null = null;
 	private runtime: PiRuntime;
+	private chatId: string;
 
-	constructor(runtime: PiRuntime) {
+	constructor(runtime: PiRuntime, chatId: string) {
 		this.runtime = runtime;
+		this.chatId = chatId;
 	}
 
 	async runPrompt(
@@ -148,7 +156,14 @@ export class SdkPiSession {
 			noSkills: true,
 			additionalExtensionPaths: this.runtime.getExtensionPaths(),
 			additionalSkillPaths: this.runtime.getSkillPaths(),
-			extensionFactories: this.runtime.extensionFactories,
+			extensionFactories: [
+				...this.runtime.extensionFactories,
+				telegramVoiceNoteExtension(this.chatId),
+				...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
+				...(SEND_LOCAL_DOCUMENTS
+					? [telegramDocumentExtension(this.chatId)]
+					: []),
+			],
 			systemPromptOverride: this.runtime.systemPromptOverride,
 		});
 		await resourceLoader.reload();
@@ -238,11 +253,20 @@ function buildPiPrompt(
 	};
 }
 
-function extractToolResultText(result: any): string {
-	const content = result?.content;
-	if (!Array.isArray(content)) return typeof result === "string" ? result : "";
+function extractToolResultText(result: unknown): string {
+	if (typeof result === "string") return result;
+	if (!result || typeof result !== "object" || !("content" in result))
+		return "";
+
+	const content = result.content;
+	if (!Array.isArray(content)) return "";
 	return content
-		.map((part) => (typeof part?.text === "string" ? part.text : ""))
+		.map((part) => {
+			if (part && typeof part === "object" && "text" in part) {
+				return typeof part.text === "string" ? part.text : "";
+			}
+			return "";
+		})
 		.filter(Boolean)
 		.join("\n");
 }

@@ -3,6 +3,9 @@
  * and converts the HTML to Markdown via Turndown.
  */
 
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
@@ -12,9 +15,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import TurndownService from "turndown";
 
 const FetchParams = Type.Object({
@@ -31,8 +31,10 @@ interface FetchDetails {
 }
 
 const CHROME_HEADERS = {
-	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-	"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+	"User-Agent":
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	Accept:
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
 	"Accept-Language": "en-US,en;q=0.9",
 	"Accept-Encoding": "gzip, deflate, br",
 	"Upgrade-Insecure-Requests": "1",
@@ -43,7 +45,10 @@ const CHROME_HEADERS = {
 };
 
 export default function (pi: ExtensionAPI) {
-	const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
+	const turndown = new TurndownService({
+		headingStyle: "atx",
+		codeBlockStyle: "fenced",
+	});
 
 	pi.registerTool({
 		name: "web_fetch",
@@ -64,7 +69,8 @@ export default function (pi: ExtensionAPI) {
 
 				details.status = response.status;
 				details.statusText = response.statusText;
-				details.contentType = response.headers.get("content-type") ?? "text/html";
+				details.contentType =
+					response.headers.get("content-type") ?? "text/html";
 
 				const html = await response.text();
 				const markdown = turndown.turndown(html);
@@ -90,8 +96,7 @@ export default function (pi: ExtensionAPI) {
 					details,
 					isError: response.status >= 400,
 				};
-
-			} catch (err: any) {
+			} catch (error) {
 				if (signal?.aborted) {
 					return {
 						content: [{ type: "text", text: "Request cancelled" }],
@@ -100,8 +105,9 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
+				const message = error instanceof Error ? error.message : String(error);
 				return {
-					content: [{ type: "text", text: `Fetch failed: ${err.message}` }],
+					content: [{ type: "text", text: `Fetch failed: ${message}` }],
 					details,
 					isError: true,
 				};
@@ -110,8 +116,10 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("muted", args.url),
-				0, 0
+				theme.fg("toolTitle", theme.bold("web_fetch ")) +
+					theme.fg("muted", args.url),
+				0,
+				0,
 			);
 		},
 
@@ -125,7 +133,10 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const statusColor = details.status < 400 ? "success" : "error";
-			let text = theme.fg(statusColor, `${details.status} ${details.statusText}`);
+			let text = theme.fg(
+				statusColor,
+				`${details.status} ${details.statusText}`,
+			);
 			if (details.contentType) {
 				text += theme.fg("dim", ` (${details.contentType})`);
 			}

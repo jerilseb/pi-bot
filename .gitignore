@@ -9,3 +9,4 @@ logs
 .vscode/settings.json
 files/
 !files/system.md
+.claude

@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import {
 	ALLOWED_CHAT_ID,
 	BOT_TOKEN,
+	DOCUMENT_UPLOAD_EXTS,
 	HEARTBEAT_ENABLED,
 	IDLE_TIMEOUT_MS,
 	LOCAL_DOCUMENT_UPLOAD_DIRS,
@@ -23,14 +24,19 @@ import {
 	PROJECT_EXTENSIONS_DIR,
 	PROJECT_SKILLS_DIR,
 	SEND_LOCAL_DOCUMENTS,
-	SEND_LOCAL_IMAGES,
 	TMP_DIR,
-	DOCUMENT_UPLOAD_EXTS,
 } from "./src/config.ts";
-import { createHeartbeatController, heartbeatStatusText } from "./src/heartbeat.ts";
+import {
+	createHeartbeatController,
+	heartbeatStatusText,
+} from "./src/heartbeat.ts";
 import { toIncomingPrompt } from "./src/inbound.ts";
-import { createPiRuntime, SdkPiSession, type PiRuntime } from "./src/pi-session.ts";
 import { sendPiResponse } from "./src/outbound.ts";
+import {
+	createPiRuntime,
+	type PiRuntime,
+	SdkPiSession,
+} from "./src/pi-session.ts";
 import {
 	discoverExtensionPaths,
 	discoverSkillPaths,
@@ -46,6 +52,7 @@ import {
 	telegram,
 } from "./src/telegram.ts";
 import type { IncomingPrompt, TelegramUpdate } from "./src/types.ts";
+import { voiceNotesConfigured } from "./src/voice.ts";
 
 interface ChatState {
 	chatId: string;
@@ -125,7 +132,7 @@ function getChat(chatId: string): ChatState {
 			chatId,
 			queue: [],
 			processing: false,
-			pi: new SdkPiSession(PI_RUNTIME),
+			pi: new SdkPiSession(PI_RUNTIME, chatId),
 			messageCount: 0,
 			startedAt: Date.now(),
 		};
@@ -204,6 +211,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				`- Queue: ${chat.queue.length}`,
 				`- Uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
 				`- Model: openrouter/${PI_RUNTIME.modelName}`,
+				`- Voice note tool: ${voiceStatusText()}`,
 				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
 			].join("\n"),
 		);
@@ -252,7 +260,8 @@ async function processQueue(chat: ChatState): Promise<void> {
 	if (chat.processing) return;
 
 	while (chat.queue.length > 0 && running) {
-		const prompt = chat.queue.shift()!;
+		const prompt = chat.queue.shift();
+		if (!prompt) break;
 		chat.processing = true;
 		resetIdleTimer(chat);
 
@@ -262,11 +271,10 @@ async function processQueue(chat: ChatState): Promise<void> {
 				: startTyping(prompt.chatId);
 		try {
 			const logLabel = prompt.source === "heartbeat" ? "heartbeat" : "prompt";
-			console.log(`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`);
-			const response = await chat.pi.runPrompt(
-				prompt.text,
-				prompt.attachments,
+			console.log(
+				`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`,
 			);
+			const response = await chat.pi.runPrompt(prompt.text, prompt.attachments);
 			await sendPiResponse(prompt.chatId, response, {
 				suppressNoop: prompt.suppressNoop,
 			});
@@ -291,12 +299,10 @@ async function pollTelegram(): Promise<void> {
 	console.log(
 		`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
 	);
-	console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`);
 	console.log(
-		`Auto image upload: ${
-			SEND_LOCAL_IMAGES ? LOCAL_IMAGE_UPLOAD_DIRS.join(", ") : "off"
-		}`,
+		`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`,
 	);
+	console.log(`Auto image upload: ${LOCAL_IMAGE_UPLOAD_DIRS.join(", ")}`);
 	console.log(
 		`Auto document upload: ${
 			SEND_LOCAL_DOCUMENTS
@@ -304,6 +310,7 @@ async function pollTelegram(): Promise<void> {
 				: "off"
 		}`,
 	);
+	console.log(`Voice note tool: ${voiceStatusText()}`);
 	console.log(heartbeatStatusText());
 
 	await registerBotCommands();
@@ -337,6 +344,12 @@ async function pollTelegram(): Promise<void> {
 			await sleep(5000);
 		}
 	}
+}
+
+function voiceStatusText(): string {
+	return voiceNotesConfigured()
+		? "registered and configured (ElevenLabs)"
+		: "registered, but missing ELEVENLABS_API_KEY or ELEVENLABS_TTS_VOICE_ID";
 }
 
 function sleep(ms: number): Promise<void> {

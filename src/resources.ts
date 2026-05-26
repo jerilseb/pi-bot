@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	EXTENSION_ENTRYPOINT_EXTS,
 	FILES_DIR,
@@ -17,7 +17,8 @@ export function discoverExtensionPaths(directory: string): string[] {
 	return fs
 		.readdirSync(directory, { withFileTypes: true })
 		.flatMap((entry) => {
-			if (entry.name.startsWith(".") || entry.name === "node_modules") return [];
+			if (entry.name.startsWith(".") || entry.name === "node_modules")
+				return [];
 
 			const entryPath = path.join(directory, entry.name);
 			if (entry.isFile()) {
@@ -38,9 +39,13 @@ export function discoverExtensionPaths(directory: string): string[] {
 }
 
 function isExtensionDirectory(directory: string): boolean {
-	return ["index.ts", "index.js", "index.mjs", "index.cjs", "package.json"].some(
-		(entrypoint) => fs.existsSync(path.join(directory, entrypoint)),
-	);
+	return [
+		"index.ts",
+		"index.js",
+		"index.mjs",
+		"index.cjs",
+		"package.json",
+	].some((entrypoint) => fs.existsSync(path.join(directory, entrypoint)));
 }
 
 export function discoverSkillPaths(directory: string): string[] {
@@ -121,7 +126,10 @@ function extractHeartbeatInstructions(content: string): string {
 	return body ? trimmed : "";
 }
 
-export function readHeartbeatInstructions(): { filePath: string; instructions: string } {
+export function readHeartbeatInstructions(): {
+	filePath: string;
+	instructions: string;
+} {
 	if (!fs.existsSync(HEARTBEAT_FILE_PATH)) {
 		return { filePath: HEARTBEAT_FILE_PATH, instructions: "" };
 	}
@@ -132,7 +140,10 @@ export function readHeartbeatInstructions(): { filePath: string; instructions: s
 	return { filePath: HEARTBEAT_FILE_PATH, instructions };
 }
 
-export function buildHeartbeatPrompt(instructions: string, filePath: string): string {
+export function buildHeartbeatPrompt(
+	instructions: string,
+	filePath: string,
+): string {
 	return [
 		"This is a scheduled heartbeat run for the Telegram assistant.",
 		`Heartbeat file: ${filePath}`,
