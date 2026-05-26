@@ -13,17 +13,13 @@ import * as fs from "node:fs";
 import {
 	ALLOWED_CHAT_ID,
 	BOT_TOKEN,
-	DOCUMENT_UPLOAD_EXTS,
 	HEARTBEAT_ENABLED,
 	IDLE_TIMEOUT_MS,
-	LOCAL_DOCUMENT_UPLOAD_DIRS,
-	LOCAL_IMAGE_UPLOAD_DIRS,
 	MAX_QUEUE_PER_CHAT,
 	OPENROUTER_API_KEY,
 	OPENROUTER_MODEL,
 	PROJECT_EXTENSIONS_DIR,
 	PROJECT_SKILLS_DIR,
-	SEND_LOCAL_DOCUMENTS,
 	TMP_DIR,
 } from "./src/config.ts";
 import {
@@ -301,14 +297,6 @@ async function pollTelegram(): Promise<void> {
 	);
 	console.log(
 		`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`,
-	);
-	console.log(`Auto image upload: ${LOCAL_IMAGE_UPLOAD_DIRS.join(", ")}`);
-	console.log(
-		`Auto document upload: ${
-			SEND_LOCAL_DOCUMENTS
-				? `${LOCAL_DOCUMENT_UPLOAD_DIRS.join(", ")} [${DOCUMENT_UPLOAD_EXTS.join(", ")}]`
-				: "off"
-		}`,
 	);
 	console.log(`Voice note tool: ${voiceStatusText()}`);
 	console.log(heartbeatStatusText());
