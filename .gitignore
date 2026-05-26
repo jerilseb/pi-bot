@@ -7,4 +7,5 @@ logs
 *.sqlite*
 .directory
 .vscode/settings.json
-files/memory.md
+files/
+!files/system.md

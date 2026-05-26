@@ -3,184 +3,49 @@
 /**
  * Standalone Telegram → Pi chat bridge.
  *
- * This is a small, Telegram-only replacement for the pi-channels extension:
- * - polls Telegram Bot API for incoming messages
- * - keeps one persistent Pi SDK session per chat
- * - queues messages per chat and sends Pi's final response back to Telegram
- * - supports /start, /help, /status, /abort, /new
- * - supports photos as image attachments and other downloaded files as local paths
- * - optionally transcribes Telegram voice/audio with ElevenLabs Scribe
- *
- * Usage:
- *   TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node channel.ts
- *
- * Optional env vars:
- *   TELEGRAM_ALLOWED_CHAT_IDS=123,-100456   comma-separated allowlist
- *   PI_CHANNEL_IDLE_TIMEOUT_MINUTES=30
- *   PI_CHANNEL_MAX_QUEUE_PER_CHAT=5
- *   PI_CHANNEL_SEND_LOCAL_IMAGES=true       upload generated image files back to Telegram
- *   PI_CHANNEL_IMAGE_UPLOAD_DIRS=/tmp/create-image  comma-separated allowed local image dirs
- *   PI_CHANNEL_MAX_IMAGE_UPLOADS=4
- *   PI_CHANNEL_SEND_LOCAL_DOCUMENTS=true    upload generated documents (pdf, docx, ...) back to Telegram
- *   PI_CHANNEL_DOCUMENT_UPLOAD_DIRS=/tmp/pi-channel  comma-separated allowed local document dirs
- *   PI_CHANNEL_MAX_DOCUMENT_UPLOADS=4
- *   PI_CHANNEL_DOCUMENT_UPLOAD_EXTS=pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,json
- *                                           comma-separated extensions (no dot) the model is allowed to upload
- *   FAL_KEY=...                             enables the create-image skill, if present in skills/
- *   ELEVENLABS_API_KEY=...                  enables voice/audio transcription
- *   ElevenLabs transcription is hardcoded to model scribe_v2 and language en.
+ * Polls Telegram, keeps one Pi SDK session per chat, queues prompts per chat,
+ * and sends Pi's final response back to Telegram. Supports text, images,
+ * downloaded files, optional audio transcription, local extensions/skills,
+ * generated file uploads, and scheduled heartbeat prompts.
  */
 
-import "dotenv/config";
-import { type ImageContent, type Model } from "@earendil-works/pi-ai";
-import {
-	AuthStorage,
-	createAgentSession,
-	DefaultResourceLoader,
-	getAgentDir,
-	ModelRegistry,
-	SessionManager,
-	SettingsManager,
-	type AgentSession,
-	type AgentSessionEvent,
-	type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "";
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_MODEL = "scribe_v2";
-const ELEVENLABS_LANGUAGE = "en";
-const ALLOWED_CHAT_IDS = new Set(
-	(process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? "")
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean),
-);
-const IDLE_TIMEOUT_MS =
-	Number(process.env.PI_CHANNEL_IDLE_TIMEOUT_MINUTES ?? 30) * 60_000;
-const MAX_QUEUE_PER_CHAT = Number(
-	process.env.PI_CHANNEL_MAX_QUEUE_PER_CHAT ?? 5,
-);
-const TELEGRAM_API = BOT_TOKEN
-	? `https://api.telegram.org/bot${BOT_TOKEN}`
-	: "";
-const TELEGRAM_FILE_API = BOT_TOKEN
-	? `https://api.telegram.org/file/bot${BOT_TOKEN}`
-	: "";
-const TELEGRAM_MAX_MESSAGE = 4096;
-const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
-const TRANSCRIPTION_MAX_FILE_SIZE = 25 * 1024 * 1024;
-const TELEGRAM_PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;
-const TELEGRAM_DOCUMENT_UPLOAD_LIMIT = 50 * 1024 * 1024;
-const TMP_DIR = path.join(os.tmpdir(), "pi-channel");
-const SEND_LOCAL_IMAGES = !["0", "false", "no", "off"].includes(
-	(process.env.PI_CHANNEL_SEND_LOCAL_IMAGES ?? "true").toLowerCase(),
-);
-const LOCAL_IMAGE_UPLOAD_DIRS = (
-	process.env.PI_CHANNEL_IMAGE_UPLOAD_DIRS ??
-	path.join(os.tmpdir(), "create-image")
-)
-	.split(",")
-	.map((s) => s.trim())
-	.filter(Boolean);
-const MAX_IMAGE_UPLOADS = Number(process.env.PI_CHANNEL_MAX_IMAGE_UPLOADS ?? 4);
-const SEND_LOCAL_DOCUMENTS = !["0", "false", "no", "off"].includes(
-	(process.env.PI_CHANNEL_SEND_LOCAL_DOCUMENTS ?? "true").toLowerCase(),
-);
-const LOCAL_DOCUMENT_UPLOAD_DIRS = (
-	process.env.PI_CHANNEL_DOCUMENT_UPLOAD_DIRS ?? `${path.join(os.tmpdir(), "pi-channel")},${process.cwd()}`
-)
-	.split(",")
-	.map((s) => s.trim())
-	.filter(Boolean);
-const MAX_DOCUMENT_UPLOADS = Number(
-	process.env.PI_CHANNEL_MAX_DOCUMENT_UPLOADS ?? 4,
-);
-const DOCUMENT_UPLOAD_EXTS = (
-	process.env.PI_CHANNEL_DOCUMENT_UPLOAD_EXTS ??
-	"pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,json"
-)
-	.split(",")
-	.map((s) => s.trim().toLowerCase().replace(/^\./, ""))
-	.filter(Boolean);
-const DOCUMENT_PATH_REGEX = new RegExp(
-	`(?:file://)?(?:~|/)[^\\s"'\`<>{}\\[\\]|]+?\\.(?:${DOCUMENT_UPLOAD_EXTS.map(
-		(ext) => ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-	).join("|")})(?=[\\s"'\`<>{}\\[\\]|),.;:!?]|$)`,
-	"gi",
-);
-const EXTENSION_ENTRYPOINT_EXTS = new Set([".ts", ".js", ".mjs", ".cjs"]);
-const PROJECT_EXTENSIONS_DIR = path.join(import.meta.dirname, "extensions");
-const PROJECT_SKILLS_DIR = path.join(import.meta.dirname, "skills");
-const FILES_DIR = path.join(import.meta.dirname, "files");
-const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, "system.md");
-const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
-let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
-
-interface TelegramUpdate {
-	update_id: number;
-	message?: TelegramMessage;
-}
-
-interface TelegramMessage {
-	message_id: number;
-	from?: { id: number; username?: string; first_name?: string };
-	chat: { id: number; type: string; title?: string };
-	date: number;
-	text?: string;
-	caption?: string;
-	photo?: Array<{
-		file_id: string;
-		width: number;
-		height: number;
-		file_size?: number;
-	}>;
-	document?: {
-		file_id: string;
-		file_name?: string;
-		mime_type?: string;
-		file_size?: number;
-	};
-	voice?: {
-		file_id: string;
-		duration: number;
-		mime_type?: string;
-		file_size?: number;
-	};
-	audio?: {
-		file_id: string;
-		file_name?: string;
-		title?: string;
-		mime_type?: string;
-		file_size?: number;
-	};
-	video?: {
-		file_id: string;
-		file_name?: string;
-		mime_type?: string;
-		file_size?: number;
-	};
-}
-
-interface Attachment {
-	type: "image" | "file";
-	path: string;
-	filename?: string;
-	mimeType?: string;
-	size?: number;
-}
-
-interface IncomingPrompt {
-	chatId: string;
-	text: string;
-	attachments: Attachment[];
-}
+import {
+	ALLOWED_CHAT_IDS,
+	BOT_TOKEN,
+	HEARTBEAT_ENABLED,
+	IDLE_TIMEOUT_MS,
+	LOCAL_DOCUMENT_UPLOAD_DIRS,
+	LOCAL_IMAGE_UPLOAD_DIRS,
+	MAX_QUEUE_PER_CHAT,
+	OPENROUTER_API_KEY,
+	OPENROUTER_MODEL,
+	PROJECT_EXTENSIONS_DIR,
+	PROJECT_SKILLS_DIR,
+	SEND_LOCAL_DOCUMENTS,
+	SEND_LOCAL_IMAGES,
+	TMP_DIR,
+	DOCUMENT_UPLOAD_EXTS,
+} from "./src/config.ts";
+import { createHeartbeatController, heartbeatStatusText } from "./src/heartbeat.ts";
+import { toIncomingPrompt } from "./src/inbound.ts";
+import { createPiRuntime, SdkPiSession, type PiRuntime } from "./src/pi-session.ts";
+import { sendPiResponse } from "./src/outbound.ts";
+import {
+	discoverExtensionPaths,
+	discoverSkillPaths,
+	ensureMemoryFile,
+	memorySystemPromptExtension,
+	readSystemPrompt,
+} from "./src/resources.ts";
+import {
+	registerBotCommands,
+	sanitizeError,
+	sendTelegramMessage,
+	startTyping,
+	telegram,
+} from "./src/telegram.ts";
+import type { IncomingPrompt, TelegramUpdate } from "./src/types.ts";
 
 interface ChatState {
 	chatId: string;
@@ -192,147 +57,20 @@ interface ChatState {
 	idleTimer?: ReturnType<typeof setTimeout>;
 }
 
-interface PiPromptResult {
-	text: string;
-	toolOutput: string;
-}
+validateEnvironment();
 
-interface TranscriptionResult {
-	ok: boolean;
-	text?: string;
-	error?: string;
-}
+let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
-function discoverExtensionPaths(directory: string): string[] {
-	if (!fs.existsSync(directory)) return [];
-
-	return fs
-		.readdirSync(directory, { withFileTypes: true })
-		.flatMap((entry) => {
-			if (entry.name.startsWith(".") || entry.name === "node_modules") return [];
-
-			const entryPath = path.join(directory, entry.name);
-			if (entry.isFile()) {
-				return EXTENSION_ENTRYPOINT_EXTS.has(
-					path.extname(entry.name).toLowerCase(),
-				)
-					? [entryPath]
-					: [];
-			}
-
-			if (entry.isDirectory() && isExtensionDirectory(entryPath)) {
-				return [entryPath];
-			}
-
-			return [];
-		})
-		.sort((a, b) => a.localeCompare(b));
-}
-
-function isExtensionDirectory(directory: string): boolean {
-	return ["index.ts", "index.js", "index.mjs", "index.cjs", "package.json"].some(
-		(entrypoint) => fs.existsSync(path.join(directory, entrypoint)),
-	);
-}
-
-function readSystemPrompt(): string {
-	return fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8").trim();
-}
-
-function ensureMemoryFile(): void {
-	fs.mkdirSync(FILES_DIR, { recursive: true });
-	if (!fs.existsSync(MEMORY_PATH)) {
-		fs.writeFileSync(MEMORY_PATH, "# Memory\n\n", "utf8");
-	}
-}
-
-function readMemory(): string {
-	ensureMemoryFile();
-	const content = fs.readFileSync(MEMORY_PATH, "utf8").trim();
-	const body = content.replace(/^# Memory\s*/i, "").trim();
-	return body ? content : "";
-}
-
-function appendMemoryToSystemPrompt(systemPrompt: string): string {
-	const memory = readMemory();
-	return `${systemPrompt}\n\n## Long-term memory\nMemory file: ${MEMORY_PATH}\n\n${memory || "(No saved memories yet.)"}`;
-}
-
-function memorySystemPromptExtension(pi: ExtensionAPI): void {
-	pi.on("before_agent_start", async (event) => ({
-		systemPrompt: appendMemoryToSystemPrompt(event.systemPrompt),
-	}));
-}
-
-function discoverSkillPaths(directory: string): string[] {
-	if (!fs.existsSync(directory)) return [];
-
-	const paths: string[] = [];
-	const seen = new Set<string>();
-
-	const add = (skillPath: string) => {
-		const normalized = path.resolve(skillPath);
-		if (seen.has(normalized)) return;
-		seen.add(normalized);
-		paths.push(normalized);
-	};
-
-	const walk = (current: string) => {
-		if (fs.existsSync(path.join(current, "SKILL.md"))) {
-			add(current);
-			return;
-		}
-
-		for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-			if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-
-			const entryPath = path.join(current, entry.name);
-			if (entry.isDirectory()) {
-				walk(entryPath);
-				continue;
-			}
-
-			if (
-				current === directory &&
-				entry.isFile() &&
-				path.extname(entry.name).toLowerCase() === ".md" &&
-				entry.name.toLowerCase() !== "readme.md"
-			) {
-				add(entryPath);
-			}
-		}
-	};
-
-	walk(directory);
-	return paths.sort((a, b) => a.localeCompare(b));
-}
-
-if (!BOT_TOKEN) {
-	console.error(
-		"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node channel.ts",
-	);
-	process.exit(1);
-}
-
-if (!OPENROUTER_API_KEY) {
-	console.error(
-		"Missing OPENROUTER_API_KEY. This bridge only uses OpenRouter provider models.",
-	);
-	process.exit(1);
-}
-
-if (!OPENROUTER_MODEL) {
-	console.error(
-		"Missing OPENROUTER_MODEL. Example: OPENROUTER_MODEL=openai/gpt-5.4-mini",
-	);
-	process.exit(1);
-}
-
-const AUTH_STORAGE = AuthStorage.create();
-AUTH_STORAGE.setRuntimeApiKey("openrouter", OPENROUTER_API_KEY);
-const MODEL_REGISTRY = ModelRegistry.create(AUTH_STORAGE);
-const AGENT_MODEL = resolveOpenRouterModel();
-const SETTINGS_MANAGER = SettingsManager.create(process.cwd(), getAgentDir());
+const PI_RUNTIME: PiRuntime = createPiRuntime({
+	cwd: process.cwd(),
+	openRouterApiKey: OPENROUTER_API_KEY,
+	openRouterModel: OPENROUTER_MODEL,
+	getExtensionPaths: () => EXTENSION_PATHS,
+	getSkillPaths: () => SKILL_PATHS,
+	systemPromptOverride: () => readSystemPrompt(),
+	extensionFactories: [memorySystemPromptExtension],
+});
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
 ensureMemoryFile();
@@ -341,183 +79,36 @@ const chats = new Map<string, ChatState>();
 let offset = 0;
 let running = true;
 
-function resolveOpenRouterModel(): Model<any> {
-	const model = MODEL_REGISTRY.find("openrouter", OPENROUTER_MODEL);
-	if (!model) {
-		console.error(`Unknown OpenRouter model: ${OPENROUTER_MODEL}`);
+const heartbeat = createHeartbeatController({
+	handleIncoming,
+	isChatBusy: (chatId) => {
+		const chat = chats.get(chatId);
+		return Boolean(chat?.processing || (chat?.queue.length ?? 0) > 0);
+	},
+	isRunning: () => running,
+});
+
+function validateEnvironment(): void {
+	if (!BOT_TOKEN) {
+		console.error(
+			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node channel.ts",
+		);
 		process.exit(1);
 	}
-	return model;
-}
 
-class SdkPiSession {
-	private session: AgentSession | null = null;
-	private starting: Promise<AgentSession> | null = null;
-	private cwd: string;
-
-	constructor(cwd: string) {
-		this.cwd = cwd;
+	if (!OPENROUTER_API_KEY) {
+		console.error(
+			"Missing OPENROUTER_API_KEY. This bridge only uses OpenRouter provider models.",
+		);
+		process.exit(1);
 	}
 
-	async runPrompt(
-		text: string,
-		attachments: Attachment[],
-	): Promise<PiPromptResult> {
-		const session = await this.start();
-		if (session.isStreaming) {
-			throw new Error("Pi SDK session is already processing a prompt");
-		}
-
-		const chunks: string[] = [];
-		const toolOutputs: string[] = [];
-		let errorMessage = "";
-		const unsubscribe = session.subscribe((event) => {
-			this.collectPromptEvent(event, chunks, toolOutputs, (message) => {
-				errorMessage = message;
-			});
-		});
-
-		try {
-			const prompt = buildPiPrompt(text, attachments);
-			await session.prompt(prompt.message, {
-				...(prompt.images?.length ? { images: prompt.images } : {}),
-			});
-
-			if (errorMessage) throw new Error(errorMessage);
-
-			return {
-				text: chunks.join("").trim() || "(no response)",
-				toolOutput: toolOutputs.join("\n"),
-			};
-		} finally {
-			unsubscribe();
-		}
+	if (!OPENROUTER_MODEL) {
+		console.error(
+			"Missing OPENROUTER_MODEL. Example: OPENROUTER_MODEL=openai/gpt-5.4-mini",
+		);
+		process.exit(1);
 	}
-
-	abort(): void {
-		void this.session?.abort();
-	}
-
-	reset(): void {
-		this.cleanup();
-	}
-
-	cleanup(): void {
-		this.session?.dispose();
-		this.session = null;
-		this.starting = null;
-	}
-
-	private async start(): Promise<AgentSession> {
-		if (this.session) return this.session;
-		if (this.starting) return this.starting;
-
-		this.starting = this.createSession();
-		try {
-			this.session = await this.starting;
-			return this.session;
-		} finally {
-			this.starting = null;
-		}
-	}
-
-	private async createSession(): Promise<AgentSession> {
-		const resourceLoader = new DefaultResourceLoader({
-			cwd: this.cwd,
-			agentDir: getAgentDir(),
-			settingsManager: SETTINGS_MANAGER,
-			noExtensions: true,
-			noSkills: true,
-			additionalExtensionPaths: EXTENSION_PATHS,
-			additionalSkillPaths: SKILL_PATHS,
-			extensionFactories: [memorySystemPromptExtension],
-			systemPromptOverride: () => readSystemPrompt(),
-		});
-		await resourceLoader.reload();
-
-		const { session } = await createAgentSession({
-			cwd: this.cwd,
-			model: AGENT_MODEL,
-			authStorage: AUTH_STORAGE,
-			modelRegistry: MODEL_REGISTRY,
-			resourceLoader,
-			sessionManager: SessionManager.inMemory(this.cwd),
-			settingsManager: SETTINGS_MANAGER,
-		});
-
-		return session;
-	}
-
-	private collectPromptEvent(
-		event: AgentSessionEvent,
-		chunks: string[],
-		toolOutputs: string[],
-		setError: (message: string) => void,
-	): void {
-		if (event.type === "message_update") {
-			const delta = event.assistantMessageEvent;
-			if (delta.type === "text_delta") {
-				chunks.push(delta.delta);
-			}
-			if (delta.type === "error") {
-				setError(
-					delta.error.errorMessage ||
-						"Pi agent failed while generating a response",
-				);
-			}
-		}
-
-		if (event.type === "tool_execution_end") {
-			const output = extractToolResultText(event.result);
-			if (output) toolOutputs.push(output);
-		}
-
-		if (event.type === "agent_end") {
-			const failed = event.messages.find(
-				(message) => message.role === "assistant" && message.errorMessage,
-			);
-			if (failed?.role === "assistant" && failed.errorMessage) {
-				setError(failed.errorMessage);
-			}
-		}
-	}
-}
-
-function buildPiPrompt(
-	text: string,
-	attachments: Attachment[],
-): {
-	message: string;
-	images?: ImageContent[];
-} {
-	const images: ImageContent[] = [];
-	const files: string[] = [];
-
-	for (const attachment of attachments) {
-		if (attachment.type === "image") {
-			images.push({
-				type: "image",
-				data: fs.readFileSync(attachment.path).toString("base64"),
-				mimeType: attachment.mimeType || "image/jpeg",
-			});
-		} else {
-			files.push(
-				attachment.filename
-					? `${attachment.filename}: ${attachment.path}`
-					: attachment.path,
-			);
-		}
-	}
-
-	const filePrefix =
-		files.length > 0
-			? `[Attached files saved locally]\n${files.map((f) => `- ${f}`).join("\n")}\n\n`
-			: "";
-
-	return {
-		message: `${filePrefix}${text}`,
-		...(images.length > 0 ? { images } : {}),
-	};
 }
 
 function getChat(chatId: string): ChatState {
@@ -527,7 +118,7 @@ function getChat(chatId: string): ChatState {
 			chatId,
 			queue: [],
 			processing: false,
-			pi: new SdkPiSession(process.cwd()),
+			pi: new SdkPiSession(PI_RUNTIME),
 			messageCount: 0,
 			startedAt: Date.now(),
 		};
@@ -556,10 +147,12 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 	}
 
 	if (chat.queue.length >= MAX_QUEUE_PER_CHAT) {
-		await sendTelegramMessage(
-			prompt.chatId,
-			`⚠️ Queue full (${MAX_QUEUE_PER_CHAT} pending). Wait or use /abort.`,
-		);
+		if (prompt.source !== "heartbeat") {
+			await sendTelegramMessage(
+				prompt.chatId,
+				`⚠️ Queue full (${MAX_QUEUE_PER_CHAT} pending). Wait or use /abort.`,
+			);
+		}
 		return;
 	}
 
@@ -603,7 +196,8 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				`- Messages: ${chat.messageCount}`,
 				`- Queue: ${chat.queue.length}`,
 				`- Uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
-				`- Model: openrouter/${OPENROUTER_MODEL}`,
+				`- Model: openrouter/${PI_RUNTIME.modelName}`,
+				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
 			].join("\n"),
 		);
 		return true;
@@ -655,14 +249,20 @@ async function processQueue(chat: ChatState): Promise<void> {
 		chat.processing = true;
 		resetIdleTimer(chat);
 
-		const typing = startTyping(prompt.chatId);
+		const typing =
+			prompt.source === "heartbeat"
+				? { stop: () => undefined }
+				: startTyping(prompt.chatId);
 		try {
-			console.log(`[${prompt.chatId}] prompt: ${prompt.text.slice(0, 120)}`);
+			const logLabel = prompt.source === "heartbeat" ? "heartbeat" : "prompt";
+			console.log(`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`);
 			const response = await chat.pi.runPrompt(
 				prompt.text,
 				prompt.attachments,
 			);
-			await sendPiResponse(prompt.chatId, response);
+			await sendPiResponse(prompt.chatId, response, {
+				suppressNoop: prompt.suppressNoop,
+			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`[${prompt.chatId}] error:`, message);
@@ -675,43 +275,13 @@ async function processQueue(chat: ChatState): Promise<void> {
 	}
 }
 
-function startTyping(chatId: string): { stop(): void } {
-	void sendChatAction(chatId);
-	const timer = setInterval(() => void sendChatAction(chatId), 4000);
-	return { stop: () => clearInterval(timer) };
-}
-
-async function registerBotCommands(): Promise<void> {
-	try {
-		await telegram("setMyCommands", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				commands: [
-					{ command: "start", description: "Say hi" },
-					{ command: "help", description: "Show commands" },
-					{ command: "status", description: "Show chat session status" },
-					{ command: "abort", description: "Stop the current Pi response" },
-					{ command: "new", description: "Reset this chat's Pi conversation" },
-					{ command: "reload", description: "Re-scan extensions and skills" },
-				],
-			}),
-		});
-	} catch (error) {
-		console.error(
-			"Failed to register bot commands:",
-			error instanceof Error ? error.message : String(error),
-		);
-	}
-}
-
 async function pollTelegram(): Promise<void> {
 	console.log("Telegram → Pi bridge started");
 	console.log(
 		`Allowed chats: ${ALLOWED_CHAT_IDS.size ? [...ALLOWED_CHAT_IDS].join(", ") : "all"}`,
 	);
 	console.log("Provider: openrouter");
-	console.log(`Model: ${OPENROUTER_MODEL}`);
+	console.log(`Model: ${PI_RUNTIME.modelName}`);
 	console.log("Pi runtime: SDK");
 	console.log(
 		`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
@@ -729,8 +299,10 @@ async function pollTelegram(): Promise<void> {
 				: "off"
 		}`,
 	);
+	console.log(heartbeatStatusText());
 
 	await registerBotCommands();
+	heartbeat.start();
 
 	while (running) {
 		try {
@@ -762,560 +334,6 @@ async function pollTelegram(): Promise<void> {
 	}
 }
 
-async function toIncomingPrompt(
-	message: TelegramMessage,
-): Promise<IncomingPrompt | null> {
-	const chatId = String(message.chat.id);
-	if (ALLOWED_CHAT_IDS.size > 0 && !ALLOWED_CHAT_IDS.has(chatId)) return null;
-
-	const caption = message.caption?.trim() ?? "";
-
-	if (message.text) {
-		return { chatId, text: message.text, attachments: [] };
-	}
-
-	if (message.photo?.length) {
-		const largest = message.photo[message.photo.length - 1];
-		const downloaded = await downloadTelegramFile(
-			largest.file_id,
-			"photo.jpg",
-			largest.file_size,
-		);
-		if (!downloaded) {
-			return {
-				chatId,
-				text: "⚠️ I could not download that photo.",
-				attachments: [],
-			};
-		}
-		return {
-			chatId,
-			text: caption || "Describe this image.",
-			attachments: [
-				{
-					type: "image",
-					path: downloaded.localPath,
-					filename: "photo.jpg",
-					mimeType: "image/jpeg",
-					size: downloaded.size,
-				},
-			],
-		};
-	}
-
-	const file =
-		message.document ?? message.voice ?? message.audio ?? message.video;
-	if (file) {
-		const filename = getTelegramFilename(message, file);
-		const mimeType = "mime_type" in file ? file.mime_type : undefined;
-		const downloaded = await downloadTelegramFile(
-			file.file_id,
-			filename,
-			file.file_size,
-		);
-		if (!downloaded) {
-			return {
-				chatId,
-				text: `⚠️ I could not download ${filename}.`,
-				attachments: [],
-			};
-		}
-
-		if (isTranscribableAudio(message, mimeType, filename)) {
-			void sendChatAction(chatId);
-			const transcription = await transcribeWithElevenLabs(
-				downloaded.localPath,
-			);
-			if (transcription.ok && transcription.text) {
-				const label = message.voice
-					? "🎤 Voice message"
-					: `🎵 Audio: ${filename}`;
-				const prefix = caption ? `${caption}\n\n` : "";
-				return {
-					chatId,
-					text: `${prefix}${label}: ${transcription.text}`,
-					attachments: [],
-				};
-			}
-
-			const reason = transcription.error
-				? ` Transcription failed: ${transcription.error}`
-				: " Transcription is not configured.";
-			return {
-				chatId,
-				text: `${caption || `Audio file uploaded: ${filename}.`}${reason}\nLocal file path: ${downloaded.localPath}`,
-				attachments: [
-					{
-						type: "file",
-						path: downloaded.localPath,
-						filename,
-						mimeType,
-						size: downloaded.size,
-					},
-				],
-			};
-		}
-
-		return {
-			chatId,
-			text:
-				caption ||
-				`A file was uploaded: ${filename}. Use the attached local path if you need to inspect it.`,
-			attachments: [
-				{
-					type: "file",
-					path: downloaded.localPath,
-					filename,
-					mimeType,
-					size: downloaded.size,
-				},
-			],
-		};
-	}
-
-	return null;
-}
-
-function getTelegramFilename(
-	message: TelegramMessage,
-	file: NonNullable<
-		| TelegramMessage["document"]
-		| TelegramMessage["voice"]
-		| TelegramMessage["audio"]
-		| TelegramMessage["video"]
-	>,
-): string {
-	if ("file_name" in file && file.file_name) return file.file_name;
-	if ("title" in file && file.title) return `${file.title}.mp3`;
-	if (message.voice) return "voice.ogg";
-	if (message.video) return "video.mp4";
-	return "file";
-}
-
-function isTranscribableAudio(
-	message: TelegramMessage,
-	mimeType: string | undefined,
-	filename: string,
-): boolean {
-	if (message.voice || message.audio) return true;
-	if (mimeType?.startsWith("audio/")) return true;
-	const ext = path.extname(filename).toLowerCase();
-	return [
-		".mp3",
-		".m4a",
-		".ogg",
-		".oga",
-		".wav",
-		".webm",
-		".flac",
-		".aac",
-	].includes(ext);
-}
-
-async function transcribeWithElevenLabs(
-	filePath: string,
-): Promise<TranscriptionResult> {
-	if (!ELEVENLABS_API_KEY) {
-		return {
-			ok: false,
-			error: "Set ELEVENLABS_API_KEY to enable ElevenLabs transcription.",
-		};
-	}
-
-	if (!fs.existsSync(filePath))
-		return { ok: false, error: `File not found: ${filePath}` };
-	const stat = fs.statSync(filePath);
-	if (stat.size === 0) return { ok: false, error: "File is empty" };
-	if (stat.size > TRANSCRIPTION_MAX_FILE_SIZE) {
-		return {
-			ok: false,
-			error: `File too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB (max 25MB)`,
-		};
-	}
-
-	try {
-		const form = new FormData();
-		const fileBuffer = fs.readFileSync(filePath);
-		form.append("file", new Blob([fileBuffer]), path.basename(filePath));
-		form.append("model_id", ELEVENLABS_MODEL);
-		if (ELEVENLABS_LANGUAGE) form.append("language_code", ELEVENLABS_LANGUAGE);
-
-		const response = await fetch(
-			"https://api.elevenlabs.io/v1/speech-to-text",
-			{
-				method: "POST",
-				headers: { "xi-api-key": ELEVENLABS_API_KEY },
-				body: form,
-			},
-		);
-
-		if (!response.ok) {
-			const body = await response.text().catch(() => "");
-			return {
-				ok: false,
-				error: `ElevenLabs API error (${response.status}): ${body.slice(0, 200)}`,
-			};
-		}
-
-		const data = (await response.json()) as { text?: string };
-		if (!data.text)
-			return { ok: false, error: "ElevenLabs returned empty transcription" };
-		return { ok: true, text: data.text };
-	} catch (error) {
-		return {
-			ok: false,
-			error: error instanceof Error ? error.message : String(error),
-		};
-	}
-}
-
-async function downloadTelegramFile(
-	fileId: string,
-	suggestedName: string,
-	knownSize = 0,
-): Promise<{ localPath: string; size: number } | null> {
-	if (knownSize > TELEGRAM_DOWNLOAD_LIMIT) return null;
-
-	const info = await telegram<{
-		ok: boolean;
-		result?: { file_path?: string; file_size?: number };
-	}>(`getFile?file_id=${encodeURIComponent(fileId)}`);
-	if (!info.ok || !info.result?.file_path) return null;
-	if ((info.result.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) return null;
-
-	const res = await fetch(`${TELEGRAM_FILE_API}/${info.result.file_path}`);
-	if (!res.ok) return null;
-
-	const buffer = Buffer.from(await res.arrayBuffer());
-	if (buffer.length > TELEGRAM_DOWNLOAD_LIMIT) return null;
-
-	const ext =
-		path.extname(info.result.file_path) || path.extname(suggestedName) || "";
-	const safeBase =
-		path
-			.basename(suggestedName, path.extname(suggestedName))
-			.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
-	const localPath = path.join(TMP_DIR, `${Date.now()}-${safeBase}${ext}`);
-	fs.writeFileSync(localPath, buffer);
-	return { localPath, size: buffer.length };
-}
-
-async function sendPiResponse(
-	chatId: string,
-	response: PiPromptResult,
-): Promise<void> {
-	await sendTelegramMessage(chatId, response.text);
-
-	const combinedText = `${response.text}\n${response.toolOutput}`;
-
-	if (SEND_LOCAL_IMAGES) {
-		const imagePaths = extractUploadableImagePaths(combinedText).slice(
-			0,
-			Math.max(0, MAX_IMAGE_UPLOADS),
-		);
-
-		for (const imagePath of imagePaths) {
-			try {
-				await sendTelegramLocalImage(chatId, imagePath);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				console.error(`[${chatId}] image upload error:`, message);
-				await sendTelegramMessage(
-					chatId,
-					`⚠️ Generated image was saved at ${imagePath}, but I could not upload it: ${sanitizeError(message)}`,
-				);
-			}
-		}
-	}
-
-	if (SEND_LOCAL_DOCUMENTS) {
-		const documentPaths = extractUploadableDocumentPaths(combinedText).slice(
-			0,
-			Math.max(0, MAX_DOCUMENT_UPLOADS),
-		);
-
-		for (const docPath of documentPaths) {
-			try {
-				await sendTelegramDocument(chatId, docPath);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				console.error(`[${chatId}] document upload error:`, message);
-				await sendTelegramMessage(
-					chatId,
-					`⚠️ Generated document was saved at ${docPath}, but I could not upload it: ${sanitizeError(message)}`,
-				);
-			}
-		}
-	}
-}
-
-function extractUploadableImagePaths(text: string): string[] {
-	const matches = text.matchAll(
-		/(?:file:\/\/)?(?:~|\/)[^\s"'`<>{}\[\]|]+?\.(?:png|jpe?g|webp|gif)(?=[\s"'`<>{}\[\]|),.;:!?]|$)/gi,
-	);
-	const paths: string[] = [];
-	const seen = new Set<string>();
-
-	for (const match of matches) {
-		const normalized = normalizeLocalPath(match[0]);
-		if (!normalized || seen.has(normalized)) continue;
-		if (!isUploadableImagePath(normalized)) continue;
-		seen.add(normalized);
-		paths.push(normalized);
-	}
-
-	return paths;
-}
-
-function extractUploadableDocumentPaths(text: string): string[] {
-	if (DOCUMENT_UPLOAD_EXTS.length === 0) return [];
-	const matches = text.matchAll(DOCUMENT_PATH_REGEX);
-	const paths: string[] = [];
-	const seen = new Set<string>();
-
-	for (const match of matches) {
-		const normalized = normalizeLocalPath(match[0]);
-		if (!normalized || seen.has(normalized)) continue;
-		if (!isUploadableDocumentPath(normalized)) continue;
-		seen.add(normalized);
-		paths.push(normalized);
-	}
-
-	return paths;
-}
-
-function normalizeLocalPath(candidate: string): string | null {
-	let filePath = candidate
-		.trim()
-		.replace(/^file:\/\//, "")
-		.replace(/^[('"`<\[]+/, "")
-		.replace(/[)'"`>\],.;:!?]+$/, "");
-
-	if (filePath.startsWith("~/")) {
-		filePath = path.join(os.homedir(), filePath.slice(2));
-	}
-
-	if (!path.isAbsolute(filePath)) return null;
-	return path.resolve(filePath);
-}
-
-function isUploadableImagePath(filePath: string): boolean {
-	const ext = path.extname(filePath).toLowerCase();
-	if (![".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) {
-		return false;
-	}
-
-	let stat: fs.Stats;
-	try {
-		stat = fs.statSync(filePath);
-	} catch {
-		return false;
-	}
-
-	if (!stat.isFile() || stat.size <= 0) return false;
-	if (stat.size > TELEGRAM_DOCUMENT_UPLOAD_LIMIT) return false;
-	return isUnderAllowedDir(filePath, LOCAL_IMAGE_UPLOAD_DIRS);
-}
-
-function isUploadableDocumentPath(filePath: string): boolean {
-	const ext = path.extname(filePath).toLowerCase().replace(/^\./, "");
-	if (!DOCUMENT_UPLOAD_EXTS.includes(ext)) return false;
-
-	let stat: fs.Stats;
-	try {
-		stat = fs.statSync(filePath);
-	} catch {
-		return false;
-	}
-
-	if (!stat.isFile() || stat.size <= 0) return false;
-	if (stat.size > TELEGRAM_DOCUMENT_UPLOAD_LIMIT) return false;
-	return isUnderAllowedDir(filePath, LOCAL_DOCUMENT_UPLOAD_DIRS);
-}
-
-function isUnderAllowedDir(filePath: string, allowedDirs: string[]): boolean {
-	let realFile: string;
-	try {
-		realFile = fs.realpathSync(filePath);
-	} catch {
-		return false;
-	}
-
-	for (const configuredDir of allowedDirs) {
-		const expandedDir = configuredDir.startsWith("~/")
-			? path.join(os.homedir(), configuredDir.slice(2))
-			: configuredDir;
-		let allowedDir = path.resolve(expandedDir);
-		try {
-			allowedDir = fs.realpathSync(allowedDir);
-		} catch {
-			// The directory may not exist until the first generation.
-		}
-
-		if (
-			realFile === allowedDir ||
-			realFile.startsWith(`${allowedDir}${path.sep}`)
-		) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-async function sendTelegramLocalImage(
-	chatId: string,
-	filePath: string,
-): Promise<void> {
-	const stat = fs.statSync(filePath);
-	const asPhoto = stat.size <= TELEGRAM_PHOTO_UPLOAD_LIMIT;
-	const method = asPhoto ? "sendPhoto" : "sendDocument";
-	const fieldName = asPhoto ? "photo" : "document";
-	const fileBuffer = fs.readFileSync(filePath);
-	const form = new FormData();
-	form.append("chat_id", chatId);
-	form.append(
-		fieldName,
-		new Blob([fileBuffer], { type: imageMimeType(filePath) }),
-		path.basename(filePath),
-	);
-	form.append("caption", `Generated image: ${path.basename(filePath)}`);
-
-	await telegram(method, { method: "POST", body: form });
-}
-
-function imageMimeType(filePath: string): string {
-	switch (path.extname(filePath).toLowerCase()) {
-		case ".jpg":
-		case ".jpeg":
-			return "image/jpeg";
-		case ".webp":
-			return "image/webp";
-		case ".gif":
-			return "image/gif";
-		default:
-			return "image/png";
-	}
-}
-
-async function sendTelegramDocument(
-	chatId: string,
-	filePath: string,
-): Promise<void> {
-	const fileBuffer = fs.readFileSync(filePath);
-	const form = new FormData();
-	form.append("chat_id", chatId);
-	form.append(
-		"document",
-		new Blob([fileBuffer], { type: documentMimeType(filePath) }),
-		path.basename(filePath),
-	);
-	form.append("caption", path.basename(filePath));
-	await telegram("sendDocument", { method: "POST", body: form });
-}
-
-function documentMimeType(filePath: string): string {
-	switch (path.extname(filePath).toLowerCase()) {
-		case ".pdf":
-			return "application/pdf";
-		case ".doc":
-			return "application/msword";
-		case ".docx":
-			return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-		case ".xls":
-			return "application/vnd.ms-excel";
-		case ".xlsx":
-			return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-		case ".ppt":
-			return "application/vnd.ms-powerpoint";
-		case ".pptx":
-			return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-		case ".csv":
-			return "text/csv";
-		case ".json":
-			return "application/json";
-		case ".md":
-			return "text/markdown";
-		case ".txt":
-			return "text/plain";
-		default:
-			return "application/octet-stream";
-	}
-}
-
-function extractToolResultText(result: any): string {
-	const content = result?.content;
-	if (!Array.isArray(content)) return typeof result === "string" ? result : "";
-	return content
-		.map((part) => (typeof part?.text === "string" ? part.text : ""))
-		.filter(Boolean)
-		.join("\n");
-}
-
-async function sendTelegramMessage(
-	chatId: string,
-	text: string,
-): Promise<void> {
-	const chunks = splitTelegramMessage(text || "(empty)");
-	for (const chunk of chunks) {
-		await telegram("sendMessage", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ chat_id: chatId, text: chunk }),
-		});
-	}
-}
-
-async function sendChatAction(chatId: string): Promise<void> {
-	try {
-		await telegram("sendChatAction", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ chat_id: chatId, action: "typing" }),
-		});
-	} catch {
-		// Typing indicators are best-effort.
-	}
-}
-
-async function telegram<T = any>(
-	methodAndQuery: string,
-	init?: RequestInit,
-): Promise<T> {
-	const res = await fetch(`${TELEGRAM_API}/${methodAndQuery}`, init);
-	if (!res.ok) {
-		const body = await res.text().catch(() => "");
-		throw new Error(
-			`Telegram ${methodAndQuery} failed (${res.status}): ${body}`,
-		);
-	}
-	return (await res.json()) as T;
-}
-
-function splitTelegramMessage(text: string): string[] {
-	const chunks: string[] = [];
-	let remaining = text;
-	while (remaining.length > TELEGRAM_MAX_MESSAGE) {
-		let splitAt = remaining.lastIndexOf("\n", TELEGRAM_MAX_MESSAGE);
-		if (splitAt < TELEGRAM_MAX_MESSAGE / 2) splitAt = TELEGRAM_MAX_MESSAGE;
-		chunks.push(remaining.slice(0, splitAt));
-		remaining = remaining.slice(splitAt).replace(/^\n/, "");
-	}
-	chunks.push(remaining);
-	return chunks;
-}
-
-function sanitizeError(error: string): string {
-	const firstUsefulLine = error
-		.split("\n")
-		.map((line) => line.trim())
-		.find(
-			(line) => line && !line.startsWith("at ") && !line.startsWith("node:"),
-		);
-	const message = firstUsefulLine || "Something went wrong.";
-	return message.length > 500 ? `${message.slice(0, 500)}…` : message;
-}
-
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1324,6 +342,7 @@ async function shutdown(): Promise<void> {
 	if (!running) return;
 	running = false;
 	console.log("Shutting down...");
+	heartbeat.stop();
 	for (const chat of chats.values()) {
 		if (chat.idleTimer) clearTimeout(chat.idleTimer);
 		chat.pi.cleanup();

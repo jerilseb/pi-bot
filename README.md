@@ -43,6 +43,17 @@ npm start
 
 If everything is happy, you should see the bridge start up and print the model, enabled extensions, and skills.
 
+## Code layout
+
+- `channel.ts` — small entrypoint/orchestrator: chat state, queueing, commands, polling loop
+- `src/config.ts` — environment variables, paths, constants
+- `src/pi-session.ts` — Pi SDK runtime/session wrapper
+- `src/telegram.ts` — Telegram API helpers and message sending
+- `src/inbound.ts` — Telegram message/file/photo/audio ingestion
+- `src/outbound.ts` — Pi response delivery and generated file uploads
+- `src/resources.ts` — extension/skill discovery, system prompt, memory, heartbeat prompt helpers
+- `src/heartbeat.ts` — scheduled heartbeat controller
+
 ## Telegram commands
 
 Inside Telegram:
@@ -79,6 +90,12 @@ PI_CHANNEL_IDLE_TIMEOUT_MINUTES=30
 PI_CHANNEL_MAX_QUEUE_PER_CHAT=5
 PI_CHANNEL_SEND_LOCAL_IMAGES=true
 PI_CHANNEL_SEND_LOCAL_DOCUMENTS=true
+
+# optional scheduled agent wake-up
+PI_HEARTBEAT_ENABLED=false
+PI_HEARTBEAT_INTERVAL_SECONDS=60
+PI_HEARTBEAT_CHAT_ID=123456789
+PI_HEARTBEAT_FILE=files/heartbeat.md
 ```
 
 ## Notes
