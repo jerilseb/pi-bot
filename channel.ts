@@ -192,6 +192,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				"/abort — abort the current Pi response",
 				"/new — clear this chat's Pi conversation",
 				"/reload — re-scan extensions/skills and reset all chats",
+				"/restart — exit this process so PM2 can restart it",
 				"/help — show this help",
 			].join("\n"),
 		);
@@ -248,6 +249,15 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 			chat.chatId,
 			"🔁 Reloaded extensions and skills. All chats reset.",
 		);
+		return true;
+	}
+	if (command === "/restart") {
+		await sendTelegramMessage(
+			chat.chatId,
+			"♻️ Restarting bot process. PM2 should bring it back up shortly.",
+		);
+		await shutdown();
+		setTimeout(() => process.exit(0), 250);
 		return true;
 	}
 
@@ -311,6 +321,7 @@ async function pollTelegram(): Promise<void> {
 
 	await registerBotCommands();
 	heartbeat.start();
+	await notifyAppStarted();
 
 	while (running) {
 		try {
@@ -339,6 +350,20 @@ async function pollTelegram(): Promise<void> {
 			);
 			await sleep(5000);
 		}
+	}
+}
+
+async function notifyAppStarted(): Promise<void> {
+	try {
+		await sendTelegramMessage(
+			ALLOWED_CHAT_ID,
+			"✅ Bot is up and running.",
+		);
+	} catch (error) {
+		console.error(
+			"Failed to send startup notification:",
+			error instanceof Error ? error.message : String(error),
+		);
 	}
 }
 

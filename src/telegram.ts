@@ -13,6 +13,7 @@ export async function registerBotCommands(): Promise<void> {
 					{ command: "abort", description: "Stop the current Pi response" },
 					{ command: "new", description: "Reset this chat's Pi conversation" },
 					{ command: "reload", description: "Re-scan extensions and skills" },
+					{ command: "restart", description: "Restart the bot process via PM2" },
 				],
 			}),
 		});
