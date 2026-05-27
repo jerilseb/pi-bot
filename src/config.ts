@@ -67,6 +67,11 @@ export const MAX_TTS_CHARS = envNumber(
 	100,
 );
 
+export const SEND_TOOL_CALLS = envFlag(
+	process.env.PI_CHANNEL_SEND_TOOL_CALLS,
+	true,
+);
+
 export const SEND_LOCAL_IMAGES = true;
 export const LOCAL_IMAGE_UPLOAD_DIRS = (
 	process.env.PI_CHANNEL_IMAGE_UPLOAD_DIRS ??

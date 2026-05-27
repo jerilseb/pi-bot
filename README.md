@@ -89,7 +89,7 @@ TAVILY_API_KEY_1=tvly-your-key
 # TAVILY_API_KEY_2=another-key-if-you-want
 
 # image generation skill
-FAL_KEY=your-fal-key
+KIE_API_KEY=your-kie-api-key
 ```
 
 A few useful knobs:
@@ -98,6 +98,7 @@ A few useful knobs:
 PI_CHANNEL_IDLE_TIMEOUT_MINUTES=30
 PI_CHANNEL_MAX_QUEUE_PER_CHAT=5
 PI_CHANNEL_SEND_LOCAL_DOCUMENTS=true
+PI_CHANNEL_SEND_TOOL_CALLS=true # send Pi tool starts to Telegram; skill reads show as 📗 skill-name
 
 # optional scheduled agent wake-up; uses TELEGRAM_ALLOWED_CHAT_ID and files/heartbeat.md
 PI_HEARTBEAT_ENABLED=false

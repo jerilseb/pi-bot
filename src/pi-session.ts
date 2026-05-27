@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
 import {
 	type AgentSession,
@@ -14,6 +15,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { SEND_LOCAL_DOCUMENTS, SEND_LOCAL_IMAGES } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
+
+export interface PiRunPromptOptions {
+	onToolCall?: (notification: string) => void;
+}
 import {
 	telegramDocumentExtension,
 	telegramImageExtension,
@@ -88,6 +93,7 @@ export class SdkPiSession {
 	async runPrompt(
 		text: string,
 		attachments: Attachment[],
+		options: PiRunPromptOptions = {},
 	): Promise<PiPromptResult> {
 		const session = await this.start();
 		if (session.isStreaming) {
@@ -98,9 +104,16 @@ export class SdkPiSession {
 		const toolOutputs: string[] = [];
 		let errorMessage = "";
 		const unsubscribe = session.subscribe((event) => {
-			this.collectPromptEvent(event, chunks, toolOutputs, (message) => {
-				errorMessage = message;
-			});
+			this.collectPromptEvent(
+				event,
+				session,
+				chunks,
+				toolOutputs,
+				(message) => {
+					errorMessage = message;
+				},
+				options.onToolCall,
+			);
 		});
 
 		try {
@@ -183,9 +196,11 @@ export class SdkPiSession {
 
 	private collectPromptEvent(
 		event: AgentSessionEvent,
+		session: AgentSession,
 		chunks: string[],
 		toolOutputs: string[],
 		setError: (message: string) => void,
+		onToolCall: ((notification: string) => void) | undefined,
 	): void {
 		if (event.type === "message_update") {
 			const delta = event.assistantMessageEvent;
@@ -198,6 +213,10 @@ export class SdkPiSession {
 						"Pi agent failed while generating a response",
 				);
 			}
+		}
+
+		if (event.type === "tool_execution_start") {
+			onToolCall?.(formatToolStartNotification(event, session, this.runtime.cwd));
 		}
 
 		if (event.type === "tool_execution_end") {
@@ -213,6 +232,51 @@ export class SdkPiSession {
 				setError(failed.errorMessage);
 			}
 		}
+	}
+}
+
+function formatToolStartNotification(
+	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+	session: AgentSession,
+	cwd: string,
+): string {
+	const skillName = skillNameForReadTool(event, session, cwd);
+	return skillName ? `📗 ${skillName}` : `🛠 ${event.toolName}`;
+}
+
+function skillNameForReadTool(
+	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+	session: AgentSession,
+	cwd: string,
+): string | null {
+	if (event.toolName !== "read") return null;
+
+	const readPath = extractReadPath(event.args);
+	if (!readPath) return null;
+
+	const normalizedReadPath = normalizeFilePath(readPath, cwd);
+	const skill = session.resourceLoader
+		.getSkills()
+		.skills.find(
+			(skill) => normalizeFilePath(skill.filePath, cwd) === normalizedReadPath,
+		);
+
+	return skill?.name ?? null;
+}
+
+function extractReadPath(args: unknown): string | null {
+	if (!args || typeof args !== "object" || !("path" in args)) return null;
+	return typeof args.path === "string" ? args.path : null;
+}
+
+function normalizeFilePath(filePath: string, cwd: string): string {
+	const absolutePath = path.isAbsolute(filePath)
+		? filePath
+		: path.resolve(cwd, filePath);
+	try {
+		return fs.realpathSync.native(absolutePath);
+	} catch {
+		return path.normalize(absolutePath);
 	}
 }
 

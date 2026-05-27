@@ -20,6 +20,7 @@ import {
 	OPENROUTER_MODEL,
 	PROJECT_EXTENSIONS_DIR,
 	PROJECT_SKILLS_DIR,
+	SEND_TOOL_CALLS,
 	TMP_DIR,
 } from "./src/config.ts";
 import {
@@ -208,6 +209,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				`- Uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
 				`- Model: openrouter/${PI_RUNTIME.modelName}`,
 				`- Voice note tool: ${voiceStatusText()}`,
+				`- Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`,
 				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
 			].join("\n"),
 		);
@@ -270,7 +272,12 @@ async function processQueue(chat: ChatState): Promise<void> {
 			console.log(
 				`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`,
 			);
-			const response = await chat.pi.runPrompt(prompt.text, prompt.attachments);
+			const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
+				onToolCall: SEND_TOOL_CALLS
+					? (notification) =>
+							notifyToolCall(prompt.chatId, notification, prompt.source)
+					: undefined,
+			});
 			await sendPiResponse(prompt.chatId, response, {
 				suppressNoop: prompt.suppressNoop,
 			});
@@ -299,6 +306,7 @@ async function pollTelegram(): Promise<void> {
 		`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(", ") : "none"}`,
 	);
 	console.log(`Voice note tool: ${voiceStatusText()}`);
+	console.log(`Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`);
 	console.log(heartbeatStatusText());
 
 	await registerBotCommands();
@@ -332,6 +340,20 @@ async function pollTelegram(): Promise<void> {
 			await sleep(5000);
 		}
 	}
+}
+
+function notifyToolCall(
+	chatId: string,
+	notification: string,
+	source: IncomingPrompt["source"],
+): void {
+	if (source === "heartbeat") return;
+	void sendTelegramMessage(chatId, notification).catch((error) => {
+		console.error(
+			`[${chatId}] failed to send tool notification:`,
+			error instanceof Error ? error.message : String(error),
+		);
+	});
 }
 
 function voiceStatusText(): string {
