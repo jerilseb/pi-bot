@@ -115,6 +115,9 @@ Inside Telegram:
 - `/status` — see the current chat session status
 - `/abort` — stop the current response and clear the queue
 - `/new` — reset the Pi conversation for this chat
+- `/reload` — re-scan extensions/skills and reset all chats
+- `/update` — `git pull` this repo and restart the app
+- `/restart` — restart the bot process
 
 ## Optional extras
 

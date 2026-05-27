@@ -9,7 +9,9 @@
  * generated file uploads, and scheduled heartbeat prompts.
  */
 
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import { promisify } from "node:util";
 import {
 	ALLOWED_CHAT_ID,
 	BOT_TOKEN,
@@ -19,6 +21,7 @@ import {
 	OPENROUTER_API_KEY,
 	OPENROUTER_MODEL,
 	PROJECT_EXTENSIONS_DIR,
+	PROJECT_ROOT,
 	PROJECT_SKILLS_DIR,
 	SEND_TOOL_CALLS,
 	TMP_DIR,
@@ -50,6 +53,8 @@ import {
 } from "./src/telegram.ts";
 import type { IncomingPrompt, TelegramUpdate } from "./src/types.ts";
 import { voiceNotesConfigured } from "./src/voice.ts";
+
+const execFileAsync = promisify(execFile);
 
 interface ChatState {
 	chatId: string;
@@ -192,6 +197,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				"/abort — abort the current Pi response",
 				"/new — clear this chat's Pi conversation",
 				"/reload — re-scan extensions/skills and reset all chats",
+				"/update — git pull this repo and restart the app",
 				"/restart — exit this process so PM2 can restart it",
 				"/help — show this help",
 			].join("\n"),
@@ -251,6 +257,25 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 		);
 		return true;
 	}
+	if (command === "/update") {
+		await sendTelegramMessage(chat.chatId, "⬇️ Pulling latest changes...");
+		const result = await gitPull();
+		if (!result.ok) {
+			await sendTelegramMessage(
+				chat.chatId,
+				`❌ Update failed:\n${commandOutputText(result.output)}`,
+			);
+			return true;
+		}
+
+		await sendTelegramMessage(
+			chat.chatId,
+			`✅ Update complete. Restarting app...\n${commandOutputText(result.output)}`,
+		);
+		await shutdown();
+		setTimeout(() => process.exit(0), 250);
+		return true;
+	}
 	if (command === "/restart") {
 		await sendTelegramMessage(
 			chat.chatId,
@@ -262,6 +287,42 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 	}
 
 	return false;
+}
+
+async function gitPull(): Promise<{ ok: boolean; output: string }> {
+	try {
+		const { stdout, stderr } = await execFileAsync("git", ["pull"], {
+			cwd: PROJECT_ROOT,
+			maxBuffer: 1024 * 1024,
+		});
+		return { ok: true, output: joinCommandOutput(stdout, stderr) };
+	} catch (error) {
+		const execError = error as Partial<{
+			stdout: string | Buffer;
+			stderr: string | Buffer;
+		}>;
+		const output = joinCommandOutput(execError.stdout, execError.stderr);
+		return {
+			ok: false,
+			output: output || (error instanceof Error ? error.message : String(error)),
+		};
+	}
+}
+
+function joinCommandOutput(
+	stdout: string | Buffer | undefined,
+	stderr: string | Buffer | undefined,
+): string {
+	return [stdout, stderr]
+		.map((value) => value?.toString().trim() ?? "")
+		.filter(Boolean)
+		.join("\n");
+}
+
+function commandOutputText(output: string): string {
+	const redacted = output.replace(/(https?:\/\/)([^@\s]+)@/g, "$1***@");
+	const trimmed = redacted.trim() || "(no output)";
+	return trimmed.length > 3000 ? `${trimmed.slice(0, 3000)}…` : trimmed;
 }
 
 async function processQueue(chat: ChatState): Promise<void> {
