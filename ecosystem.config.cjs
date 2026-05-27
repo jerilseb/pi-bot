@@ -2,7 +2,7 @@ module.exports = {
 	apps: [
 		{
 			name: "pi-bot",
-			script: "channel.ts",
+			script: "main.ts",
 			interpreter: "node",
 			autorestart: true,
 			restart_delay: 1000,

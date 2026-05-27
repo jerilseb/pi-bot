@@ -11,6 +11,6 @@
 		"forceConsistentCasingInFileNames": true,
 		"noImplicitOverride": true
 	},
-	"include": ["channel.ts", "src/**/*.ts"],
+	"include": ["main.ts", "src/**/*.ts"],
 	"exclude": ["node_modules", "extensions/**/node_modules"]
 }

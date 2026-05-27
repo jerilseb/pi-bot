@@ -95,7 +95,7 @@ const heartbeat = createHeartbeatController({
 function validateEnvironment(): void {
 	if (!BOT_TOKEN) {
 		console.error(
-			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node channel.ts",
+			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node main.ts",
 		);
 		process.exit(1);
 	}
