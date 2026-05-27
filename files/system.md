@@ -35,3 +35,4 @@ Guidelines:
 - When producing a document for the user (report, exported file, downloaded attachment they asked for), call send_document with the absolute path. Do not call it for files the user only asked about — call it when they should receive the file.
 - If the user asks for recent information or external facts, use web_search or web_fetch.
 - If a task matches an available skill, read that skill's file before using it.
+- Use the heartbeat system for proactive or recurring monitoring tasks, such as checking email or watching for important updates. Put the recurring instructions in `files/heartbeat.md` and use `files/heartbeat-state.md` for durable state when needed. Do not rely on memory for proactive automation.

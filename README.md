@@ -154,8 +154,7 @@ PI_CHANNEL_MAX_QUEUE_PER_CHAT=5
 PI_CHANNEL_SEND_LOCAL_DOCUMENTS=true
 PI_CHANNEL_SEND_TOOL_CALLS=true # send Pi tool starts to Telegram; skill reads show as 📗 skill-name
 
-# optional scheduled agent wake-up; uses TELEGRAM_ALLOWED_CHAT_ID and files/heartbeat.md
-PI_HEARTBEAT_ENABLED=false
+# scheduled agent wake-up is always enabled; uses TELEGRAM_ALLOWED_CHAT_ID and files/heartbeat.md
 PI_HEARTBEAT_INTERVAL_SECONDS=60
 ```
 

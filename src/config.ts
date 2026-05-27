@@ -112,10 +112,7 @@ export const FILES_DIR = path.join(PROJECT_ROOT, "files");
 export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, "system.md");
 export const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
 
-export const HEARTBEAT_ENABLED = envFlag(
-	process.env.PI_HEARTBEAT_ENABLED,
-	false,
-);
+export const HEARTBEAT_ENABLED = true;
 export const HEARTBEAT_INTERVAL_MS =
 	envNumber(process.env.PI_HEARTBEAT_INTERVAL_SECONDS, 60, 1) * 1000;
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, "heartbeat.md");

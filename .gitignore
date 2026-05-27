@@ -7,6 +7,6 @@ logs
 *.sqlite*
 .directory
 .vscode/settings.json
-files/
+files/*
 !files/system.md
 .claude
