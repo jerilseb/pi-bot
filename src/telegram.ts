@@ -38,12 +38,31 @@ export async function sendTelegramMessage(
 ): Promise<void> {
 	const chunks = splitTelegramMessage(text || "(empty)");
 	for (const chunk of chunks) {
-		await telegram("sendMessage", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ chat_id: chatId, text: chunk }),
-		});
+		await sendTelegramHtmlMessage(chatId, chunk);
 	}
+}
+
+async function sendTelegramHtmlMessage(
+	chatId: string,
+	html: string,
+): Promise<void> {
+	try {
+		await postTelegramHtmlMessage(chatId, html);
+	} catch (error) {
+		if (!isTelegramHtmlParseError(error)) throw error;
+		await postTelegramHtmlMessage(chatId, escapeTelegramHtml(html));
+	}
+}
+
+async function postTelegramHtmlMessage(
+	chatId: string,
+	text: string,
+): Promise<void> {
+	await telegram("sendMessage", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+	});
 }
 
 export async function sendChatAction(chatId: string): Promise<void> {
@@ -70,6 +89,18 @@ export async function telegram<T = unknown>(
 		);
 	}
 	return (await res.json()) as T;
+}
+
+export function escapeTelegramHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
+}
+
+function isTelegramHtmlParseError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.toLowerCase().includes("can't parse entities");
 }
 
 function splitTelegramMessage(text: string): string[] {

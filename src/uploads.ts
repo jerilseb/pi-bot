@@ -197,6 +197,7 @@ async function uploadImage(
 	);
 	if (caption) {
 		form.append("caption", caption);
+		form.append("parse_mode", "HTML");
 	}
 	await telegram(method, { method: "POST", body: form });
 }
@@ -212,6 +213,7 @@ async function uploadDocument(
 	form.append("document", new Blob([fileBuffer]), path.basename(filePath));
 	if (caption) {
 		form.append("caption", caption);
+		form.append("parse_mode", "HTML");
 	}
 	await telegram("sendDocument", { method: "POST", body: form });
 }
