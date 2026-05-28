@@ -53,6 +53,7 @@ import {
 import {
 	answerTelegramCallbackQuery,
 	editTelegramMessageText,
+	escapeTelegramHtml,
 	type InlineKeyboardButton,
 	registerBotCommands,
 	sanitizeError,
@@ -278,7 +279,7 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 	}
 
 	if (chat.queue.length >= MAX_QUEUE_PER_CHAT) {
-		if (prompt.source !== "heartbeat") {
+		if (prompt.source !== "heartbeat" && prompt.source !== "cron") {
 			await sendTelegramMessage(
 				prompt.chatId,
 				`⚠️ Queue full (${MAX_QUEUE_PER_CHAT} pending). Wait or use /abort.`,
@@ -458,7 +459,8 @@ function joinCommandOutput(
 function commandOutputText(output: string): string {
 	const redacted = output.replace(/(https?:\/\/)([^@\s]+)@/g, "$1***@");
 	const trimmed = redacted.trim() || "(no output)";
-	return trimmed.length > 3000 ? `${trimmed.slice(0, 3000)}…` : trimmed;
+	const truncated = trimmed.length > 3000 ? `${trimmed.slice(0, 3000)}…` : trimmed;
+	return escapeTelegramHtml(truncated);
 }
 
 async function processQueue(chat: ChatState): Promise<void> {
@@ -491,6 +493,15 @@ async function processQueue(chat: ChatState): Promise<void> {
 			await sendPiResponse(prompt.chatId, response, {
 				suppressNoop: prompt.suppressNoop,
 			});
+			for (const attachment of prompt.attachments) {
+				if (attachment.path?.startsWith(TMP_DIR)) {
+					try {
+						fs.unlinkSync(attachment.path);
+					} catch {
+						// Best-effort cleanup.
+					}
+				}
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`[${prompt.chatId}] error:`, message);
