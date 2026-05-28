@@ -1,6 +1,14 @@
 export interface TelegramUpdate {
 	update_id: number;
 	message?: TelegramMessage;
+	callback_query?: TelegramCallbackQuery;
+}
+
+export interface TelegramCallbackQuery {
+	id: string;
+	from: { id: number; username?: string; first_name?: string };
+	message?: TelegramMessage;
+	data?: string;
 }
 
 export interface TelegramMessage {

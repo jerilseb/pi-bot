@@ -10,6 +10,7 @@ export async function registerBotCommands(): Promise<void> {
 					{ command: "start", description: "Say hi" },
 					{ command: "help", description: "Show commands" },
 					{ command: "status", description: "Show chat session status" },
+					{ command: "models", description: "Switch OpenRouter model" },
 					{ command: "abort", description: "Stop the current Pi response" },
 					{ command: "new", description: "Reset this chat's Pi conversation" },
 					{ command: "reload", description: "Re-scan extensions and skills" },
@@ -42,6 +43,52 @@ export async function sendTelegramMessage(
 	}
 }
 
+export interface InlineKeyboardButton {
+	text: string;
+	callback_data: string;
+}
+
+export async function sendTelegramInlineKeyboard(
+	chatId: string,
+	text: string,
+	keyboard: InlineKeyboardButton[][],
+): Promise<void> {
+	await postTelegramHtmlMessage(chatId, escapeTelegramHtml(text || "(empty)"), {
+		inline_keyboard: keyboard,
+	});
+}
+
+export async function answerTelegramCallbackQuery(
+	callbackQueryId: string,
+	text?: string,
+): Promise<void> {
+	await telegram("answerCallbackQuery", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			callback_query_id: callbackQueryId,
+			...(text ? { text } : {}),
+		}),
+	});
+}
+
+export async function editTelegramMessageText(
+	chatId: string,
+	messageId: number,
+	text: string,
+): Promise<void> {
+	await telegram("editMessageText", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			chat_id: chatId,
+			message_id: messageId,
+			text: escapeTelegramHtml(text || "(empty)"),
+			parse_mode: "HTML",
+		}),
+	});
+}
+
 async function sendTelegramHtmlMessage(
 	chatId: string,
 	html: string,
@@ -57,11 +104,17 @@ async function sendTelegramHtmlMessage(
 async function postTelegramHtmlMessage(
 	chatId: string,
 	text: string,
+	replyMarkup?: Record<string, unknown>,
 ): Promise<void> {
 	await telegram("sendMessage", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+		body: JSON.stringify({
+			chat_id: chatId,
+			text,
+			parse_mode: "HTML",
+			...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+		}),
 	});
 }
 

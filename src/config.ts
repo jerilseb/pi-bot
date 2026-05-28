@@ -24,11 +24,29 @@ export function resolveConfigPath(value: string): string {
 	return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
 
+function normalizeOpenRouterModelName(modelName: string): string {
+	return modelName.trim().replace(/^openrouter\//, "");
+}
+
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
-export const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "";
+export const OPENROUTER_MODEL = normalizeOpenRouterModelName(
+	process.env.OPENROUTER_MODEL ?? "",
+);
+const configuredAllowedOpenRouterModels = (
+	process.env.ALLOWED_OPENROUTER_MODELS ?? ""
+)
+	.split(",")
+	.map((model) => normalizeOpenRouterModelName(model))
+	.filter(Boolean);
+export const ALLOWED_OPENROUTER_MODELS =
+	configuredAllowedOpenRouterModels.length > 0
+		? configuredAllowedOpenRouterModels
+		: OPENROUTER_MODEL
+			? [OPENROUTER_MODEL]
+			: [];
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 export const ELEVENLABS_MODEL = "scribe_v2";

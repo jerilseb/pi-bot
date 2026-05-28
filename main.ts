@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import { promisify } from "node:util";
 import {
 	ALLOWED_CHAT_ID,
+	ALLOWED_OPENROUTER_MODELS,
 	BOT_TOKEN,
 	HEARTBEAT_ENABLED,
 	IDLE_TIMEOUT_MS,
@@ -47,13 +48,21 @@ import {
 	readSystemPrompt,
 } from "./src/resources.ts";
 import {
+	answerTelegramCallbackQuery,
+	editTelegramMessageText,
+	type InlineKeyboardButton,
 	registerBotCommands,
 	sanitizeError,
+	sendTelegramInlineKeyboard,
 	sendTelegramMessage,
 	startTyping,
 	telegram,
 } from "./src/telegram.ts";
-import type { IncomingPrompt, TelegramUpdate } from "./src/types.ts";
+import type {
+	IncomingPrompt,
+	TelegramCallbackQuery,
+	TelegramUpdate,
+} from "./src/types.ts";
 import { voiceNotesConfigured } from "./src/voice.ts";
 
 const execFileAsync = promisify(execFile);
@@ -129,6 +138,13 @@ function validateEnvironment(): void {
 		process.exit(1);
 	}
 
+	if (!ALLOWED_OPENROUTER_MODELS.includes(OPENROUTER_MODEL)) {
+		console.error(
+			"OPENROUTER_MODEL must be included in ALLOWED_OPENROUTER_MODELS.",
+		);
+		process.exit(1);
+	}
+
 	if (!ALLOWED_CHAT_ID) {
 		console.error(
 			"Missing TELEGRAM_ALLOWED_CHAT_ID. This bot is restricted to exactly one Telegram chat.",
@@ -161,6 +177,87 @@ function resetIdleTimer(chat: ChatState): void {
 		chat.pi.cleanup();
 		chats.delete(chat.chatId);
 	}, IDLE_TIMEOUT_MS);
+}
+
+const MODEL_CALLBACK_PREFIX = "model:";
+const MODEL_CALLBACK_CANCEL = `${MODEL_CALLBACK_PREFIX}cancel`;
+
+function buildModelInlineKeyboard(): InlineKeyboardButton[][] {
+	return [
+		...ALLOWED_OPENROUTER_MODELS.map((model, index) => [
+			{ text: model, callback_data: `${MODEL_CALLBACK_PREFIX}${index}` },
+		]),
+		[{ text: "Cancel", callback_data: MODEL_CALLBACK_CANCEL }],
+	];
+}
+
+async function handleModelCallbackQuery(
+	query: TelegramCallbackQuery,
+): Promise<void> {
+	const data = query.data ?? "";
+	if (!data.startsWith(MODEL_CALLBACK_PREFIX)) return;
+
+	const chatId = query.message ? String(query.message.chat.id) : "";
+	if (chatId !== ALLOWED_CHAT_ID || !query.message) {
+		await answerTelegramCallbackQuery(
+			query.id,
+			"This model menu is no longer valid.",
+		);
+		return;
+	}
+
+	if (data === MODEL_CALLBACK_CANCEL) {
+		await answerTelegramCallbackQuery(query.id, "Cancelled");
+		await editTelegramMessageText(
+			chatId,
+			query.message.message_id,
+			"Cancelled model switch.",
+		);
+		return;
+	}
+
+	const modelIndex = Number(data.slice(MODEL_CALLBACK_PREFIX.length));
+	const modelName = Number.isInteger(modelIndex)
+		? ALLOWED_OPENROUTER_MODELS[modelIndex]
+		: undefined;
+	if (!modelName) {
+		await answerTelegramCallbackQuery(query.id, "Unknown model.");
+		await editTelegramMessageText(
+			chatId,
+			query.message.message_id,
+			"❌ That model option is no longer available. Use /models again.",
+		);
+		return;
+	}
+
+	const chat = getChat(chatId);
+	if (chat.processing || chat.queue.length > 0) {
+		await answerTelegramCallbackQuery(query.id, "Chat is busy.");
+		await editTelegramMessageText(
+			chatId,
+			query.message.message_id,
+			"⚠️ Model switch cancelled because the chat is busy. Try /models again when idle.",
+		);
+		return;
+	}
+
+	try {
+		await chat.pi.setOpenRouterModel(modelName);
+		await answerTelegramCallbackQuery(query.id, "Model switched.");
+		await editTelegramMessageText(
+			chatId,
+			query.message.message_id,
+			`✅ Switched to openrouter/${chat.pi.modelName}`,
+		);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		await answerTelegramCallbackQuery(query.id, "Model switch failed.");
+		await editTelegramMessageText(
+			chatId,
+			query.message.message_id,
+			`❌ ${sanitizeError(message)}`,
+		);
+	}
 }
 
 async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
@@ -204,6 +301,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 			[
 				"Telegram → Pi bridge commands:",
 				"/status — show this chat session status",
+				"/models — choose an allowed OpenRouter model",
 				"/abort — abort the current Pi response",
 				"/new — clear this chat's Pi conversation",
 				"/reload — re-scan extensions/skills and reset all chats",
@@ -224,12 +322,31 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				`- Messages: ${chat.messageCount}`,
 				`- Queue: ${chat.queue.length}`,
 				`- Uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
-				`- Model: openrouter/${PI_RUNTIME.modelName}`,
+				`- Model: openrouter/${chat.pi.modelName}`,
 				`- Voice note tool: ${voiceStatusText()}`,
 				`- Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`,
 				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
 				`- ${cronStatusText()}`,
 			].join("\n"),
+		);
+		return true;
+	}
+	if (command === "/models") {
+		if (chat.processing || chat.queue.length > 0) {
+			await sendTelegramMessage(
+				chat.chatId,
+				"⚠️ Wait for the current response and queue to finish before switching models.",
+			);
+			return true;
+		}
+
+		await sendTelegramInlineKeyboard(
+			chat.chatId,
+			[
+				`Current model: openrouter/${chat.pi.modelName}`,
+				"Choose a model:",
+			].join("\n"),
+			buildModelInlineKeyboard(),
 		);
 		return true;
 	}
@@ -405,7 +522,7 @@ async function pollTelegram(): Promise<void> {
 			const params = new URLSearchParams({
 				offset: String(offset),
 				timeout: "30",
-				allowed_updates: JSON.stringify(["message"]),
+				allowed_updates: JSON.stringify(["message", "callback_query"]),
 			});
 			const data = await telegram<{ ok: boolean; result: TelegramUpdate[] }>(
 				`getUpdates?${params}`,
@@ -414,6 +531,12 @@ async function pollTelegram(): Promise<void> {
 
 			for (const update of data.result) {
 				offset = update.update_id + 1;
+
+				if (update.callback_query) {
+					await handleModelCallbackQuery(update.callback_query);
+					continue;
+				}
+
 				if (!update.message) continue;
 
 				const incoming = await toIncomingPrompt(update.message);

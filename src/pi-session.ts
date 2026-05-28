@@ -72,11 +72,16 @@ function resolveOpenRouterModel(
 	modelRegistry: ReturnType<typeof ModelRegistry.create>,
 	modelName: string,
 ): Model<Api> {
-	const model = modelRegistry.find("openrouter", modelName);
+	const normalizedModelName = normalizeOpenRouterModelName(modelName);
+	const model = modelRegistry.find("openrouter", normalizedModelName);
 	if (!model) {
-		throw new Error(`Unknown OpenRouter model: ${modelName}`);
+		throw new Error(`Unknown OpenRouter model: ${normalizedModelName}`);
 	}
 	return model;
+}
+
+function normalizeOpenRouterModelName(modelName: string): string {
+	return modelName.trim().replace(/^openrouter\//, "");
 }
 
 export class SdkPiSession {
@@ -84,10 +89,42 @@ export class SdkPiSession {
 	private starting: Promise<AgentSession> | null = null;
 	private runtime: PiRuntime;
 	private chatId: string;
+	private selectedModelName: string;
+	private selectedModel: Model<Api>;
 
 	constructor(runtime: PiRuntime, chatId: string) {
 		this.runtime = runtime;
 		this.chatId = chatId;
+		this.selectedModelName = runtime.modelName;
+		this.selectedModel = runtime.model;
+	}
+
+	get modelName(): string {
+		return this.selectedModelName;
+	}
+
+	async setOpenRouterModel(modelName: string): Promise<void> {
+		const normalizedModelName = normalizeOpenRouterModelName(modelName);
+		this.runtime.modelRegistry.refresh();
+		const model = resolveOpenRouterModel(
+			this.runtime.modelRegistry,
+			normalizedModelName,
+		);
+
+		if (!this.runtime.modelRegistry.hasConfiguredAuth(model)) {
+			throw new Error(`No OpenRouter API key configured for ${normalizedModelName}`);
+		}
+
+		if (this.session?.isStreaming) {
+			throw new Error("Cannot switch models while Pi is responding");
+		}
+
+		if (this.session) {
+			await this.session.setModel(model);
+		}
+
+		this.selectedModelName = normalizedModelName;
+		this.selectedModel = model;
 	}
 
 	async runPrompt(
@@ -183,7 +220,7 @@ export class SdkPiSession {
 
 		const { session } = await createAgentSession({
 			cwd: this.runtime.cwd,
-			model: this.runtime.model,
+			model: this.selectedModel,
 			authStorage: this.runtime.authStorage,
 			modelRegistry: this.runtime.modelRegistry,
 			resourceLoader,
