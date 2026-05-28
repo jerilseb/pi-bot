@@ -9,7 +9,7 @@ import {
 	formatSize,
 	truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 const TavilySearchParams = Type.Object({
 	query: Type.String({ description: "What to search for on the web" }),

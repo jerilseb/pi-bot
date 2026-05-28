@@ -14,7 +14,7 @@ import {
 	truncateHead,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import TurndownService from "turndown";
 
 const FetchParams = Type.Object({

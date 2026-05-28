@@ -55,7 +55,7 @@ export interface IncomingPrompt {
 	chatId: string;
 	text: string;
 	attachments: Attachment[];
-	source?: "telegram" | "heartbeat";
+	source?: "telegram" | "heartbeat" | "cron";
 	suppressNoop?: boolean;
 }
 

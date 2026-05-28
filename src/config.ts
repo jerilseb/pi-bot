@@ -111,6 +111,7 @@ export const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, "skills");
 export const FILES_DIR = path.join(PROJECT_ROOT, "files");
 export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, "system.md");
 export const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
+export const CRON_JOBS_PATH = path.join(FILES_DIR, "cron-jobs.json");
 
 export const HEARTBEAT_ENABLED = true;
 export const HEARTBEAT_INTERVAL_MS =
@@ -118,3 +119,4 @@ export const HEARTBEAT_INTERVAL_MS =
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, "heartbeat.md");
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, "heartbeat-state.md");
 export const HEARTBEAT_NOOP = "__HEARTBEAT_NOOP__";
+export const CRON_NOOP = "__CRON_NOOP__";

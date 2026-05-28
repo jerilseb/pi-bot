@@ -26,6 +26,7 @@ import {
 	SEND_TOOL_CALLS,
 	TMP_DIR,
 } from "./src/config.ts";
+import { createCronController, cronStatusText } from "./src/cron.ts";
 import {
 	createHeartbeatController,
 	heartbeatStatusText,
@@ -88,12 +89,20 @@ const chats = new Map<string, ChatState>();
 let offset = 0;
 let running = true;
 
+const isChatBusy = (chatId: string): boolean => {
+	const chat = chats.get(chatId);
+	return Boolean(chat?.processing || (chat?.queue.length ?? 0) > 0);
+};
+
 const heartbeat = createHeartbeatController({
 	handleIncoming,
-	isChatBusy: (chatId) => {
-		const chat = chats.get(chatId);
-		return Boolean(chat?.processing || (chat?.queue.length ?? 0) > 0);
-	},
+	isChatBusy,
+	isRunning: () => running,
+});
+
+const cron = createCronController({
+	handleIncoming,
+	isChatBusy,
 	isRunning: () => running,
 });
 
@@ -218,6 +227,7 @@ async function handleCommand(chat: ChatState, text: string): Promise<boolean> {
 				`- Voice note tool: ${voiceStatusText()}`,
 				`- Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`,
 				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
+				`- ${cronStatusText()}`,
 			].join("\n"),
 		);
 		return true;
@@ -335,11 +345,14 @@ async function processQueue(chat: ChatState): Promise<void> {
 		resetIdleTimer(chat);
 
 		const typing =
-			prompt.source === "heartbeat"
+			prompt.source === "heartbeat" || prompt.source === "cron"
 				? { stop: () => undefined }
 				: startTyping(prompt.chatId);
 		try {
-			const logLabel = prompt.source === "heartbeat" ? "heartbeat" : "prompt";
+			const logLabel =
+				prompt.source === "heartbeat" || prompt.source === "cron"
+					? prompt.source
+					: "prompt";
 			console.log(
 				`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`,
 			);
@@ -379,9 +392,11 @@ async function pollTelegram(): Promise<void> {
 	console.log(`Voice note tool: ${voiceStatusText()}`);
 	console.log(`Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`);
 	console.log(heartbeatStatusText());
+	console.log(cronStatusText());
 
 	await registerBotCommands();
 	heartbeat.start();
+	cron.start();
 	await notifyAppStarted();
 
 	while (running) {
@@ -433,7 +448,7 @@ function notifyToolCall(
 	notification: string,
 	source: IncomingPrompt["source"],
 ): void {
-	if (source === "heartbeat") return;
+	if (source === "heartbeat" || source === "cron") return;
 	void sendTelegramMessage(chatId, notification).catch((error) => {
 		console.error(
 			`[${chatId}] failed to send tool notification:`,
@@ -457,6 +472,7 @@ async function shutdown(): Promise<void> {
 	running = false;
 	console.log("Shutting down...");
 	heartbeat.stop();
+	cron.stop();
 	for (const chat of chats.values()) {
 		if (chat.idleTimer) clearTimeout(chat.idleTimer);
 		chat.pi.cleanup();
