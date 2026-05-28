@@ -7,14 +7,6 @@ description: Interactive browser automation via Chrome DevTools Protocol. Use wh
 
 Chrome DevTools Protocol tools for agent-assisted web automation. These tools connect to Chrome running on `:9222` with remote debugging enabled.
 
-## Setup
-
-Run once before first use:
-
-```bash
-cd {baseDir}/browser-tools
-npm install
-```
 
 ## Start Chrome
 
