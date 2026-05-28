@@ -81,9 +81,11 @@ export const ALLOWED_CHAT_ID =
 	process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? "";
 
 export const IDLE_TIMEOUT_MS =
-	Number(process.env.PI_CHANNEL_IDLE_TIMEOUT_MINUTES ?? 30) * 60_000;
-export const MAX_QUEUE_PER_CHAT = Number(
-	process.env.PI_CHANNEL_MAX_QUEUE_PER_CHAT ?? 5,
+	envNumber(process.env.PI_CHANNEL_IDLE_TIMEOUT_MINUTES, 30, 1) * 60_000;
+export const MAX_QUEUE_PER_CHAT = envNumber(
+	process.env.PI_CHANNEL_MAX_QUEUE_PER_CHAT,
+	5,
+	1,
 );
 export const TELEGRAM_API = BOT_TOKEN
 	? `https://api.telegram.org/bot${BOT_TOKEN}`

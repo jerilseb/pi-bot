@@ -15,21 +15,22 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	MEMORY_PATH,
+	normalizeOpenRouterModelName,
 	readActiveOpenRouterModel,
 	SEND_LOCAL_DOCUMENTS,
 	SEND_LOCAL_IMAGES,
 	writeActiveOpenRouterModel,
 } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
-
-export interface PiRunPromptOptions {
-	onToolCall?: (notification: string) => void;
-}
 import {
 	telegramDocumentExtension,
 	telegramImageExtension,
 } from "./uploads.ts";
 import { telegramVoiceNoteExtension } from "./voice.ts";
+
+export interface PiRunPromptOptions {
+	onToolCall?: (notification: string) => void;
+}
 
 export interface PiRuntime {
 	modelName: string;
@@ -84,10 +85,6 @@ function resolveOpenRouterModel(
 		throw new Error(`Unknown OpenRouter model: ${normalizedModelName}`);
 	}
 	return model;
-}
-
-function normalizeOpenRouterModelName(modelName: string): string {
-	return modelName.trim().replace(/^openrouter\//, "");
 }
 
 export class SdkPiSession {
@@ -312,7 +309,7 @@ function skillNameForReadTool(
 ): string | null {
 	if (event.toolName !== "read") return null;
 
-	const readPath = extractReadPath(event.args);
+	const readPath = extractToolPath(event.args);
 	if (!readPath) return null;
 
 	const normalizedReadPath = normalizeFilePath(readPath, cwd);
@@ -323,10 +320,6 @@ function skillNameForReadTool(
 		);
 
 	return skill?.name ?? null;
-}
-
-function extractReadPath(args: unknown): string | null {
-	return extractToolPath(args);
 }
 
 function extractToolPath(args: unknown): string | null {
