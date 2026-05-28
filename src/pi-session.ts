@@ -13,7 +13,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { SEND_LOCAL_DOCUMENTS, SEND_LOCAL_IMAGES } from "./config.ts";
+import { MEMORY_PATH, SEND_LOCAL_DOCUMENTS, SEND_LOCAL_IMAGES } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
 
 export interface PiRunPromptOptions {
@@ -240,8 +240,22 @@ function formatToolStartNotification(
 	session: AgentSession,
 	cwd: string,
 ): string {
+	if (isMemoryEditTool(event, cwd)) return "🧠 memory updated";
+
 	const skillName = skillNameForReadTool(event, session, cwd);
 	return skillName ? `📗 ${skillName}` : `🛠 ${event.toolName}`;
+}
+
+function isMemoryEditTool(
+	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+	cwd: string,
+): boolean {
+	if (event.toolName !== "edit") return false;
+
+	const editPath = extractToolPath(event.args);
+	if (!editPath) return false;
+
+	return normalizeFilePath(editPath, cwd) === normalizeFilePath(MEMORY_PATH, cwd);
 }
 
 function skillNameForReadTool(
@@ -265,6 +279,10 @@ function skillNameForReadTool(
 }
 
 function extractReadPath(args: unknown): string | null {
+	return extractToolPath(args);
+}
+
+function extractToolPath(args: unknown): string | null {
 	if (!args || typeof args !== "object" || !("path" in args)) return null;
 	return typeof args.path === "string" ? args.path : null;
 }
