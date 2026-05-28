@@ -1,13 +1,12 @@
+import * as fs from "node:fs";
 import {
 	ALLOWED_CHAT_ID,
 	HEARTBEAT_ENABLED,
 	HEARTBEAT_FILE_PATH,
 	HEARTBEAT_INTERVAL_MS,
+	HEARTBEAT_NOOP,
+	HEARTBEAT_STATE_PATH,
 } from "./config.ts";
-import {
-	buildHeartbeatPrompt,
-	readHeartbeatInstructions,
-} from "./resources.ts";
 import type { IncomingPrompt } from "./types.ts";
 
 export interface HeartbeatController {
@@ -68,4 +67,34 @@ export function heartbeatStatusText(): string {
 			? `${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s (${HEARTBEAT_FILE_PATH})`
 			: "off"
 	}`;
+}
+
+function readHeartbeatInstructions(): {
+	filePath: string;
+	instructions: string;
+} {
+	if (!fs.existsSync(HEARTBEAT_FILE_PATH)) {
+		return { filePath: HEARTBEAT_FILE_PATH, instructions: "" };
+	}
+
+	const content = fs.readFileSync(HEARTBEAT_FILE_PATH, "utf8");
+	const trimmed = content.trim();
+	const body = trimmed.replace(/^#\s*(?:Heartbeat|Heatbeat)\s*/i, "").trim();
+	return { filePath: HEARTBEAT_FILE_PATH, instructions: body ? trimmed : "" };
+}
+
+function buildHeartbeatPrompt(instructions: string, filePath: string): string {
+	return [
+		"This is a scheduled heartbeat run for the Telegram assistant.",
+		`Heartbeat file: ${filePath}`,
+		"",
+		"Read and follow these heartbeat instructions:",
+		"<heartbeat_instructions>",
+		instructions,
+		"</heartbeat_instructions>",
+		"",
+		`If you need durable heartbeat state, create or update ${HEARTBEAT_STATE_PATH}.`,
+		"Only notify the Telegram user when there is something important, actionable, or explicitly requested by the heartbeat instructions.",
+		`If there is nothing user-visible to report, respond exactly: ${HEARTBEAT_NOOP}`,
+	].join("\n");
 }

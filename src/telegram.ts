@@ -1,4 +1,5 @@
 import { TELEGRAM_API, TELEGRAM_MAX_MESSAGE } from "./config.ts";
+import { errorMessage } from "./util.ts";
 
 export async function registerBotCommands(): Promise<void> {
 	try {
@@ -22,7 +23,7 @@ export async function registerBotCommands(): Promise<void> {
 	} catch (error) {
 		console.error(
 			"Failed to register bot commands:",
-			error instanceof Error ? error.message : String(error),
+			errorMessage(error),
 		);
 	}
 }
@@ -273,8 +274,7 @@ function renderSanitizedAttrs(tag: string, raw: string): string | null {
 }
 
 function isTelegramHtmlParseError(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : String(error);
-	return message.toLowerCase().includes("can't parse entities");
+	return errorMessage(error).toLowerCase().includes("can't parse entities");
 }
 
 type SplitAtom =

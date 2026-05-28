@@ -16,6 +16,7 @@ import type {
 	TelegramMessage,
 	TranscriptionResult,
 } from "./types.ts";
+import { errorMessage } from "./util.ts";
 
 export async function toIncomingPrompt(
 	message: TelegramMessage,
@@ -219,7 +220,7 @@ async function transcribeWithElevenLabs(
 	} catch (error) {
 		return {
 			ok: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: errorMessage(error),
 		};
 	}
 }

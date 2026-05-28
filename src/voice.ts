@@ -29,6 +29,12 @@ export function voiceNotesConfigured(): boolean {
 	return Boolean(ELEVENLABS_API_KEY && ELEVENLABS_TTS_VOICE_ID);
 }
 
+export function voiceStatusText(): string {
+	return voiceNotesConfigured()
+		? "registered and configured (ElevenLabs)"
+		: "registered, but missing ELEVENLABS_API_KEY or ELEVENLABS_TTS_VOICE_ID";
+}
+
 export function telegramVoiceNoteExtension(
 	chatId: string,
 ): (pi: ExtensionAPI) => void {

@@ -11,6 +11,7 @@ import {
 	type CronJob,
 } from "./cron-store.ts";
 import type { IncomingPrompt } from "./types.ts";
+import { errorMessage } from "./util.ts";
 
 const MAX_TIMER_MS = 60 * 1000;
 const BUSY_DEFER_MS = 60 * 1000;
@@ -41,7 +42,7 @@ export function createCronController(options: {
 		} catch (error) {
 			console.error(
 				"Cron scheduler failed to read jobs:",
-				error instanceof Error ? error.message : String(error),
+				errorMessage(error),
 			);
 			timer = setTimeout(scheduleNext, MAX_TIMER_MS);
 			return;
@@ -74,7 +75,7 @@ export function createCronController(options: {
 		} catch (error) {
 			console.error(
 				"Cron scheduler failed:",
-				error instanceof Error ? error.message : String(error),
+				errorMessage(error),
 			);
 			scheduleNext();
 			return;
@@ -140,9 +141,7 @@ export function cronStatusText(): string {
 		const enabled = jobs.filter((job) => job.enabled).length;
 		return `Cron: ${enabled}/${jobs.length} enabled (${CRON_JOBS_PATH})`;
 	} catch (error) {
-		return `Cron: error reading ${CRON_JOBS_PATH}: ${
-			error instanceof Error ? error.message : String(error)
-		}`;
+		return `Cron: error reading ${CRON_JOBS_PATH}: ${errorMessage(error)}`;
 	}
 }
 
