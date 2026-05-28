@@ -1,4 +1,5 @@
 import "dotenv/config";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -24,17 +25,36 @@ export function resolveConfigPath(value: string): string {
 	return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
 
-function normalizeOpenRouterModelName(modelName: string): string {
+export function normalizeOpenRouterModelName(modelName: string): string {
 	return modelName.trim().replace(/^openrouter\//, "");
 }
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
+export const ACTIVE_MODEL_PATH = path.join(PROJECT_ROOT, ".active_model");
+
+export function readActiveOpenRouterModel(): string | null {
+	if (!fs.existsSync(ACTIVE_MODEL_PATH)) return null;
+	const modelName = normalizeOpenRouterModelName(
+		fs.readFileSync(ACTIVE_MODEL_PATH, "utf8"),
+	);
+	return modelName || null;
+}
+
+export function writeActiveOpenRouterModel(modelName: string): void {
+	fs.writeFileSync(
+		ACTIVE_MODEL_PATH,
+		`${normalizeOpenRouterModelName(modelName)}\n`,
+		"utf8",
+	);
+}
 
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
-export const OPENROUTER_MODEL = normalizeOpenRouterModelName(
+export const DEFAULT_OPENROUTER_MODEL = normalizeOpenRouterModelName(
 	process.env.OPENROUTER_MODEL ?? "",
 );
+export const OPENROUTER_MODEL =
+	readActiveOpenRouterModel() ?? DEFAULT_OPENROUTER_MODEL;
 const configuredAllowedOpenRouterModels = (
 	process.env.ALLOWED_OPENROUTER_MODELS ?? ""
 )

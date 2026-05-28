@@ -13,7 +13,13 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { MEMORY_PATH, SEND_LOCAL_DOCUMENTS, SEND_LOCAL_IMAGES } from "./config.ts";
+import {
+	MEMORY_PATH,
+	readActiveOpenRouterModel,
+	SEND_LOCAL_DOCUMENTS,
+	SEND_LOCAL_IMAGES,
+	writeActiveOpenRouterModel,
+} from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
 
 export interface PiRunPromptOptions {
@@ -95,8 +101,11 @@ export class SdkPiSession {
 	constructor(runtime: PiRuntime, chatId: string) {
 		this.runtime = runtime;
 		this.chatId = chatId;
-		this.selectedModelName = runtime.modelName;
-		this.selectedModel = runtime.model;
+		this.selectedModelName = readActiveOpenRouterModel() ?? runtime.modelName;
+		this.selectedModel = resolveOpenRouterModel(
+			runtime.modelRegistry,
+			this.selectedModelName,
+		);
 	}
 
 	get modelName(): string {
@@ -123,6 +132,7 @@ export class SdkPiSession {
 			await this.session.setModel(model);
 		}
 
+		writeActiveOpenRouterModel(normalizedModelName);
 		this.selectedModelName = normalizedModelName;
 		this.selectedModel = model;
 	}

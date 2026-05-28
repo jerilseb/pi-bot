@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+	ACTIVE_MODEL_PATH,
 	EXTENSION_ENTRYPOINT_EXTS,
 	FILES_DIR,
 	HEARTBEAT_FILE_PATH,
@@ -117,6 +118,23 @@ function appendMemoryToSystemPrompt(systemPrompt: string): string {
 export function memorySystemPromptExtension(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", async (event) => ({
 		systemPrompt: appendMemoryToSystemPrompt(event.systemPrompt),
+	}));
+}
+
+function appendActiveModelToSystemPrompt(systemPrompt: string): string {
+	return [
+		systemPrompt,
+		"",
+		"## Active model state",
+		`The bot stores the active OpenRouter model in ${ACTIVE_MODEL_PATH}.`,
+		"Read that file if you need to know which model is currently active.",
+		"When the Telegram user changes models with /models, the bot updates this file.",
+	].join("\n");
+}
+
+export function activeModelSystemPromptExtension(pi: ExtensionAPI): void {
+	pi.on("before_agent_start", async (event) => ({
+		systemPrompt: appendActiveModelToSystemPrompt(event.systemPrompt),
 	}));
 }
 

@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import { promisify } from "node:util";
 import {
+	ACTIVE_MODEL_PATH,
 	ALLOWED_CHAT_ID,
 	ALLOWED_OPENROUTER_MODELS,
 	BOT_TOKEN,
@@ -26,6 +27,7 @@ import {
 	PROJECT_SKILLS_DIR,
 	SEND_TOOL_CALLS,
 	TMP_DIR,
+	writeActiveOpenRouterModel,
 } from "./src/config.ts";
 import { createCronController, cronStatusText } from "./src/cron.ts";
 import {
@@ -40,6 +42,7 @@ import {
 	SdkPiSession,
 } from "./src/pi-session.ts";
 import {
+	activeModelSystemPromptExtension,
 	discoverExtensionPaths,
 	discoverSkillPaths,
 	ensureMemoryFile,
@@ -78,6 +81,7 @@ interface ChatState {
 }
 
 validateEnvironment();
+writeActiveOpenRouterModel(OPENROUTER_MODEL);
 
 let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
@@ -89,7 +93,11 @@ const PI_RUNTIME: PiRuntime = createPiRuntime({
 	getExtensionPaths: () => EXTENSION_PATHS,
 	getSkillPaths: () => SKILL_PATHS,
 	systemPromptOverride: () => readSystemPrompt(),
-	extensionFactories: [memorySystemPromptExtension, protectedEnvToolAccessExtension],
+	extensionFactories: [
+		memorySystemPromptExtension,
+		activeModelSystemPromptExtension,
+		protectedEnvToolAccessExtension,
+	],
 });
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -140,7 +148,7 @@ function validateEnvironment(): void {
 
 	if (!ALLOWED_OPENROUTER_MODELS.includes(OPENROUTER_MODEL)) {
 		console.error(
-			"OPENROUTER_MODEL must be included in ALLOWED_OPENROUTER_MODELS.",
+			`Active OpenRouter model (${OPENROUTER_MODEL}) must be included in ALLOWED_OPENROUTER_MODELS. Check ${ACTIVE_MODEL_PATH} or OPENROUTER_MODEL.`,
 		);
 		process.exit(1);
 	}
