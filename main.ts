@@ -43,6 +43,7 @@ import {
 	discoverSkillPaths,
 	ensureMemoryFile,
 	memorySystemPromptExtension,
+	protectedEnvToolAccessExtension,
 	readSystemPrompt,
 } from "./src/resources.ts";
 import {
@@ -79,7 +80,7 @@ const PI_RUNTIME: PiRuntime = createPiRuntime({
 	getExtensionPaths: () => EXTENSION_PATHS,
 	getSkillPaths: () => SKILL_PATHS,
 	systemPromptOverride: () => readSystemPrompt(),
-	extensionFactories: [memorySystemPromptExtension],
+	extensionFactories: [memorySystemPromptExtension, protectedEnvToolAccessExtension],
 });
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
