@@ -21,5 +21,11 @@ function isNoopResponse(text: string): boolean {
 		.replace(/^```(?:text)?\s*/i, "")
 		.replace(/\s*```$/i, "")
 		.trim();
-	return normalized === HEARTBEAT_NOOP || normalized === CRON_NOOP;
+
+	return (
+		normalized.includes(HEARTBEAT_NOOP) ||
+		normalized.includes(CRON_NOOP) ||
+		normalized.includes("HEARTBEAT_NOOP") ||
+		normalized.includes("CRON_NOOP")
+	);
 }
