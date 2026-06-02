@@ -23,7 +23,7 @@ type CommandHandler = (ctx: CommandContext) => Promise<void>;
 const HELP_TEXT = [
 	"Telegram → Pi bridge commands:",
 	"/status — show this chat session status",
-	"/models — choose an allowed OpenRouter model",
+	"/models — choose an allowed model",
 	"/abort — abort the current Pi response",
 	"/new — clear this chat's Pi conversation",
 	"/reload — re-scan extensions/skills and reset all chats",
@@ -54,7 +54,7 @@ const COMMANDS: Record<string, CommandHandler> = {
 				`- Messages: ${chat.messageCount}`,
 				`- Queue: ${chat.queue.length}`,
 				`- Uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
-				`- Model: openrouter/${chat.pi.modelName}`,
+				`- Model: ${chat.pi.modelName}`,
 				`- Voice note tool: ${voiceStatusText()}`,
 				`- Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`,
 				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
@@ -74,9 +74,7 @@ const COMMANDS: Record<string, CommandHandler> = {
 
 		await sendTelegramInlineKeyboard(
 			chat.chatId,
-			[`Current model: openrouter/${chat.pi.modelName}`, "Choose a model:"].join(
-				"\n",
-			),
+			[`Current model: ${chat.pi.modelName}`, "Choose a model:"].join("\n"),
 			buildModelInlineKeyboard(),
 		);
 	},

@@ -1,5 +1,5 @@
 import type { ChatRegistry } from "./chat-session.ts";
-import { ALLOWED_CHAT_ID, ALLOWED_OPENROUTER_MODELS } from "./config.ts";
+import { ALLOWED_CHAT_ID, ALLOWED_MODELS } from "./config.ts";
 import {
 	answerTelegramCallbackQuery,
 	editTelegramMessageText,
@@ -14,7 +14,7 @@ const MODEL_CALLBACK_CANCEL = `${MODEL_CALLBACK_PREFIX}cancel`;
 
 export function buildModelInlineKeyboard(): InlineKeyboardButton[][] {
 	return [
-		...ALLOWED_OPENROUTER_MODELS.map((model, index) => [
+		...ALLOWED_MODELS.map((model, index) => [
 			{ text: model, callback_data: `${MODEL_CALLBACK_PREFIX}${index}` },
 		]),
 		[{ text: "Cancel", callback_data: MODEL_CALLBACK_CANCEL }],
@@ -49,7 +49,7 @@ export async function handleModelCallbackQuery(
 
 	const modelIndex = Number(data.slice(MODEL_CALLBACK_PREFIX.length));
 	const modelName = Number.isInteger(modelIndex)
-		? ALLOWED_OPENROUTER_MODELS[modelIndex]
+		? ALLOWED_MODELS[modelIndex]
 		: undefined;
 	if (!modelName) {
 		await answerTelegramCallbackQuery(query.id, "Unknown model.");
@@ -73,12 +73,12 @@ export async function handleModelCallbackQuery(
 	}
 
 	try {
-		await chat.pi.setOpenRouterModel(modelName);
+		await chat.pi.setModel(modelName);
 		await answerTelegramCallbackQuery(query.id, "Model switched.");
 		await editTelegramMessageText(
 			chatId,
 			query.message.message_id,
-			`✅ Switched to openrouter/${chat.pi.modelName}`,
+			`✅ Switched to ${chat.pi.modelName}`,
 		);
 	} catch (error) {
 		await answerTelegramCallbackQuery(query.id, "Model switch failed.");

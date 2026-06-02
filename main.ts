@@ -6,7 +6,7 @@
  * Polls Telegram, keeps one Pi SDK session per chat, queues prompts per chat,
  * and sends Pi's final response back to Telegram. Supports text, images,
  * downloaded files, optional audio transcription, local extensions/skills,
- * generated file uploads, and scheduled heartbeat prompts.
+ * generated file uploads, model refs across Pi providers, and scheduled heartbeat prompts.
  *
  * This module is the orchestrator: it wires the pieces together and owns the
  * polling loop, per-chat queue, and process lifecycle. Self-contained concerns
@@ -20,16 +20,15 @@ import { handleCommand } from "./src/commands.ts";
 import {
 	ACTIVE_MODEL_PATH,
 	ALLOWED_CHAT_ID,
-	ALLOWED_OPENROUTER_MODELS,
+	ALLOWED_MODELS,
 	BOT_TOKEN,
 	MAX_QUEUE_PER_CHAT,
-	OPENROUTER_API_KEY,
-	OPENROUTER_MODEL,
+	MODEL,
 	PROJECT_EXTENSIONS_DIR,
 	PROJECT_SKILLS_DIR,
 	SEND_TOOL_CALLS,
 	TMP_DIR,
-	writeActiveOpenRouterModel,
+	writeActiveModel,
 } from "./src/config.ts";
 import { createCronController, cronStatusText } from "./src/cron.ts";
 import { discoverExtensionPaths, discoverSkillPaths } from "./src/discovery.ts";
@@ -60,15 +59,14 @@ import { errorMessage, isBackgroundSource } from "./src/util.ts";
 import { voiceStatusText } from "./src/voice.ts";
 
 validateEnvironment();
-writeActiveOpenRouterModel(OPENROUTER_MODEL);
+writeActiveModel(MODEL);
 
 let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
 const PI_RUNTIME: PiRuntime = createPiRuntime({
 	cwd: process.cwd(),
-	openRouterApiKey: OPENROUTER_API_KEY,
-	openRouterModel: OPENROUTER_MODEL,
+	model: MODEL,
 	getExtensionPaths: () => EXTENSION_PATHS,
 	getSkillPaths: () => SKILL_PATHS,
 	systemPromptOverride: () => readSystemPrompt(),
@@ -101,28 +99,21 @@ const cron = createCronController({
 function validateEnvironment(): void {
 	if (!BOT_TOKEN) {
 		console.error(
-			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-... OPENROUTER_MODEL=openai/gpt-5.4-mini node main.ts",
+			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc MODEL=openrouter/openai/gpt-5.4-mini node main.ts",
 		);
 		process.exit(1);
 	}
 
-	if (!OPENROUTER_API_KEY) {
+	if (!MODEL) {
 		console.error(
-			"Missing OPENROUTER_API_KEY. This bridge only uses OpenRouter provider models.",
+			"Missing MODEL. Example: MODEL=openrouter/openai/gpt-5.4-mini",
 		);
 		process.exit(1);
 	}
 
-	if (!OPENROUTER_MODEL) {
+	if (!ALLOWED_MODELS.includes(MODEL)) {
 		console.error(
-			"Missing OPENROUTER_MODEL. Example: OPENROUTER_MODEL=openai/gpt-5.4-mini",
-		);
-		process.exit(1);
-	}
-
-	if (!ALLOWED_OPENROUTER_MODELS.includes(OPENROUTER_MODEL)) {
-		console.error(
-			`Active OpenRouter model (${OPENROUTER_MODEL}) must be included in ALLOWED_OPENROUTER_MODELS. Check ${ACTIVE_MODEL_PATH} or OPENROUTER_MODEL.`,
+			`Active model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or MODEL.`,
 		);
 		process.exit(1);
 	}
@@ -273,7 +264,6 @@ async function pollTelegram(): Promise<void> {
 function logStartupBanner(): void {
 	console.log("Telegram → Pi bridge started");
 	console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
-	console.log("Provider: openrouter");
 	console.log(`Model: ${PI_RUNTIME.modelName}`);
 	console.log("Pi runtime: SDK");
 	console.log(

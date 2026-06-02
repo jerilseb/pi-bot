@@ -8,7 +8,7 @@ It is basically a personal AI assistant in Telegram, with support for images, fi
 
 - Polls the Telegram Bot API for messages
 - Keeps a separate Pi conversation per Telegram chat
-- Uses OpenRouter models through Pi
+- Uses Pi model refs such as `openrouter/openai/gpt-5.4-mini` or `openai-codex/gpt-5.5`
 - Handles photos as image attachments
 - Downloads documents/audio/video to local temp files for Pi to inspect
 - Can transcribe voice/audio with ElevenLabs
@@ -29,8 +29,9 @@ Create a `.env` file:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:your-telegram-token
+MODEL=openrouter/openai/gpt-5.4-mini
+ALLOWED_MODELS=openrouter/openai/gpt-5.4-mini,openrouter/openai/gpt-5.5,openai-codex/gpt-5.5
 OPENROUTER_API_KEY=sk-or-your-key
-OPENROUTER_MODEL=openai/gpt-5.4-mini
 
 # required: the only Telegram chat allowed to use this bot
 TELEGRAM_ALLOWED_CHAT_ID=123456789
@@ -50,6 +51,8 @@ npm start
 
 If everything is happy, the bridge logs will show the model, enabled extensions, and skills.
 
+Model refs use `provider/model-id` form. OpenRouter model IDs can contain slashes, so include the provider prefix, e.g. `openrouter/openai/gpt-5.4-mini`. For `openai-codex/...`, authenticate through Pi first with `/login openai-codex` so credentials are available in `~/.pi/agent/auth.json`.
+
 ## Deployment
 
 This bot uses Telegram long polling, so it does **not** need a public HTTPS URL or webhook. Deploy it as one long-running Node.js process on a VPS, home server, or any process host that allows outbound HTTPS.
@@ -61,7 +64,7 @@ git clone <your-repo-url> pi-bot
 cd pi-bot
 npm ci
 cp .env.example .env
-# edit .env with your Telegram/OpenRouter keys and TELEGRAM_ALLOWED_CHAT_ID
+# edit .env with your Telegram/model provider keys and TELEGRAM_ALLOWED_CHAT_ID
 npm start
 ```
 

@@ -14,12 +14,15 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+	formatModelRef,
 	MEMORY_PATH,
-	normalizeOpenRouterModelName,
-	readActiveOpenRouterModel,
+	OPENAI_CODEX_API_KEY,
+	OPENROUTER_API_KEY,
+	parseModelRef,
 	SEND_LOCAL_DOCUMENTS,
 	SEND_LOCAL_IMAGES,
-	writeActiveOpenRouterModel,
+	writeActiveModel,
+	type ModelRef,
 } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
 import {
@@ -47,22 +50,28 @@ export interface PiRuntime {
 
 export function createPiRuntime(options: {
 	cwd: string;
-	openRouterApiKey: string;
-	openRouterModel: string;
+	model: string;
 	getExtensionPaths: () => string[];
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
 	extensionFactories?: Array<(pi: ExtensionAPI) => void>;
 }): PiRuntime {
 	const authStorage = AuthStorage.create();
-	authStorage.setRuntimeApiKey("openrouter", options.openRouterApiKey);
+	if (OPENROUTER_API_KEY) {
+		authStorage.setRuntimeApiKey("openrouter", OPENROUTER_API_KEY);
+	}
+	if (OPENAI_CODEX_API_KEY) {
+		authStorage.setRuntimeApiKey("openai-codex", OPENAI_CODEX_API_KEY);
+	}
 
 	const modelRegistry = ModelRegistry.create(authStorage);
-	const model = resolveOpenRouterModel(modelRegistry, options.openRouterModel);
+	const selectedModelRef = parseModelRef(options.model);
+	const model = resolveModel(modelRegistry, selectedModelRef);
+	ensureConfiguredAuth(modelRegistry, model, selectedModelRef);
 	const settingsManager = SettingsManager.create(options.cwd, getAgentDir());
 
 	return {
-		modelName: options.openRouterModel,
+		modelName: formatModelRef(selectedModelRef),
 		model,
 		authStorage,
 		modelRegistry,
@@ -75,16 +84,25 @@ export function createPiRuntime(options: {
 	};
 }
 
-function resolveOpenRouterModel(
+function resolveModel(
 	modelRegistry: ReturnType<typeof ModelRegistry.create>,
-	modelName: string,
+	modelRef: ModelRef,
 ): Model<Api> {
-	const normalizedModelName = normalizeOpenRouterModelName(modelName);
-	const model = modelRegistry.find("openrouter", normalizedModelName);
+	const model = modelRegistry.find(modelRef.provider, modelRef.model);
 	if (!model) {
-		throw new Error(`Unknown OpenRouter model: ${normalizedModelName}`);
+		throw new Error(`Unknown model: ${formatModelRef(modelRef)}`);
 	}
 	return model;
+}
+
+function ensureConfiguredAuth(
+	modelRegistry: ReturnType<typeof ModelRegistry.create>,
+	model: Model<Api>,
+	modelRef: ModelRef,
+): void {
+	if (!modelRegistry.hasConfiguredAuth(model)) {
+		throw new Error(`No auth configured for ${formatModelRef(modelRef)}`);
+	}
 }
 
 export class SdkPiSession {
@@ -92,34 +110,25 @@ export class SdkPiSession {
 	private starting: Promise<AgentSession> | null = null;
 	private runtime: PiRuntime;
 	private chatId: string;
-	private selectedModelName: string;
+	private selectedModelRef: ModelRef;
 	private selectedModel: Model<Api>;
 
 	constructor(runtime: PiRuntime, chatId: string) {
 		this.runtime = runtime;
 		this.chatId = chatId;
-		this.selectedModelName = readActiveOpenRouterModel() ?? runtime.modelName;
-		this.selectedModel = resolveOpenRouterModel(
-			runtime.modelRegistry,
-			this.selectedModelName,
-		);
+		this.selectedModelRef = parseModelRef(runtime.modelName);
+		this.selectedModel = resolveModel(runtime.modelRegistry, this.selectedModelRef);
 	}
 
 	get modelName(): string {
-		return this.selectedModelName;
+		return formatModelRef(this.selectedModelRef);
 	}
 
-	async setOpenRouterModel(modelName: string): Promise<void> {
-		const normalizedModelName = normalizeOpenRouterModelName(modelName);
+	async setModel(modelName: string): Promise<void> {
+		const modelRef = parseModelRef(modelName);
 		this.runtime.modelRegistry.refresh();
-		const model = resolveOpenRouterModel(
-			this.runtime.modelRegistry,
-			normalizedModelName,
-		);
-
-		if (!this.runtime.modelRegistry.hasConfiguredAuth(model)) {
-			throw new Error(`No OpenRouter API key configured for ${normalizedModelName}`);
-		}
+		const model = resolveModel(this.runtime.modelRegistry, modelRef);
+		ensureConfiguredAuth(this.runtime.modelRegistry, model, modelRef);
 
 		if (this.session?.isStreaming) {
 			throw new Error("Cannot switch models while Pi is responding");
@@ -129,8 +138,8 @@ export class SdkPiSession {
 			await this.session.setModel(model);
 		}
 
-		writeActiveOpenRouterModel(normalizedModelName);
-		this.selectedModelName = normalizedModelName;
+		writeActiveModel(formatModelRef(modelRef));
+		this.selectedModelRef = modelRef;
 		this.selectedModel = model;
 	}
 

@@ -3,6 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+export interface ModelRef {
+	provider: string;
+	model: string;
+}
+
 export function envFlag(
 	value: string | undefined,
 	defaultValue: boolean,
@@ -25,49 +30,96 @@ export function resolveConfigPath(value: string): string {
 	return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
 
-export function normalizeOpenRouterModelName(modelName: string): string {
-	return modelName.trim().replace(/^openrouter\//, "");
+export function parseModelRef(value: string): ModelRef {
+	const normalized = normalizeModelRef(value);
+	const slash = normalized.indexOf("/");
+	if (slash <= 0 || slash === normalized.length - 1) {
+		throw new Error(
+			`Model must be in provider/model form, e.g. openrouter/openai/gpt-5.4-mini: ${value}`,
+		);
+	}
+	return {
+		provider: normalized.slice(0, slash),
+		model: normalized.slice(slash + 1),
+	};
+}
+
+export function normalizeModelRef(
+	value: string,
+	defaultProvider?: string,
+): string {
+	const trimmed = value.trim();
+	if (!trimmed) return "";
+	if (!defaultProvider || trimmed.startsWith(`${defaultProvider}/`)) {
+		return trimmed;
+	}
+	return `${defaultProvider}/${trimmed}`;
+}
+
+export function formatModelRef(ref: ModelRef): string {
+	return `${ref.provider}/${ref.model}`;
 }
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 export const ACTIVE_MODEL_PATH = path.join(PROJECT_ROOT, ".active_model");
 
-export function readActiveOpenRouterModel(): string | null {
+function readActiveModelRaw(): string | null {
 	if (!fs.existsSync(ACTIVE_MODEL_PATH)) return null;
-	const modelName = normalizeOpenRouterModelName(
-		fs.readFileSync(ACTIVE_MODEL_PATH, "utf8"),
-	);
-	return modelName || null;
+	return fs.readFileSync(ACTIVE_MODEL_PATH, "utf8").trim() || null;
 }
 
-export function writeActiveOpenRouterModel(modelName: string): void {
-	fs.writeFileSync(
-		ACTIVE_MODEL_PATH,
-		`${normalizeOpenRouterModelName(modelName)}\n`,
-		"utf8",
+function readActiveModel(
+	allowedModels: string[],
+	defaultModel: string,
+): string | null {
+	const raw = readActiveModelRaw();
+	if (!raw) return null;
+
+	const candidates = [normalizeModelRef(raw), normalizeModelRef(raw, "openrouter")]
+		.filter(Boolean)
+		.filter((model, index, models) => models.indexOf(model) === index);
+
+	return (
+		candidates.find((model) => allowedModels.includes(model)) ??
+		candidates.find((model) => model === defaultModel) ??
+		candidates[0] ??
+		null
 	);
+}
+
+export function writeActiveModel(model: string): void {
+	fs.writeFileSync(ACTIVE_MODEL_PATH, `${normalizeModelRef(model)}\n`, "utf8");
 }
 
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
-export const DEFAULT_OPENROUTER_MODEL = normalizeOpenRouterModelName(
-	process.env.OPENROUTER_MODEL ?? "",
+
+const modelEnvValue = process.env.MODEL ?? process.env.OPENROUTER_MODEL ?? "";
+const modelEnvDefaultProvider = process.env.MODEL ? undefined : "openrouter";
+export const DEFAULT_MODEL = normalizeModelRef(
+	modelEnvValue,
+	modelEnvDefaultProvider,
 );
-export const OPENROUTER_MODEL =
-	readActiveOpenRouterModel() ?? DEFAULT_OPENROUTER_MODEL;
-const configuredAllowedOpenRouterModels = (
-	process.env.ALLOWED_OPENROUTER_MODELS ?? ""
-)
+
+const allowedModelsEnvValue =
+	process.env.ALLOWED_MODELS ?? process.env.ALLOWED_OPENROUTER_MODELS ?? "";
+const allowedModelsDefaultProvider = process.env.ALLOWED_MODELS
+	? undefined
+	: "openrouter";
+const configuredAllowedModels = allowedModelsEnvValue
 	.split(",")
-	.map((model) => normalizeOpenRouterModelName(model))
+	.map((model) => normalizeModelRef(model, allowedModelsDefaultProvider))
 	.filter(Boolean);
-export const ALLOWED_OPENROUTER_MODELS =
-	configuredAllowedOpenRouterModels.length > 0
-		? configuredAllowedOpenRouterModels
-		: OPENROUTER_MODEL
-			? [OPENROUTER_MODEL]
+export const ALLOWED_MODELS =
+	configuredAllowedModels.length > 0
+		? configuredAllowedModels
+		: DEFAULT_MODEL
+			? [DEFAULT_MODEL]
 			: [];
+export const MODEL = readActiveModel(ALLOWED_MODELS, DEFAULT_MODEL) ?? DEFAULT_MODEL;
+
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
+export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? "";
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 export const ELEVENLABS_MODEL = "scribe_v2";
 export const ELEVENLABS_LANGUAGE = "en";

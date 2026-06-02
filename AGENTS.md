@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## Project overview
 
-`pi-bot` is a small Telegram bot that bridges Telegram chats to a Pi SDK session. It uses long polling, OpenRouter-backed Pi models, optional ElevenLabs voice features, local Pi extensions, and Pi skills.
+`pi-bot` is a small Telegram bot that bridges Telegram chats to a Pi SDK session. It uses long polling, Pi model refs (for example OpenRouter or OpenAI Codex), optional ElevenLabs voice features, local Pi extensions, and Pi skills.
 
 Key files:
 
@@ -46,7 +46,7 @@ npm run typecheck
 ## Environment and secrets
 
 - Never commit `.env` or real API keys/tokens.
-- Required runtime variables include `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `TELEGRAM_ALLOWED_CHAT_ID`.
+- Required runtime variables include `TELEGRAM_BOT_TOKEN`, `MODEL`, and `TELEGRAM_ALLOWED_CHAT_ID`; provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 - Optional integrations include ElevenLabs, Tavily, and KIE API keys; keep these secret.
 
 ## Operational notes

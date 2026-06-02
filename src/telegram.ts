@@ -11,7 +11,7 @@ export async function registerBotCommands(): Promise<void> {
 					{ command: "start", description: "Say hi" },
 					{ command: "help", description: "Show commands" },
 					{ command: "status", description: "Show chat session status" },
-					{ command: "models", description: "Switch OpenRouter model" },
+					{ command: "models", description: "Switch model" },
 					{ command: "abort", description: "Stop the current Pi response" },
 					{ command: "new", description: "Reset this chat's Pi conversation" },
 					{ command: "reload", description: "Re-scan extensions and skills" },
