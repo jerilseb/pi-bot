@@ -28,6 +28,8 @@ import {
 	PROJECT_SKILLS_DIR,
 	SEND_TOOL_CALLS,
 	TMP_DIR,
+	TOOL_CALL_BATCH_MAX_ITEMS,
+	TOOL_CALL_BATCH_MS,
 	writeActiveModel,
 } from "./src/config.ts";
 import { createCronController, cronStatusText } from "./src/cron.ts";
@@ -83,6 +85,14 @@ ensureMemoryFile();
 const chats = createChatRegistry(PI_RUNTIME);
 let offset = 0;
 let running = true;
+
+interface ToolNotificationBatch {
+	notifications: string[];
+	timer: ReturnType<typeof setTimeout> | null;
+	sending: Promise<void> | null;
+}
+
+const toolNotificationBatches = new Map<string, ToolNotificationBatch>();
 
 const heartbeat = createHeartbeatController({
 	handleIncoming,
@@ -191,6 +201,7 @@ async function processQueue(chat: ChatState): Promise<void> {
 							notifyToolCall(prompt.chatId, notification, prompt.source)
 					: undefined,
 			});
+			await flushToolNotifications(prompt.chatId);
 			await sendPiResponse(prompt.chatId, response, {
 				suppressNoop: prompt.suppressNoop,
 			});
@@ -198,6 +209,7 @@ async function processQueue(chat: ChatState): Promise<void> {
 		} catch (error) {
 			const message = errorMessage(error);
 			console.error(`[${prompt.chatId}] error:`, message);
+			await flushToolNotifications(prompt.chatId);
 			await sendTelegramMessage(prompt.chatId, `❌ ${sanitizeError(message)}`);
 		} finally {
 			typing.stop();
@@ -290,12 +302,107 @@ function notifyToolCall(
 	source: IncomingPrompt["source"],
 ): void {
 	if (isBackgroundSource(source)) return;
-	void sendTelegramMessage(chatId, notification).catch((error) => {
-		console.error(
-			`[${chatId}] failed to send tool notification:`,
-			errorMessage(error),
-		);
-	});
+
+	const batch = getToolNotificationBatch(chatId);
+	batch.notifications.push(notification);
+
+	if (batch.notifications.length >= TOOL_CALL_BATCH_MAX_ITEMS) {
+		void flushToolNotifications(chatId);
+		return;
+	}
+
+	if (TOOL_CALL_BATCH_MS <= 0) {
+		void flushToolNotifications(chatId);
+		return;
+	}
+
+	batch.timer ??= setTimeout(() => {
+		void flushToolNotifications(chatId);
+	}, TOOL_CALL_BATCH_MS);
+}
+
+function getToolNotificationBatch(chatId: string): ToolNotificationBatch {
+	let batch = toolNotificationBatches.get(chatId);
+	if (!batch) {
+		batch = { notifications: [], timer: null, sending: null };
+		toolNotificationBatches.set(chatId, batch);
+	}
+	return batch;
+}
+
+async function flushToolNotifications(chatId: string): Promise<void> {
+	const batch = toolNotificationBatches.get(chatId);
+	if (!batch) return;
+
+	if (batch.sending) await batch.sending;
+
+	if (batch.timer) {
+		clearTimeout(batch.timer);
+		batch.timer = null;
+	}
+
+	const notifications = batch.notifications.splice(0);
+	if (notifications.length === 0) {
+		if (!batch.sending) toolNotificationBatches.delete(chatId);
+		return;
+	}
+
+	batch.sending = sendTelegramMessage(
+		chatId,
+		formatToolNotificationBatch(notifications),
+	)
+		.catch((error) => {
+			console.error(
+				`[${chatId}] failed to send tool notifications:`,
+				errorMessage(error),
+			);
+		})
+		.finally(() => {
+			batch.sending = null;
+			if (batch.notifications.length === 0 && !batch.timer) {
+				toolNotificationBatches.delete(chatId);
+			}
+		});
+
+	await batch.sending;
+}
+
+function formatToolNotificationBatch(notifications: string[]): string {
+	const compacted = compactAdjacentNotifications(notifications);
+	if (compacted.length === 1) return compacted[0];
+
+	const maxDisplay = Math.max(1, TOOL_CALL_BATCH_MAX_ITEMS);
+	const visible = compacted.slice(0, maxDisplay);
+	const hidden = compacted.length - visible.length;
+	return `🧰 ${visible.join(" → ")}${hidden > 0 ? ` → +${hidden} more` : ""}`;
+}
+
+function compactAdjacentNotifications(notifications: string[]): string[] {
+	const compacted: string[] = [];
+	let previous = "";
+	let count = 0;
+
+	for (const notification of notifications) {
+		if (notification === previous) {
+			count++;
+			continue;
+		}
+		pushCompactedNotification(compacted, previous, count);
+		previous = notification;
+		count = 1;
+	}
+	pushCompactedNotification(compacted, previous, count);
+
+	return compacted;
+}
+
+function pushCompactedNotification(
+	compacted: string[],
+	notification: string,
+	count: number,
+): void {
+	if (!notification || count <= 0) return;
+	compacted.push(count === 1 ? notification : `${notification} ×${count}`);
 }
 
 function sleep(ms: number): Promise<void> {

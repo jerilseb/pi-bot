@@ -163,6 +163,16 @@ export const SEND_TOOL_CALLS = envFlag(
 	process.env.PI_CHANNEL_SEND_TOOL_CALLS,
 	true,
 );
+export const TOOL_CALL_BATCH_MS = envNumber(
+	process.env.PI_CHANNEL_TOOL_CALL_BATCH_MS,
+	1500,
+	0,
+);
+export const TOOL_CALL_BATCH_MAX_ITEMS = envNumber(
+	process.env.PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS,
+	8,
+	1,
+);
 
 export const SEND_LOCAL_IMAGES = true;
 export const LOCAL_IMAGE_UPLOAD_DIRS = (
