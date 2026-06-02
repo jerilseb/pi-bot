@@ -13,3 +13,4 @@ files/*
 .headless-profile/
 debug-*.png
 .active_model
+workspace/
