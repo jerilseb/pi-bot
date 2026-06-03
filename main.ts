@@ -130,21 +130,21 @@ const cron = createCronController({
 function validateEnvironment(): void {
 	if (!BOT_TOKEN) {
 		console.error(
-			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc MODEL=openrouter/openai/gpt-5.4-mini node main.ts",
+			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc CHAT_MODEL=openrouter/openai/gpt-5.4-mini node main.ts",
 		);
 		process.exit(1);
 	}
 
 	if (!MODEL) {
 		console.error(
-			"Missing MODEL. Example: MODEL=openrouter/openai/gpt-5.4-mini",
+			"Missing CHAT_MODEL. Example: CHAT_MODEL=openrouter/openai/gpt-5.4-mini",
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(MODEL)) {
 		console.error(
-			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or MODEL.`,
+			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL.`,
 		);
 		process.exit(1);
 	}

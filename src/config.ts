@@ -99,11 +99,12 @@ export function writeActiveModel(model: string): void {
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
 
-const modelEnvValue = process.env.MODEL ?? process.env.OPENROUTER_MODEL ?? "";
-const modelEnvDefaultProvider = process.env.MODEL ? undefined : "openrouter";
+const chatModelEnvValue =
+	process.env.CHAT_MODEL ?? process.env.chat_model ?? process.env.MODEL;
+const chatModelEnvDefaultProvider = chatModelEnvValue ? undefined : "openrouter";
 export const DEFAULT_MODEL = normalizeModelRef(
-	modelEnvValue,
-	modelEnvDefaultProvider,
+	chatModelEnvValue ?? process.env.OPENROUTER_MODEL ?? "",
+	chatModelEnvDefaultProvider,
 );
 
 const allowedModelsEnvValue =
