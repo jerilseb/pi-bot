@@ -15,6 +15,8 @@ export interface ChatState {
 export interface ChatRegistry {
 	/** Returns the chat's state, creating a fresh Pi session on first use. */
 	get(chatId: string): ChatState;
+	/** Returns the chat's state if it already exists. */
+	getExisting(chatId: string): ChatState | null;
 	/** True while the chat is processing a prompt or has queued prompts. */
 	isBusy(chatId: string): boolean;
 	/** (Re)starts the idle timer that disposes an unused session. */
@@ -51,6 +53,10 @@ export function createChatRegistry(runtime: PiRuntime): ChatRegistry {
 			}
 			resetIdleTimer(chat);
 			return chat;
+		},
+
+		getExisting(chatId): ChatState | null {
+			return chats.get(chatId) ?? null;
 		},
 
 		isBusy(chatId): boolean {

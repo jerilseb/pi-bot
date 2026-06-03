@@ -15,13 +15,19 @@
  */
 
 import * as fs from "node:fs";
-import { createChatRegistry, type ChatState } from "./src/chat-session.ts";
+import {
+	createChatRegistry,
+	type ChatRegistry,
+	type ChatState,
+} from "./src/chat-session.ts";
 import { handleCommand } from "./src/commands.ts";
 import {
 	ACTIVE_MODEL_PATH,
 	ALLOWED_CHAT_ID,
 	ALLOWED_MODELS,
+	BACKGROUND_MODEL,
 	BOT_TOKEN,
+	DEFAULT_MODEL,
 	MAX_QUEUE_PER_CHAT,
 	MODEL,
 	PROJECT_EXTENSIONS_DIR,
@@ -66,7 +72,7 @@ writeActiveModel(MODEL);
 let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
-const PI_RUNTIME: PiRuntime = createPiRuntime({
+const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
 	cwd: process.cwd(),
 	model: MODEL,
 	getExtensionPaths: () => EXTENSION_PATHS,
@@ -77,12 +83,28 @@ const PI_RUNTIME: PiRuntime = createPiRuntime({
 		activeModelSystemPromptExtension,
 		protectedEnvToolAccessExtension,
 	],
+	writeModelState: writeActiveModel,
+});
+
+const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
+	cwd: process.cwd(),
+	model: BACKGROUND_MODEL,
+	getExtensionPaths: () => EXTENSION_PATHS,
+	getSkillPaths: () => SKILL_PATHS,
+	systemPromptOverride: () => readSystemPrompt(),
+	extensionFactories: [
+		memorySystemPromptExtension,
+		activeModelSystemPromptExtension,
+		protectedEnvToolAccessExtension,
+	],
+	writeModelState: () => undefined,
 });
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
 ensureMemoryFile();
 
-const chats = createChatRegistry(PI_RUNTIME);
+const chats = createChatRegistry(CHAT_PI_RUNTIME);
+const backgroundChats = createChatRegistry(BACKGROUND_PI_RUNTIME);
 let offset = 0;
 let running = true;
 
@@ -96,34 +118,62 @@ const toolNotificationBatches = new Map<string, ToolNotificationBatch>();
 
 const heartbeat = createHeartbeatController({
 	handleIncoming,
-	isChatBusy: chats.isBusy,
+	isChatBusy: isAssistantBusy,
 	isRunning: () => running,
 });
 
 const cron = createCronController({
 	handleIncoming,
-	isChatBusy: chats.isBusy,
+	isChatBusy: isAssistantBusy,
 	isRunning: () => running,
 });
 
 function validateEnvironment(): void {
 	if (!BOT_TOKEN) {
 		console.error(
-			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc MODEL=openrouter/openai/gpt-5.4-mini node main.ts",
+			"Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc CHAT_MODEL=openrouter/openai/gpt-5.4-mini node main.ts",
 		);
 		process.exit(1);
 	}
 
-	if (!MODEL) {
+	if (!DEFAULT_MODEL) {
 		console.error(
-			"Missing MODEL. Example: MODEL=openrouter/openai/gpt-5.4-mini",
+			"Missing CHAT_MODEL. Example: CHAT_MODEL=openrouter/openai/gpt-5.4-mini",
+		);
+		process.exit(1);
+	}
+
+	if (ALLOWED_MODELS.length === 0) {
+		console.error(
+			"Missing ALLOWED_MODELS. Example: ALLOWED_MODELS=openrouter/openai/gpt-5.4-mini,openai-codex/gpt-5.5",
+		);
+		process.exit(1);
+	}
+
+	if (!ALLOWED_MODELS.includes(DEFAULT_MODEL)) {
+		console.error(
+			`CHAT_MODEL (${DEFAULT_MODEL}) must be included in ALLOWED_MODELS.`,
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(MODEL)) {
 		console.error(
-			`Active model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or MODEL.`,
+			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL.`,
+		);
+		process.exit(1);
+	}
+
+	if (!BACKGROUND_MODEL) {
+		console.error(
+			"Missing BACKGROUND_MODEL. Example: BACKGROUND_MODEL=openai-codex/gpt-5.5",
+		);
+		process.exit(1);
+	}
+
+	if (!ALLOWED_MODELS.includes(BACKGROUND_MODEL)) {
+		console.error(
+			`Background model (${BACKGROUND_MODEL}) must be included in ALLOWED_MODELS. Check BACKGROUND_MODEL or ALLOWED_MODELS.`,
 		);
 		process.exit(1);
 	}
@@ -141,6 +191,7 @@ function reloadResources(): void {
 	EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 	SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 	chats.clearAll();
+	backgroundChats.clearAll();
 }
 
 /** Shuts the bot down and exits so PM2 brings the process back up. */
@@ -150,12 +201,20 @@ async function restart(): Promise<void> {
 }
 
 async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
-	const chat = chats.get(prompt.chatId);
+	const registry = isBackgroundSource(prompt.source) ? backgroundChats : chats;
+	const chat = registry.get(prompt.chatId);
 	const trimmed = prompt.text.trim();
 
 	if (prompt.attachments.length === 0 && trimmed.startsWith("/")) {
 		const handled = await handleCommand(
-			{ chat, registry: chats, reloadResources, restart },
+			{
+				chat,
+				registry: chats,
+				backgroundRegistry: backgroundChats,
+				getBackgroundModelName,
+				reloadResources,
+				restart,
+			},
 			trimmed,
 		);
 		if (handled) return;
@@ -173,17 +232,31 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 
 	chat.queue.push(prompt);
 	chat.messageCount++;
-	void processQueue(chat);
+	void processQueue(chat, registry);
 }
 
-async function processQueue(chat: ChatState): Promise<void> {
+function isAssistantBusy(chatId: string): boolean {
+	return chats.isBusy(chatId) || backgroundChats.isBusy(chatId);
+}
+
+function getBackgroundModelName(chatId: string): string {
+	return (
+		backgroundChats.getExisting(chatId)?.pi.modelName ??
+		BACKGROUND_PI_RUNTIME.modelName
+	);
+}
+
+async function processQueue(
+	chat: ChatState,
+	registry: ChatRegistry,
+): Promise<void> {
 	if (chat.processing) return;
 
 	while (chat.queue.length > 0 && running) {
 		const prompt = chat.queue.shift();
 		if (!prompt) break;
 		chat.processing = true;
-		chats.resetIdleTimer(chat);
+		registry.resetIdleTimer(chat);
 
 		const typing = isBackgroundSource(prompt.source)
 			? { stop: () => undefined }
@@ -214,7 +287,7 @@ async function processQueue(chat: ChatState): Promise<void> {
 		} finally {
 			typing.stop();
 			chat.processing = false;
-			chats.resetIdleTimer(chat);
+			registry.resetIdleTimer(chat);
 		}
 	}
 }
@@ -276,7 +349,8 @@ async function pollTelegram(): Promise<void> {
 function logStartupBanner(): void {
 	console.log("Telegram → Pi bridge started");
 	console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
-	console.log(`Model: ${PI_RUNTIME.modelName}`);
+	console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName}`);
+	console.log(`Background model: ${BACKGROUND_PI_RUNTIME.modelName}`);
 	console.log("Pi runtime: SDK");
 	console.log(
 		`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(", ") : "none"}`,
@@ -416,6 +490,7 @@ async function shutdown(): Promise<void> {
 	heartbeat.stop();
 	cron.stop();
 	chats.clearAll();
+	backgroundChats.clearAll();
 }
 
 process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));

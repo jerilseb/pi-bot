@@ -78,7 +78,7 @@ export async function handleModelCallbackQuery(
 		await editTelegramMessageText(
 			chatId,
 			query.message.message_id,
-			`✅ Switched to ${chat.pi.modelName}`,
+			`✅ Switched chat model to ${chat.pi.modelName}`,
 		);
 	} catch (error) {
 		await answerTelegramCallbackQuery(query.id, "Model switch failed.");

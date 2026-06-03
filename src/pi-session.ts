@@ -21,7 +21,6 @@ import {
 	parseModelRef,
 	SEND_LOCAL_DOCUMENTS,
 	SEND_LOCAL_IMAGES,
-	writeActiveModel,
 	type ModelRef,
 } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
@@ -46,6 +45,7 @@ export interface PiRuntime {
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
 	extensionFactories: Array<(pi: ExtensionAPI) => void>;
+	writeModelState: (model: string) => void;
 }
 
 export function createPiRuntime(options: {
@@ -55,6 +55,7 @@ export function createPiRuntime(options: {
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
 	extensionFactories?: Array<(pi: ExtensionAPI) => void>;
+	writeModelState: (model: string) => void;
 }): PiRuntime {
 	const authStorage = AuthStorage.create();
 	if (OPENROUTER_API_KEY) {
@@ -81,6 +82,7 @@ export function createPiRuntime(options: {
 		getSkillPaths: options.getSkillPaths,
 		systemPromptOverride: options.systemPromptOverride,
 		extensionFactories: options.extensionFactories ?? [],
+		writeModelState: options.writeModelState,
 	};
 }
 
@@ -138,7 +140,10 @@ export class SdkPiSession {
 			await this.session.setModel(model);
 		}
 
-		writeActiveModel(formatModelRef(modelRef));
+		const formatted = formatModelRef(modelRef);
+		this.runtime.writeModelState(formatted);
+		this.runtime.modelName = formatted;
+		this.runtime.model = model;
 		this.selectedModelRef = modelRef;
 		this.selectedModel = model;
 	}

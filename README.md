@@ -29,7 +29,8 @@ Create a `.env` file:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:your-telegram-token
-MODEL=openrouter/openai/gpt-5.4-mini
+CHAT_MODEL=openrouter/openai/gpt-5.4-mini
+BACKGROUND_MODEL=openai-codex/gpt-5.5
 ALLOWED_MODELS=openrouter/openai/gpt-5.4-mini,openrouter/openai/gpt-5.5,openai-codex/gpt-5.5
 OPENROUTER_API_KEY=sk-or-your-key
 
@@ -49,7 +50,9 @@ For normal pm2-managed startup:
 npm start
 ```
 
-If everything is happy, the bridge logs will show the model, enabled extensions, and skills.
+If everything is happy, the bridge logs will show the chat model, background model, enabled extensions, and skills.
+
+`CHAT_MODEL` controls normal Telegram chat prompts. `BACKGROUND_MODEL` controls heartbeat and cron prompts and can only be changed through the environment. Both must be included in `ALLOWED_MODELS`.
 
 Model refs use `provider/model-id` form. OpenRouter model IDs can contain slashes, so include the provider prefix, e.g. `openrouter/openai/gpt-5.4-mini`. For `openai-codex/...`, authenticate through Pi first with `/login openai-codex` so credentials are available in `~/.pi/agent/auth.json`.
 

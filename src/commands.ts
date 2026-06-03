@@ -12,6 +12,8 @@ import { voiceStatusText } from "./voice.ts";
 export interface CommandContext {
 	chat: ChatState;
 	registry: ChatRegistry;
+	backgroundRegistry: ChatRegistry;
+	getBackgroundModelName(chatId: string): string;
 	/** Re-scans extensions/skills and resets every chat session. */
 	reloadResources(): void;
 	/** Shuts the bot down and exits so PM2 brings it back up. */
@@ -23,7 +25,7 @@ type CommandHandler = (ctx: CommandContext) => Promise<void>;
 const HELP_TEXT = [
 	"Telegram → Pi bridge commands:",
 	"/status — show this chat session status",
-	"/models — choose an allowed model",
+	"/models — choose an allowed chat model",
 	"/abort — abort the current Pi response",
 	"/new — clear this chat's Pi conversation",
 	"/reload — re-scan extensions/skills and reset all chats",
@@ -44,17 +46,21 @@ const COMMANDS: Record<string, CommandHandler> = {
 		await sendTelegramMessage(chat.chatId, HELP_TEXT);
 	},
 
-	"/status": async ({ chat }) => {
+	"/status": async ({ chat, backgroundRegistry, getBackgroundModelName }) => {
 		const uptimeSeconds = Math.floor((Date.now() - chat.startedAt) / 1000);
+		const background = backgroundRegistry.getExisting(chat.chatId);
 		await sendTelegramMessage(
 			chat.chatId,
 			[
 				"Session status:",
-				`- State: ${chat.processing ? "processing" : "idle"}`,
-				`- Messages: ${chat.messageCount}`,
-				`- Queue: ${chat.queue.length}`,
-				`- Uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
-				`- Model: ${chat.pi.modelName}`,
+				`- Chat state: ${chat.processing ? "processing" : "idle"}`,
+				`- Chat messages: ${chat.messageCount}`,
+				`- Chat queue: ${chat.queue.length}`,
+				`- Chat uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
+				`- Chat model: ${chat.pi.modelName}`,
+				`- Background state: ${background?.processing ? "processing" : "idle"}`,
+				`- Background queue: ${background?.queue.length ?? 0}`,
+				`- Background model: ${getBackgroundModelName(chat.chatId)}`,
 				`- Voice note tool: ${voiceStatusText()}`,
 				`- Tool call messages: ${SEND_TOOL_CALLS ? "on" : "off"}`,
 				`- Heartbeat: ${HEARTBEAT_ENABLED ? "enabled" : "off"}`,
@@ -67,14 +73,14 @@ const COMMANDS: Record<string, CommandHandler> = {
 		if (registry.isBusy(chat.chatId)) {
 			await sendTelegramMessage(
 				chat.chatId,
-				"⚠️ Wait for the current response and queue to finish before switching models.",
+				"⚠️ Wait for the current chat response and queue to finish before switching models.",
 			);
 			return;
 		}
 
 		await sendTelegramInlineKeyboard(
 			chat.chatId,
-			[`Current model: ${chat.pi.modelName}`, "Choose a model:"].join("\n"),
+			[`Current chat model: ${chat.pi.modelName}`, "Choose a chat model:"].join("\n"),
 			buildModelInlineKeyboard(),
 		);
 	},

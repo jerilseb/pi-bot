@@ -41,10 +41,11 @@ function appendActiveModelToSystemPrompt(systemPrompt: string): string {
 		systemPrompt,
 		"",
 		"## Active model state",
-		`The bot stores the active model ref in ${ACTIVE_MODEL_PATH}.`,
+		`The bot stores the active chat model ref in ${ACTIVE_MODEL_PATH}.`,
+		"The heartbeat/cron background model is configured only by the BACKGROUND_MODEL environment variable and cannot be changed from Telegram.",
 		"Model refs use provider/model form, for example openrouter/openai/gpt-5.4-mini or openai-codex/gpt-5.5.",
-		"Read that file if you need to know which model is currently active.",
-		"When the Telegram user changes models with /models, the bot updates this file.",
+		"Read the active chat model file if you need to know which chat model is currently active.",
+		"When the Telegram user changes chat models with /models, the bot updates this file.",
 	].join("\n");
 }
 

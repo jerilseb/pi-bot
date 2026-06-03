@@ -63,16 +63,17 @@ export function formatModelRef(ref: ModelRef): string {
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 export const ACTIVE_MODEL_PATH = path.join(PROJECT_ROOT, ".active_model");
 
-function readActiveModelRaw(): string | null {
-	if (!fs.existsSync(ACTIVE_MODEL_PATH)) return null;
-	return fs.readFileSync(ACTIVE_MODEL_PATH, "utf8").trim() || null;
+function readActiveModelRaw(filePath: string): string | null {
+	if (!fs.existsSync(filePath)) return null;
+	return fs.readFileSync(filePath, "utf8").trim() || null;
 }
 
 function readActiveModel(
+	filePath: string,
 	allowedModels: string[],
 	defaultModel: string,
 ): string | null {
-	const raw = readActiveModelRaw();
+	const raw = readActiveModelRaw(filePath);
 	if (!raw) return null;
 
 	const candidates = [normalizeModelRef(raw), normalizeModelRef(raw, "openrouter")]
@@ -87,36 +88,29 @@ function readActiveModel(
 	);
 }
 
+function writeModelState(filePath: string, model: string): void {
+	fs.writeFileSync(filePath, `${normalizeModelRef(model)}\n`, "utf8");
+}
+
 export function writeActiveModel(model: string): void {
-	fs.writeFileSync(ACTIVE_MODEL_PATH, `${normalizeModelRef(model)}\n`, "utf8");
+	writeModelState(ACTIVE_MODEL_PATH, model);
 }
 
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
 
-const modelEnvValue = process.env.MODEL ?? process.env.OPENROUTER_MODEL ?? "";
-const modelEnvDefaultProvider = process.env.MODEL ? undefined : "openrouter";
-export const DEFAULT_MODEL = normalizeModelRef(
-	modelEnvValue,
-	modelEnvDefaultProvider,
-);
+export const DEFAULT_MODEL = normalizeModelRef(process.env.CHAT_MODEL ?? "");
 
-const allowedModelsEnvValue =
-	process.env.ALLOWED_MODELS ?? process.env.ALLOWED_OPENROUTER_MODELS ?? "";
-const allowedModelsDefaultProvider = process.env.ALLOWED_MODELS
-	? undefined
-	: "openrouter";
-const configuredAllowedModels = allowedModelsEnvValue
+export const ALLOWED_MODELS = (process.env.ALLOWED_MODELS ?? "")
 	.split(",")
-	.map((model) => normalizeModelRef(model, allowedModelsDefaultProvider))
+	.map((model) => normalizeModelRef(model))
 	.filter(Boolean);
-export const ALLOWED_MODELS =
-	configuredAllowedModels.length > 0
-		? configuredAllowedModels
-		: DEFAULT_MODEL
-			? [DEFAULT_MODEL]
-			: [];
-export const MODEL = readActiveModel(ALLOWED_MODELS, DEFAULT_MODEL) ?? DEFAULT_MODEL;
+export const MODEL =
+	readActiveModel(ACTIVE_MODEL_PATH, ALLOWED_MODELS, DEFAULT_MODEL) ??
+	DEFAULT_MODEL;
+export const BACKGROUND_MODEL = normalizeModelRef(
+	process.env.BACKGROUND_MODEL ?? "",
+);
 
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? "";
