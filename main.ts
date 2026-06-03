@@ -27,6 +27,7 @@ import {
 	ALLOWED_MODELS,
 	BACKGROUND_MODEL,
 	BOT_TOKEN,
+	DEFAULT_MODEL,
 	MAX_QUEUE_PER_CHAT,
 	MODEL,
 	PROJECT_EXTENSIONS_DIR,
@@ -135,9 +136,23 @@ function validateEnvironment(): void {
 		process.exit(1);
 	}
 
-	if (!MODEL) {
+	if (!DEFAULT_MODEL) {
 		console.error(
 			"Missing CHAT_MODEL. Example: CHAT_MODEL=openrouter/openai/gpt-5.4-mini",
+		);
+		process.exit(1);
+	}
+
+	if (ALLOWED_MODELS.length === 0) {
+		console.error(
+			"Missing ALLOWED_MODELS. Example: ALLOWED_MODELS=openrouter/openai/gpt-5.4-mini,openai-codex/gpt-5.5",
+		);
+		process.exit(1);
+	}
+
+	if (!ALLOWED_MODELS.includes(DEFAULT_MODEL)) {
+		console.error(
+			`CHAT_MODEL (${DEFAULT_MODEL}) must be included in ALLOWED_MODELS.`,
 		);
 		process.exit(1);
 	}
@@ -145,6 +160,13 @@ function validateEnvironment(): void {
 	if (!ALLOWED_MODELS.includes(MODEL)) {
 		console.error(
 			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL.`,
+		);
+		process.exit(1);
+	}
+
+	if (!BACKGROUND_MODEL) {
+		console.error(
+			"Missing BACKGROUND_MODEL. Example: BACKGROUND_MODEL=openai-codex/gpt-5.5",
 		);
 		process.exit(1);
 	}

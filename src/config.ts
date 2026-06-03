@@ -99,36 +99,18 @@ export function writeActiveModel(model: string): void {
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
 
-const chatModelEnvValue =
-	process.env.CHAT_MODEL ?? process.env.chat_model ?? process.env.MODEL;
-const chatModelEnvDefaultProvider = chatModelEnvValue ? undefined : "openrouter";
-export const DEFAULT_MODEL = normalizeModelRef(
-	chatModelEnvValue ?? process.env.OPENROUTER_MODEL ?? "",
-	chatModelEnvDefaultProvider,
-);
+export const DEFAULT_MODEL = normalizeModelRef(process.env.CHAT_MODEL ?? "");
 
-const allowedModelsEnvValue =
-	process.env.ALLOWED_MODELS ?? process.env.ALLOWED_OPENROUTER_MODELS ?? "";
-const allowedModelsDefaultProvider = process.env.ALLOWED_MODELS
-	? undefined
-	: "openrouter";
-const configuredAllowedModels = allowedModelsEnvValue
+export const ALLOWED_MODELS = (process.env.ALLOWED_MODELS ?? "")
 	.split(",")
-	.map((model) => normalizeModelRef(model, allowedModelsDefaultProvider))
+	.map((model) => normalizeModelRef(model))
 	.filter(Boolean);
-export const ALLOWED_MODELS =
-	configuredAllowedModels.length > 0
-		? configuredAllowedModels
-		: DEFAULT_MODEL
-			? [DEFAULT_MODEL]
-			: [];
 export const MODEL =
 	readActiveModel(ACTIVE_MODEL_PATH, ALLOWED_MODELS, DEFAULT_MODEL) ??
 	DEFAULT_MODEL;
-const backgroundModelEnvValue = process.env.BACKGROUND_MODEL ?? "";
-export const DEFAULT_BACKGROUND_MODEL =
-	normalizeModelRef(backgroundModelEnvValue) || MODEL;
-export const BACKGROUND_MODEL = DEFAULT_BACKGROUND_MODEL;
+export const BACKGROUND_MODEL = normalizeModelRef(
+	process.env.BACKGROUND_MODEL ?? "",
+);
 
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? "";
