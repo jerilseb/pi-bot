@@ -33,6 +33,7 @@ import {
 	PROJECT_EXTENSIONS_DIR,
 	PROJECT_SKILLS_DIR,
 	SEND_TOOL_CALLS,
+	SESSIONS_DIR,
 	TMP_DIR,
 	TOOL_CALL_BATCH_MAX_ITEMS,
 	TOOL_CALL_BATCH_MS,
@@ -75,6 +76,7 @@ let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
 	cwd: process.cwd(),
 	model: MODEL,
+	sessionPrefix: "telegram-chat",
 	getExtensionPaths: () => EXTENSION_PATHS,
 	getSkillPaths: () => SKILL_PATHS,
 	systemPromptOverride: () => readSystemPrompt(),
@@ -89,6 +91,7 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
 const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
 	cwd: process.cwd(),
 	model: BACKGROUND_MODEL,
+	sessionPrefix: "telegram-background",
 	getExtensionPaths: () => EXTENSION_PATHS,
 	getSkillPaths: () => SKILL_PATHS,
 	systemPromptOverride: () => readSystemPrompt(),
@@ -101,6 +104,7 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
 });
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
+fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
 
 const chats = createChatRegistry(CHAT_PI_RUNTIME);

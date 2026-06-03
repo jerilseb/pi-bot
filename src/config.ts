@@ -62,6 +62,7 @@ export function formatModelRef(ref: ModelRef): string {
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 export const ACTIVE_MODEL_PATH = path.join(PROJECT_ROOT, ".active_model");
+export const SESSIONS_DIR = path.join(PROJECT_ROOT, "sessions");
 
 function readActiveModelRaw(filePath: string): string | null {
 	if (!fs.existsSync(filePath)) return null;

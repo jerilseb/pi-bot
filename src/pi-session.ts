@@ -21,6 +21,7 @@ import {
 	parseModelRef,
 	SEND_LOCAL_DOCUMENTS,
 	SEND_LOCAL_IMAGES,
+	SESSIONS_DIR,
 	type ModelRef,
 } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
@@ -41,6 +42,8 @@ export interface PiRuntime {
 	modelRegistry: ReturnType<typeof ModelRegistry.create>;
 	settingsManager: ReturnType<typeof SettingsManager.create>;
 	cwd: string;
+	sessionDir: string;
+	sessionPrefix: string;
 	getExtensionPaths: () => string[];
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
@@ -51,6 +54,7 @@ export interface PiRuntime {
 export function createPiRuntime(options: {
 	cwd: string;
 	model: string;
+	sessionPrefix: string;
 	getExtensionPaths: () => string[];
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
@@ -78,6 +82,8 @@ export function createPiRuntime(options: {
 		modelRegistry,
 		settingsManager,
 		cwd: options.cwd,
+		sessionDir: SESSIONS_DIR,
+		sessionPrefix: options.sessionPrefix,
 		getExtensionPaths: options.getExtensionPaths,
 		getSkillPaths: options.getSkillPaths,
 		systemPromptOverride: options.systemPromptOverride,
@@ -114,6 +120,7 @@ export class SdkPiSession {
 	private chatId: string;
 	private selectedModelRef: ModelRef;
 	private selectedModel: Model<Api>;
+	private forceNewSessionOnNextStart = false;
 
 	constructor(runtime: PiRuntime, chatId: string) {
 		this.runtime = runtime;
@@ -201,6 +208,7 @@ export class SdkPiSession {
 
 	reset(): void {
 		this.cleanup();
+		this.forceNewSessionOnNextStart = true;
 	}
 
 	cleanup(): void {
@@ -243,17 +251,45 @@ export class SdkPiSession {
 		});
 		await resourceLoader.reload();
 
+		const sessionManager = await this.createSessionManager();
 		const { session } = await createAgentSession({
 			cwd: this.runtime.cwd,
 			model: this.selectedModel,
 			authStorage: this.runtime.authStorage,
 			modelRegistry: this.runtime.modelRegistry,
 			resourceLoader,
-			sessionManager: SessionManager.inMemory(this.runtime.cwd),
+			sessionManager,
 			settingsManager: this.runtime.settingsManager,
 		});
 
+		this.forceNewSessionOnNextStart = false;
 		return session;
+	}
+
+	private async createSessionManager(): Promise<SessionManager> {
+		const sessionId = buildTelegramSessionId(
+			this.runtime.sessionPrefix,
+			this.chatId,
+		);
+
+		if (!this.forceNewSessionOnNextStart) {
+			const existingSession = await findMostRecentSessionForId(
+				this.runtime.cwd,
+				this.runtime.sessionDir,
+				sessionId,
+			);
+			if (existingSession) {
+				return SessionManager.open(
+					existingSession.path,
+					this.runtime.sessionDir,
+					this.runtime.cwd,
+				);
+			}
+		}
+
+		return SessionManager.create(this.runtime.cwd, this.runtime.sessionDir, {
+			id: sessionId,
+		});
 	}
 
 	private collectPromptEvent(
@@ -295,6 +331,28 @@ export class SdkPiSession {
 			}
 		}
 	}
+}
+
+function buildTelegramSessionId(prefix: string, chatId: string): string {
+	const sanitized = `${prefix}-${chatId}`
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/^[^A-Za-z0-9]+/, "")
+		.replace(/[^A-Za-z0-9]+$/, "");
+
+	return sanitized || `${prefix}-unknown`;
+}
+
+async function findMostRecentSessionForId(
+	cwd: string,
+	sessionDir: string,
+	sessionId: string,
+): Promise<{ path: string } | null> {
+	const sessions = await SessionManager.list(cwd, sessionDir);
+	return (
+		sessions
+			.filter((session) => session.id === sessionId)
+			.sort((a, b) => b.modified.getTime() - a.modified.getTime())[0] ?? null
+	);
 }
 
 function formatToolStartNotification(
