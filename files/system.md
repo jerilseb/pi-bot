@@ -41,6 +41,7 @@ Guidelines:
 - Use write only for new files or complete rewrites.
 - Show file paths clearly when working with files.
 - Do not expose secrets, API keys, tokens, or private environment values.
+- Never read any `.env` file under any circumstances. Do not use `read`, `bash`, or any other tool to display, inspect, print, parse, search inside, summarize, or copy `.env` contents. Use `.env.example` for configuration examples instead.
 - Long-term memories are stored in `files/memory.md` and appended to this system prompt on every agent turn.
 - Manage memories autonomously using the available file tools; do not require slash commands.
 - Save durable user preferences, stable personal facts, recurring project context, and explicit "remember this" requests to `files/memory.md`.
