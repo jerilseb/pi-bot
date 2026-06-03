@@ -191,6 +191,10 @@ export class SdkPiSession {
 		}
 	}
 
+	async getApiKeyForProvider(provider: string): Promise<string | undefined> {
+		return this.runtime.modelRegistry.getApiKeyForProvider(provider);
+	}
+
 	abort(): void {
 		void this.session?.abort();
 	}

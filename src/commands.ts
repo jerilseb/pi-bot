@@ -4,6 +4,12 @@ import { cronStatusText } from "./cron.ts";
 import { formatCommandOutput, gitPull } from "./maintenance.ts";
 import { buildModelInlineKeyboard } from "./model-menu.ts";
 import {
+	buildOpenAIUsageTelegramHtml,
+	fetchOpenAIUsage,
+	OPENAI_CODEX_PROVIDER,
+} from "./openai-usage.ts";
+import {
+	escapeTelegramHtml,
 	sendTelegramInlineKeyboard,
 	sendTelegramMessage,
 } from "./telegram.ts";
@@ -26,6 +32,7 @@ const HELP_TEXT = [
 	"Telegram → Pi bridge commands:",
 	"/status — show this chat session status",
 	"/models — choose an allowed chat model",
+	"/openaiusage — show OpenAI Codex usage windows and reset times",
 	"/abort — abort the current Pi response",
 	"/new — clear this chat's Pi conversation",
 	"/reload — re-scan extensions/skills and reset all chats",
@@ -83,6 +90,33 @@ const COMMANDS: Record<string, CommandHandler> = {
 			[`Current chat model: ${chat.pi.modelName}`, "Choose a chat model:"].join("\n"),
 			buildModelInlineKeyboard(),
 		);
+	},
+
+	"/openaiusage": async ({ chat }) => {
+		const accessToken = await chat.pi.getApiKeyForProvider(OPENAI_CODEX_PROVIDER);
+		if (!accessToken) {
+			await sendTelegramMessage(
+				chat.chatId,
+				"❌ No OpenAI Codex credentials found. Authenticate with Pi using /login openai-codex, or set OPENAI_CODEX_API_KEY.",
+			);
+			return;
+		}
+
+		await sendTelegramMessage(chat.chatId, "Fetching OpenAI Codex usage...");
+
+		try {
+			const { usage, warnings } = await fetchOpenAIUsage(accessToken);
+			await sendTelegramMessage(
+				chat.chatId,
+				buildOpenAIUsageTelegramHtml(usage, warnings),
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			await sendTelegramMessage(
+				chat.chatId,
+				`❌ Failed to fetch OpenAI Codex usage: ${escapeTelegramHtml(message)}`,
+			);
+		}
 	},
 
 	"/abort": async ({ chat }) => {
