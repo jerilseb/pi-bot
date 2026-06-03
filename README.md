@@ -14,8 +14,9 @@ It is basically a personal AI assistant in Telegram, with support for images, fi
 - Can transcribe voice/audio with ElevenLabs
 - Can send Telegram voice-note replies with ElevenLabs when the agent decides it is appropriate
 - Can upload generated local images/documents back to Telegram
-- Includes a Tavily `web_search` extension
-- Includes skills for image generation and HTML visualizations
+- Includes Tavily `web_search` and browser-style `web_fetch` tools
+- Can create one-time, interval, and cron-like scheduled tasks
+- Includes skills for browser automation, image generation, HTML visualizations, email via Himalaya, and PDF work
 
 ## Setup
 
@@ -52,7 +53,7 @@ npm start
 
 If everything is happy, the bridge logs will show the chat model, background model, enabled extensions, and skills.
 
-`CHAT_MODEL` controls normal Telegram chat prompts. `BACKGROUND_MODEL` controls heartbeat and cron prompts and can only be changed through the environment. Both must be included in `ALLOWED_MODELS`.
+`CHAT_MODEL` is the default model for normal Telegram chat prompts. The active chat model can be changed with `/models` and is persisted in `.active_model`. `BACKGROUND_MODEL` controls heartbeat and cron prompts and can only be changed through the environment. `CHAT_MODEL`, the active chat model, and `BACKGROUND_MODEL` must be included in `ALLOWED_MODELS`.
 
 Model refs use `provider/model-id` form. OpenRouter model IDs can contain slashes, so include the provider prefix, e.g. `openrouter/openai/gpt-5.4-mini`. For `openai-codex/...`, authenticate through Pi first with `/login openai-codex` so credentials are available in `~/.pi/agent/auth.json`.
 
@@ -97,20 +98,24 @@ Operational notes:
 
 - Use Node.js 22+ or the same Node version you use locally.
 - Keep `.env` on the server only; do not commit bot/API keys.
-- Persistent app state lives under `files/` (memory and heartbeat state). Back it up if you care about it.
+- Persistent app state lives under `files/` (memory, heartbeat state, and scheduled tasks). Back it up if you care about it.
 - Telegram downloads and generated temp files are stored under your system temp directory.
 - After changing extensions, skills, prompts, or environment variables, restart with `npx pm2 restart pi-bot --update-env` or `npm stop && npm start`.
 
 ## Code layout
 
-- `main.ts` — small entrypoint/orchestrator: chat state, queueing, commands, polling loop
+- `main.ts` — entrypoint/orchestrator: chat state, queueing, polling loop, startup/shutdown
+- `src/commands.ts` — Telegram slash-command handlers
 - `src/config.ts` — environment variables, paths, constants
 - `src/pi-session.ts` — Pi SDK runtime/session wrapper
 - `src/telegram.ts` — Telegram API helpers and message sending
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion
 - `src/outbound.ts` — Pi response delivery and generated file uploads
-- `src/resources.ts` — extension/skill discovery, system prompt, memory, heartbeat prompt helpers
+- `src/discovery.ts` — extension and skill discovery
+- `src/system-prompt.ts` — system prompt, memory, active model prompt, and heartbeat/cron instructions
 - `src/heartbeat.ts` — scheduled heartbeat controller
+- `src/cron.ts` and `src/cron-store.ts` — scheduled task runner and durable cron job store
+- `src/model-menu.ts` — inline keyboard model switching
 
 ## Telegram commands
 
@@ -119,6 +124,8 @@ Inside Telegram:
 - `/start` — say hi
 - `/help` — show commands
 - `/status` — see the current chat session status
+- `/models` — choose an allowed chat model
+- `/openaiusage` — show OpenAI Codex usage windows and reset times
 - `/abort` — stop the current response and clear the queue
 - `/new` — reset the Pi conversation for this chat
 - `/reload` — re-scan extensions/skills and reset all chats
@@ -164,6 +171,11 @@ PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS=8
 
 # scheduled agent wake-up is always enabled; uses TELEGRAM_ALLOWED_CHAT_ID and files/heartbeat.md
 PI_HEARTBEAT_INTERVAL_SECONDS=60
+
+# optional generated-file upload allowlists
+PI_CHANNEL_IMAGE_UPLOAD_DIRS=/tmp/create-image
+PI_CHANNEL_DOCUMENT_UPLOAD_DIRS=/tmp/pi-channel,/path/to/pi-bot
+PI_CHANNEL_DOCUMENT_UPLOAD_EXTS=pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,json
 ```
 
 ## Notes
