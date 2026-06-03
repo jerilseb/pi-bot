@@ -63,16 +63,17 @@ export function formatModelRef(ref: ModelRef): string {
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 export const ACTIVE_MODEL_PATH = path.join(PROJECT_ROOT, ".active_model");
 
-function readActiveModelRaw(): string | null {
-	if (!fs.existsSync(ACTIVE_MODEL_PATH)) return null;
-	return fs.readFileSync(ACTIVE_MODEL_PATH, "utf8").trim() || null;
+function readActiveModelRaw(filePath: string): string | null {
+	if (!fs.existsSync(filePath)) return null;
+	return fs.readFileSync(filePath, "utf8").trim() || null;
 }
 
 function readActiveModel(
+	filePath: string,
 	allowedModels: string[],
 	defaultModel: string,
 ): string | null {
-	const raw = readActiveModelRaw();
+	const raw = readActiveModelRaw(filePath);
 	if (!raw) return null;
 
 	const candidates = [normalizeModelRef(raw), normalizeModelRef(raw, "openrouter")]
@@ -87,8 +88,12 @@ function readActiveModel(
 	);
 }
 
+function writeModelState(filePath: string, model: string): void {
+	fs.writeFileSync(filePath, `${normalizeModelRef(model)}\n`, "utf8");
+}
+
 export function writeActiveModel(model: string): void {
-	fs.writeFileSync(ACTIVE_MODEL_PATH, `${normalizeModelRef(model)}\n`, "utf8");
+	writeModelState(ACTIVE_MODEL_PATH, model);
 }
 
 export const BOT_TOKEN =
@@ -116,7 +121,13 @@ export const ALLOWED_MODELS =
 		: DEFAULT_MODEL
 			? [DEFAULT_MODEL]
 			: [];
-export const MODEL = readActiveModel(ALLOWED_MODELS, DEFAULT_MODEL) ?? DEFAULT_MODEL;
+export const MODEL =
+	readActiveModel(ACTIVE_MODEL_PATH, ALLOWED_MODELS, DEFAULT_MODEL) ??
+	DEFAULT_MODEL;
+const backgroundModelEnvValue = process.env.BACKGROUND_MODEL ?? "";
+export const DEFAULT_BACKGROUND_MODEL =
+	normalizeModelRef(backgroundModelEnvValue) || MODEL;
+export const BACKGROUND_MODEL = DEFAULT_BACKGROUND_MODEL;
 
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? "";
