@@ -32,6 +32,7 @@ import {
 	telegramDocumentExtension,
 	telegramImageExtension,
 } from "./uploads.ts";
+import { telegramRestartToolExtension } from "./restart-tool.ts";
 import { telegramVoiceNoteExtension } from "./voice.ts";
 
 export interface PiRunPromptOptions {
@@ -51,6 +52,7 @@ export interface PiRuntime {
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
 	extensionFactories: Array<(pi: ExtensionAPI) => void>;
+	requestRestart?: () => Promise<void>;
 	writeModelState: (model: string) => void;
 }
 
@@ -62,6 +64,7 @@ export function createPiRuntime(options: {
 	getSkillPaths: () => string[];
 	systemPromptOverride: () => string;
 	extensionFactories?: Array<(pi: ExtensionAPI) => void>;
+	requestRestart?: () => Promise<void>;
 	writeModelState: (model: string) => void;
 }): PiRuntime {
 	const authStorage = AuthStorage.create();
@@ -91,6 +94,7 @@ export function createPiRuntime(options: {
 		getSkillPaths: options.getSkillPaths,
 		systemPromptOverride: options.systemPromptOverride,
 		extensionFactories: options.extensionFactories ?? [],
+		...(options.requestRestart ? { requestRestart: options.requestRestart } : {}),
 		writeModelState: options.writeModelState,
 	};
 }
@@ -244,6 +248,9 @@ export class SdkPiSession {
 			additionalSkillPaths: this.runtime.getSkillPaths(),
 			extensionFactories: [
 				...this.runtime.extensionFactories,
+				...(this.runtime.requestRestart
+					? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
+					: []),
 				telegramVoiceNoteExtension(this.chatId),
 				...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
 				...(SEND_LOCAL_DOCUMENTS

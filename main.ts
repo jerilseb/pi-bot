@@ -88,6 +88,7 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
 		activeModelSystemPromptExtension,
 		protectedEnvToolAccessExtension,
 	],
+	requestRestart: restart,
 	writeModelState: (model) => writeModelState(ACTIVE_MODEL_PATH, model),
 });
 
