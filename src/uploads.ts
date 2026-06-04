@@ -10,7 +10,7 @@ import {
 	TELEGRAM_DOCUMENT_UPLOAD_LIMIT,
 	TELEGRAM_PHOTO_UPLOAD_LIMIT,
 } from "./config.ts";
-import { telegram } from "./telegram.ts";
+import { escapeTelegramHtml, telegram } from "./telegram.ts";
 
 const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 
@@ -196,7 +196,7 @@ async function uploadImage(
 		path.basename(filePath),
 	);
 	if (caption) {
-		form.append("caption", caption);
+		form.append("caption", escapeTelegramHtml(caption));
 		form.append("parse_mode", "HTML");
 	}
 	await telegram(method, { method: "POST", body: form });
@@ -212,7 +212,7 @@ async function uploadDocument(
 	form.append("chat_id", chatId);
 	form.append("document", new Blob([fileBuffer]), path.basename(filePath));
 	if (caption) {
-		form.append("caption", caption);
+		form.append("caption", escapeTelegramHtml(caption));
 		form.append("parse_mode", "HTML");
 	}
 	await telegram("sendDocument", { method: "POST", body: form });

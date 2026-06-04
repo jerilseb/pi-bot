@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { sendTelegramMessage } from "./telegram.ts";
+import { textResult } from "./tool-result.ts";
 import { errorMessage } from "./util.ts";
 
 const RestartBotParams = Type.Object({});
@@ -54,9 +55,3 @@ export function telegramRestartToolExtension(
 	};
 }
 
-function textResult(text: string): {
-	content: Array<{ type: "text"; text: string }>;
-	details: Record<string, never>;
-} {
-	return { content: [{ type: "text", text }], details: {} };
-}

@@ -8,6 +8,7 @@ import {
 	updateCronJob,
 	type CronJobKind,
 } from "../src/cron-store.ts";
+import { textResult } from "../src/tool-result.ts";
 
 const JobKind = Type.Union([
 	Type.Literal("once"),
@@ -175,9 +176,3 @@ function toCreateInput(params: ScheduleTaskParamsType): {
 	};
 }
 
-function textResult(text: string): {
-	content: Array<{ type: "text"; text: string }>;
-	details: Record<string, never>;
-} {
-	return { content: [{ type: "text", text }], details: {} };
-}

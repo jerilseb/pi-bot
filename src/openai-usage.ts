@@ -1,9 +1,11 @@
+import { escapeTelegramHtml } from "./telegram.ts";
+import { telegramCode as code, titleCase, usageBar } from "./telegram-format.ts";
+
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const DEFAULT_USAGE_PROBE_MODEL = "gpt-5.4-mini";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const FETCH_TIMEOUT_MS = 30_000;
-const USAGE_BAR_WIDTH = 18;
 
 export { OPENAI_CODEX_PROVIDER };
 
@@ -79,15 +81,6 @@ function getAccountId(accessToken: string): string {
 		);
 	}
 	return accountId;
-}
-
-function titleCase(value: string | undefined): string {
-	if (!value) return "—";
-	return value
-		.split(/[ _-]+/g)
-		.filter(Boolean)
-		.map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
-		.join(" ");
 }
 
 function formatPercent(value: number | undefined): string {
@@ -215,24 +208,6 @@ export async function fetchOpenAIUsage(
 	}
 
 	return { usage, warnings };
-}
-
-function escapeTelegramHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
-}
-
-function code(value: string): string {
-	return `<code>${escapeTelegramHtml(value)}</code>`;
-}
-
-function usageBar(percent: number | undefined): string {
-	const normalized = percent === undefined ? 0 : percent / 100;
-	const clamped = Math.max(0, Math.min(1, normalized));
-	const filled = Math.round(clamped * USAGE_BAR_WIDTH);
-	return "█".repeat(filled) + "░".repeat(USAGE_BAR_WIDTH - filled);
 }
 
 function windowReport(window: UsageWindow): string[] {

@@ -22,6 +22,7 @@ import {
 	SEND_LOCAL_IMAGES,
 	SESSIONS_DIR,
 } from "./config.ts";
+import { escapeTelegramHtml } from "./telegram.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
 import {
 	formatModelRef,
@@ -486,13 +487,6 @@ function truncateToolArgument(value: string, maxChars: number): string {
 
 function visibleTextLength(value: string): number {
 	return value.replace(/<[^>]*>/g, "").length;
-}
-
-function escapeTelegramHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
 }
 
 function getMemoryUpdateKind(

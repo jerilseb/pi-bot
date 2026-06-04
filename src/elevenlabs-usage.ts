@@ -1,9 +1,8 @@
-import { escapeTelegramHtml } from "./telegram.ts";
+import { telegramCode as code, titleCase, usageBar } from "./telegram-format.ts";
 
 const ELEVENLABS_SUBSCRIPTION_URL =
 	"https://api.elevenlabs.io/v1/user/subscription";
 const FETCH_TIMEOUT_MS = 30_000;
-const USAGE_BAR_WIDTH = 18;
 
 interface MoneyAmount {
 	amount?: string;
@@ -51,19 +50,6 @@ export async function fetchElevenLabsUsage(
 	return (await response.json()) as ElevenLabsSubscription;
 }
 
-function code(value: string): string {
-	return `<code>${escapeTelegramHtml(value)}</code>`;
-}
-
-function titleCase(value: string | null | undefined): string {
-	if (!value) return "—";
-	return value
-		.split(/[ _-]+/g)
-		.filter(Boolean)
-		.map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
-		.join(" ");
-}
-
 function formatNumber(value: number | undefined | null): string {
 	if (value === undefined || value === null) return "—";
 	return new Intl.NumberFormat("en-US").format(value);
@@ -98,13 +84,6 @@ function formatMoney(value: MoneyAmount | undefined): string {
 	if (!value?.amount) return "—";
 	const currency = value.currency?.toUpperCase();
 	return currency ? `${value.amount} ${currency}` : value.amount;
-}
-
-function usageBar(percent: number | undefined): string {
-	const normalized = percent === undefined ? 0 : percent / 100;
-	const clamped = Math.max(0, Math.min(1, normalized));
-	const filled = Math.round(clamped * USAGE_BAR_WIDTH);
-	return "█".repeat(filled) + "░".repeat(USAGE_BAR_WIDTH - filled);
 }
 
 export function buildElevenLabsUsageTelegramHtml(

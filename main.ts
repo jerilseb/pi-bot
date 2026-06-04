@@ -229,6 +229,7 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 	}
 
 	if (chat.queue.length >= MAX_QUEUE_PER_CHAT) {
+		cleanupAttachments(prompt);
 		if (!isBackgroundSource(prompt.source)) {
 			await sendTelegramMessage(
 				prompt.chatId,

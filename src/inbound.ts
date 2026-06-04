@@ -83,6 +83,7 @@ export async function toIncomingPrompt(
 				downloaded.localPath,
 			);
 			if (transcription.ok && transcription.text) {
+				deleteLocalFile(downloaded.localPath);
 				const label = message.voice
 					? "🎤 Voice message"
 					: `🎵 Audio: ${filename}`;
@@ -222,6 +223,14 @@ async function transcribeWithElevenLabs(
 			ok: false,
 			error: errorMessage(error),
 		};
+	}
+}
+
+function deleteLocalFile(filePath: string): void {
+	try {
+		fs.unlinkSync(filePath);
+	} catch {
+		// Best-effort cleanup.
 	}
 }
 
