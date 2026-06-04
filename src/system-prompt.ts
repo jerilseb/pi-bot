@@ -1,7 +1,9 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	ACTIVE_MODEL_PATH,
+	DAILY_MEMORY_DIR,
 	FILES_DIR,
 	MEMORY_PATH,
 	SYSTEM_PROMPT_PATH,
@@ -13,21 +15,97 @@ export function readSystemPrompt(): string {
 
 export function ensureMemoryFile(): void {
 	fs.mkdirSync(FILES_DIR, { recursive: true });
+	fs.mkdirSync(DAILY_MEMORY_DIR, { recursive: true });
 	if (!fs.existsSync(MEMORY_PATH)) {
 		fs.writeFileSync(MEMORY_PATH, "# Memory\n\n", "utf8");
 	}
+	ensureDailyMemoryFile(todayLocalDate());
+}
+
+function ensureDailyMemoryFile(date: string): string {
+	fs.mkdirSync(DAILY_MEMORY_DIR, { recursive: true });
+	const filePath = dailyMemoryPath(date);
+	if (!fs.existsSync(filePath)) {
+		fs.writeFileSync(filePath, `# Daily memory — ${date}\n\n`, "utf8");
+	}
+	return filePath;
+}
+
+function dailyMemoryPath(date: string): string {
+	return path.join(DAILY_MEMORY_DIR, `${date}.md`);
+}
+
+function todayLocalDate(): string {
+	return localDateString(new Date());
+}
+
+function yesterdayLocalDate(): string {
+	const date = new Date();
+	date.setDate(date.getDate() - 1);
+	return localDateString(date);
+}
+
+function localDateString(date: Date): string {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
 }
 
 function readMemory(): string {
 	ensureMemoryFile();
 	const content = fs.readFileSync(MEMORY_PATH, "utf8").trim();
-	const body = content.replace(/^# Memory\s*/i, "").trim();
-	return body ? content : "";
+	return markdownBody(content) ? content : "";
+}
+
+function readDailyMemoryNotes(): string {
+	ensureMemoryFile();
+	const dates = [todayLocalDate(), yesterdayLocalDate()].filter(
+		(date, index, allDates) => allDates.indexOf(date) === index,
+	);
+	const sections: string[] = [];
+
+	for (const date of dates) {
+		const filePath = dailyMemoryPath(date);
+		if (!fs.existsSync(filePath)) continue;
+		const content = fs.readFileSync(filePath, "utf8").trim();
+		if (!markdownBody(content)) continue;
+		sections.push(`### ${date}\nFile: ${filePath}\n\n${content}`);
+	}
+
+	return sections.join("\n\n");
+}
+
+function markdownBody(content: string): string {
+	return content.replace(/^# .+$/m, "").trim();
 }
 
 function appendMemoryToSystemPrompt(systemPrompt: string): string {
+	const today = todayLocalDate();
+	const todayPath = ensureDailyMemoryFile(today);
 	const memory = readMemory();
-	return `${systemPrompt}\n\n## Long-term memory\nMemory file: ${MEMORY_PATH}\n\n${memory || "(No saved memories yet.)"}`;
+	const dailyNotes = readDailyMemoryNotes();
+
+	return [
+		systemPrompt,
+		"",
+		"## Memory system",
+		`Long-term memory file: ${MEMORY_PATH}`,
+		`Daily notes directory: ${DAILY_MEMORY_DIR}`,
+		`Today's daily note file: ${todayPath}`,
+		"",
+		"Use long-term memory for durable facts, stable user preferences, standing instructions, recurring project context, and explicit 'remember this' requests.",
+		"Use today's daily note for session/work logs, commands run, commits, temporary findings, research summaries, decisions that may be useful later, and detailed context that should not always be injected forever.",
+		"If a daily note becomes a durable preference or standing instruction, promote a concise summary to long-term memory and remove stale detail when appropriate.",
+		"Do not store secrets, API keys, tokens, passwords, or highly sensitive personal data in either memory layer.",
+		"Keep both layers concise Markdown bullets. Briefly confirm long-term memory changes to the user; daily note updates do not need confirmation unless relevant.",
+		"",
+		"## Long-term memory",
+		memory || "(No saved long-term memories yet.)",
+		"",
+		"## Recent daily notes",
+		dailyNotes || "(No daily notes for today or yesterday yet.)",
+	].join("\n");
 }
 
 export function memorySystemPromptExtension(pi: ExtensionAPI): void {

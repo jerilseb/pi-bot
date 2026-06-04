@@ -92,6 +92,7 @@ export const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, "skills");
 export const FILES_DIR = path.join(PROJECT_ROOT, "files");
 export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, "system.md");
 export const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
+export const DAILY_MEMORY_DIR = path.join(FILES_DIR, "memory");
 export const CRON_JOBS_PATH = path.join(FILES_DIR, "cron-jobs.json");
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, "heartbeat.md");
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, "heartbeat-state.md");

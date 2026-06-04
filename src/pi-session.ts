@@ -14,6 +14,7 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+	DAILY_MEMORY_DIR,
 	MEMORY_PATH,
 	OPENAI_CODEX_API_KEY,
 	OPENROUTER_API_KEY,
@@ -372,12 +373,16 @@ function isMemoryEditTool(
 	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
 	cwd: string,
 ): boolean {
-	if (event.toolName !== "edit") return false;
+	if (event.toolName !== "edit" && event.toolName !== "write") return false;
 
 	const editPath = extractToolPath(event.args);
 	if (!editPath) return false;
 
-	return normalizeFilePath(editPath, cwd) === normalizeFilePath(MEMORY_PATH, cwd);
+	const normalizedEditPath = normalizeFilePath(editPath, cwd);
+	return (
+		normalizedEditPath === normalizeFilePath(MEMORY_PATH, cwd) ||
+		isPathInside(normalizedEditPath, normalizeFilePath(DAILY_MEMORY_DIR, cwd))
+	);
 }
 
 function skillNameForReadTool(
@@ -414,6 +419,15 @@ function normalizeFilePath(filePath: string, cwd: string): string {
 	} catch {
 		return path.normalize(absolutePath);
 	}
+}
+
+function isPathInside(filePath: string, directoryPath: string): boolean {
+	const relativePath = path.relative(directoryPath, filePath);
+	return Boolean(
+		relativePath &&
+			!relativePath.startsWith("..") &&
+			!path.isAbsolute(relativePath),
+	);
 }
 
 function buildPiPrompt(
