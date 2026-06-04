@@ -33,6 +33,7 @@ import {
 	telegramImageExtension,
 } from "./uploads.ts";
 import { telegramRestartToolExtension } from "./restart-tool.ts";
+import { telegramNewSessionToolExtension } from "./session-switch-tool.ts";
 import { telegramVoiceNoteExtension } from "./voice.ts";
 
 export interface PiRunPromptOptions {
@@ -128,6 +129,8 @@ export class SdkPiSession {
 	private selectedModelRef: ModelRef;
 	private selectedModel: Model<Api>;
 	private forceNewSessionOnNextStart = false;
+	private pendingNewSessionRequest = false;
+	private pendingNewSessionTask: string | null = null;
 
 	constructor(runtime: PiRuntime, chatId: string) {
 		this.runtime = runtime;
@@ -202,7 +205,22 @@ export class SdkPiSession {
 			};
 		} finally {
 			unsubscribe();
+			this.applyPendingNewSession();
 		}
+	}
+
+	async requestNewSession(task?: string): Promise<string> {
+		this.pendingNewSessionRequest = true;
+		this.pendingNewSessionTask = task?.trim() || null;
+		return this.pendingNewSessionTask
+			? "Fresh session queued. The provided task will run automatically in the new Pi conversation after the current response finishes."
+			: "Fresh session queued. The next user message will start a new Pi conversation.";
+	}
+
+	consumePendingNewSessionTask(): string | null {
+		const task = this.pendingNewSessionTask;
+		this.pendingNewSessionTask = null;
+		return task;
 	}
 
 	async getApiKeyForProvider(provider: string): Promise<string | undefined> {
@@ -215,6 +233,8 @@ export class SdkPiSession {
 
 	reset(): void {
 		this.cleanup();
+		this.pendingNewSessionRequest = false;
+		this.pendingNewSessionTask = null;
 		this.forceNewSessionOnNextStart = true;
 	}
 
@@ -222,6 +242,14 @@ export class SdkPiSession {
 		this.session?.dispose();
 		this.session = null;
 		this.starting = null;
+	}
+
+	private applyPendingNewSession(): void {
+		if (!this.pendingNewSessionRequest) return;
+
+		this.pendingNewSessionRequest = false;
+		this.cleanup();
+		this.forceNewSessionOnNextStart = true;
 	}
 
 	private async start(): Promise<AgentSession> {
@@ -251,6 +279,7 @@ export class SdkPiSession {
 				...(this.runtime.requestRestart
 					? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
 					: []),
+				telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
 				telegramVoiceNoteExtension(this.chatId),
 				...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
 				...(SEND_LOCAL_DOCUMENTS

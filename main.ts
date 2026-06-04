@@ -287,6 +287,7 @@ async function processQueue(
 				suppressNoop: prompt.suppressNoop,
 			});
 			cleanupAttachments(prompt);
+			enqueuePendingNewSessionTask(chat, prompt);
 		} catch (error) {
 			const message = errorMessage(error);
 			console.error(`[${prompt.chatId}] error:`, message);
@@ -298,6 +299,22 @@ async function processQueue(
 			registry.resetIdleTimer(chat);
 		}
 	}
+}
+
+function enqueuePendingNewSessionTask(
+	chat: ChatState,
+	prompt: IncomingPrompt,
+): void {
+	const task = chat.pi.consumePendingNewSessionTask();
+	if (!task) return;
+
+	chat.queue.unshift({
+		chatId: prompt.chatId,
+		text: task,
+		attachments: [],
+		...(prompt.source ? { source: prompt.source } : {}),
+	});
+	chat.messageCount++;
 }
 
 /** Best-effort removal of temp downloads created for this prompt. */
@@ -398,7 +415,10 @@ function notifyToolCall(
 		return;
 	}
 
-	batch.timer ??= setTimeout(() => {
+	if (batch.timer) {
+		clearTimeout(batch.timer);
+	}
+	batch.timer = setTimeout(() => {
 		void flushToolNotifications(chatId);
 	}, TOOL_CALL_BATCH_MS);
 }
