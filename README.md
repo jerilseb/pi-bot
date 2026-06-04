@@ -4,7 +4,7 @@
 
 `pi-bot` turns a normal Telegram chat into a practical personal AI workspace powered by the [Pi coding agent SDK](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Instead of opening a terminal, a browser, a separate AI app, and a task manager, you can message one bot and let it coordinate the work.
 
-It is designed for people who want an assistant that lives where they already communicate: Telegram.
+It is designed for people who want an assistant that lives where they already communicate: Telegram. Think of it as a lightweight alternative to heavier agent setups like OpenClaw or Hermes agents when you mainly want a private, practical assistant you can message from anywhere.
 
 ## Why this exists
 
