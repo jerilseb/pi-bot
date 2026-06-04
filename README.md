@@ -271,30 +271,6 @@ Operational notes:
 - Telegram downloads and generated temp files are stored under your system temp directory.
 - After changing extensions, skills, prompts, `src/config.ts`, or environment variables, restart with `npx pm2 restart pi-bot --update-env` or `npm stop && npm start`.
 
-## Project layout
-
-```text
-main.ts                     Bot entrypoint and polling loop
-src/commands.ts             Telegram slash-command handlers
-src/config.ts               Non-secret app config and env wiring
-src/pi-session.ts           Pi SDK runtime/session wrapper
-src/telegram.ts             Telegram API helpers
-src/inbound.ts              Telegram message/file/photo/audio ingestion
-src/outbound.ts             Pi response delivery and file uploads
-src/discovery.ts            Extension and skill discovery
-src/system-prompt.ts        System prompt, memory, daily notes, active model prompt
-src/heartbeat.ts            Heartbeat controller
-src/cron.ts                 Scheduled task runner
-src/cron-store.ts           Durable cron job store
-src/model-menu.ts           Inline keyboard model switching
-src/openai-usage.ts         OpenAI Codex usage helper
-src/elevenlabs-usage.ts     ElevenLabs usage helper
-src/restart-tool.ts         Explicit natural-language restart tool
-extensions/                 Local Pi extensions
-skills/                     Pi skills
-files/                      Persistent memory, heartbeat, and cron state
-```
-
 ## Memory files
 
 Important persistent paths:
