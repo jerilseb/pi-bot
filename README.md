@@ -17,6 +17,7 @@ It is basically a personal AI assistant in Telegram, with support for images, fi
 - Includes Tavily `web_search` and browser-style `web_fetch` tools
 - Can create one-time, interval, and cron-like scheduled tasks
 - Has a heartbeat loop for broad proactive monitoring tasks
+- Can gracefully restart itself via `/restart` or an explicit natural-language restart request
 - Maintains long-term memory in `files/memory.md` and daily/session notes in `files/memory/YYYY-MM-DD.md`
 - Includes usage commands for OpenAI Codex and ElevenLabs
 - Includes skills for browser automation, image generation, HTML visualizations, email via Himalaya, and PDF work
@@ -119,6 +120,7 @@ Operational notes:
 - `src/model-menu.ts` — inline keyboard model switching
 - `src/openai-usage.ts` — OpenAI Codex usage helper
 - `src/elevenlabs-usage.ts` — ElevenLabs subscription/credit usage helper
+- `src/restart-tool.ts` — constrained Pi tool for explicit natural-language bot restarts
 
 ## Telegram commands
 
@@ -135,6 +137,8 @@ Inside Telegram:
 - `/reload` — re-scan extensions/skills and reset all chats
 - `/update` — `git pull` this repo and restart the app
 - `/restart` — restart the bot process
+
+The chat runtime also exposes a constrained `restart_bot` Pi tool. It is intended only for explicit natural-language requests such as “restart yourself” and uses the same graceful shutdown path as `/restart`, letting pm2 bring the process back up.
 
 ## Memory
 
