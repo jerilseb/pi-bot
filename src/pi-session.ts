@@ -14,17 +14,19 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-	formatModelRef,
 	MEMORY_PATH,
 	OPENAI_CODEX_API_KEY,
 	OPENROUTER_API_KEY,
-	parseModelRef,
 	SEND_LOCAL_DOCUMENTS,
 	SEND_LOCAL_IMAGES,
 	SESSIONS_DIR,
-	type ModelRef,
 } from "./config.ts";
 import type { Attachment, PiPromptResult } from "./types.ts";
+import {
+	formatModelRef,
+	parseModelRef,
+	type ModelRef,
+} from "./util.ts";
 import {
 	telegramDocumentExtension,
 	telegramImageExtension,

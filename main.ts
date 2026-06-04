@@ -37,7 +37,6 @@ import {
 	TMP_DIR,
 	TOOL_CALL_BATCH_MAX_ITEMS,
 	TOOL_CALL_BATCH_MS,
-	writeActiveModel,
 } from "./src/config.ts";
 import { createCronController, cronStatusText } from "./src/cron.ts";
 import { discoverExtensionPaths, discoverSkillPaths } from "./src/discovery.ts";
@@ -64,11 +63,15 @@ import {
 	telegram,
 } from "./src/telegram.ts";
 import type { IncomingPrompt, TelegramUpdate } from "./src/types.ts";
-import { errorMessage, isBackgroundSource } from "./src/util.ts";
+import {
+	errorMessage,
+	isBackgroundSource,
+	writeModelState,
+} from "./src/util.ts";
 import { voiceStatusText } from "./src/voice.ts";
 
 validateEnvironment();
-writeActiveModel(MODEL);
+writeModelState(ACTIVE_MODEL_PATH, MODEL);
 
 let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
@@ -85,7 +88,7 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
 		activeModelSystemPromptExtension,
 		protectedEnvToolAccessExtension,
 	],
-	writeModelState: writeActiveModel,
+	writeModelState: (model) => writeModelState(ACTIVE_MODEL_PATH, model),
 });
 
 const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
@@ -142,42 +145,42 @@ function validateEnvironment(): void {
 
 	if (!DEFAULT_MODEL) {
 		console.error(
-			"Missing CHAT_MODEL in constants.ts. Example: CHAT_MODEL = \"openrouter/openai/gpt-5.4-mini\"",
+			"Missing CHAT_MODEL in src/config.ts. Example: CHAT_MODEL = \"openrouter/openai/gpt-5.4-mini\"",
 		);
 		process.exit(1);
 	}
 
 	if (ALLOWED_MODELS.length === 0) {
 		console.error(
-			"Missing ALLOWED_MODELS in constants.ts. Example: ALLOWED_MODELS = [\"openrouter/openai/gpt-5.4-mini\", \"openai-codex/gpt-5.5\"]",
+			"Missing CONFIG_ALLOWED_MODELS in src/config.ts. Example: CONFIG_ALLOWED_MODELS = [\"openrouter/openai/gpt-5.4-mini\", \"openai-codex/gpt-5.5\"]",
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(DEFAULT_MODEL)) {
 		console.error(
-			`CHAT_MODEL (${DEFAULT_MODEL}) must be included in ALLOWED_MODELS in constants.ts.`,
+			`CHAT_MODEL (${DEFAULT_MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts.`,
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(MODEL)) {
 		console.error(
-			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS in constants.ts. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL in constants.ts.`,
+			`Active chat model (${MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL in src/config.ts.`,
 		);
 		process.exit(1);
 	}
 
 	if (!BACKGROUND_MODEL) {
 		console.error(
-			"Missing BACKGROUND_MODEL in constants.ts. Example: BACKGROUND_MODEL = \"openai-codex/gpt-5.5\"",
+			"Missing CONFIG_BACKGROUND_MODEL in src/config.ts. Example: CONFIG_BACKGROUND_MODEL = \"openai-codex/gpt-5.5\"",
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(BACKGROUND_MODEL)) {
 		console.error(
-			`Background model (${BACKGROUND_MODEL}) must be included in ALLOWED_MODELS in constants.ts. Check BACKGROUND_MODEL or ALLOWED_MODELS in constants.ts.`,
+			`Background model (${BACKGROUND_MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts. Check CONFIG_BACKGROUND_MODEL or CONFIG_ALLOWED_MODELS in src/config.ts.`,
 		);
 		process.exit(1);
 	}

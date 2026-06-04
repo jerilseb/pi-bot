@@ -34,7 +34,7 @@ TELEGRAM_ALLOWED_CHAT_ID=123456789
 OPENROUTER_API_KEY=sk-or-your-key
 ```
 
-Chat/model defaults live in `constants.ts`; secrets and the deployment-specific allowed Telegram chat ID live in `.env`.
+Chat/model defaults live in `src/config.ts`; secrets and the deployment-specific allowed Telegram chat ID live in `.env`.
 
 For local foreground development:
 
@@ -50,7 +50,7 @@ npm start
 
 If everything is happy, the bridge logs will show the chat model, background model, enabled extensions, and skills.
 
-`CHAT_MODEL` is the default model for normal Telegram chat prompts. The active chat model can be changed with `/models` and is persisted in `.active_model`. `BACKGROUND_MODEL` controls heartbeat and cron prompts and can only be changed through the environment. `CHAT_MODEL`, the active chat model, and `BACKGROUND_MODEL` must be included in `ALLOWED_MODELS`.
+`CHAT_MODEL` is the default model for normal Telegram chat prompts. The active chat model can be changed with `/models` and is persisted in `.active_model`. `CONFIG_BACKGROUND_MODEL` controls heartbeat and cron prompts and can only be changed in `src/config.ts`. `CHAT_MODEL`, the active chat model, and `CONFIG_BACKGROUND_MODEL` must be included in `CONFIG_ALLOWED_MODELS`.
 
 Model refs use `provider/model-id` form. OpenRouter model IDs can contain slashes, so include the provider prefix, e.g. `openrouter/openai/gpt-5.4-mini`. For `openai-codex/...`, authenticate through Pi first with `/login openai-codex` so credentials are available in `~/.pi/agent/auth.json`.
 
