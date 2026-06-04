@@ -363,26 +363,31 @@ function formatToolStartNotification(
 	session: AgentSession,
 	cwd: string,
 ): string {
-	if (isMemoryEditTool(event, cwd)) return "🧠 memory updated";
+	const memoryUpdateKind = getMemoryUpdateKind(event, cwd);
+	if (memoryUpdateKind === "long-term") return "🧠 memory updated";
+	if (memoryUpdateKind === "daily") return "🧠 daily memory updated";
 
 	const skillName = skillNameForReadTool(event, session, cwd);
 	return skillName ? `📗 ${skillName}` : `🛠 ${event.toolName}`;
 }
 
-function isMemoryEditTool(
+function getMemoryUpdateKind(
 	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
 	cwd: string,
-): boolean {
-	if (event.toolName !== "edit" && event.toolName !== "write") return false;
+): "long-term" | "daily" | null {
+	if (event.toolName !== "edit" && event.toolName !== "write") return null;
 
 	const editPath = extractToolPath(event.args);
-	if (!editPath) return false;
+	if (!editPath) return null;
 
 	const normalizedEditPath = normalizeFilePath(editPath, cwd);
-	return (
-		normalizedEditPath === normalizeFilePath(MEMORY_PATH, cwd) ||
-		isPathInside(normalizedEditPath, normalizeFilePath(DAILY_MEMORY_DIR, cwd))
-	);
+	if (normalizedEditPath === normalizeFilePath(MEMORY_PATH, cwd)) {
+		return "long-term";
+	}
+	if (isPathInside(normalizedEditPath, normalizeFilePath(DAILY_MEMORY_DIR, cwd))) {
+		return "daily";
+	}
+	return null;
 }
 
 function skillNameForReadTool(
