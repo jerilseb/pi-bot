@@ -46,8 +46,9 @@ npm run typecheck
 ## Environment and secrets
 
 - Never commit `.env` or real API keys/tokens.
-- Required runtime variables include `TELEGRAM_BOT_TOKEN`, `MODEL`, and `TELEGRAM_ALLOWED_CHAT_ID`; provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
-- Optional integrations include ElevenLabs, Tavily, and KIE API keys; keep these secret.
+- Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys.
+- Non-secret bot configuration lives in top-level `constants.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval.
+- Provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 
 ## Operational notes
 

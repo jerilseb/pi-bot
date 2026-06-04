@@ -30,14 +30,11 @@ Create a `.env` file:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:your-telegram-token
-CHAT_MODEL=openrouter/openai/gpt-5.4-mini
-BACKGROUND_MODEL=openai-codex/gpt-5.5
-ALLOWED_MODELS=openrouter/openai/gpt-5.4-mini,openrouter/openai/gpt-5.5,openai-codex/gpt-5.5
-OPENROUTER_API_KEY=sk-or-your-key
-
-# required: the only Telegram chat allowed to use this bot
 TELEGRAM_ALLOWED_CHAT_ID=123456789
+OPENROUTER_API_KEY=sk-or-your-key
 ```
+
+Chat/model defaults live in `constants.ts`; secrets and the deployment-specific allowed Telegram chat ID live in `.env`.
 
 For local foreground development:
 
@@ -137,9 +134,6 @@ Inside Telegram:
 Add any of these to `.env` if you want the extra features:
 
 ```bash
-# required: limit access to one specific chat/group
-TELEGRAM_ALLOWED_CHAT_ID=123456789
-
 # voice/audio transcription
 ELEVENLABS_API_KEY=your-elevenlabs-key
 

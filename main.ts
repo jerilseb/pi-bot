@@ -142,49 +142,49 @@ function validateEnvironment(): void {
 
 	if (!DEFAULT_MODEL) {
 		console.error(
-			"Missing CHAT_MODEL. Example: CHAT_MODEL=openrouter/openai/gpt-5.4-mini",
+			"Missing CHAT_MODEL in constants.ts. Example: CHAT_MODEL = \"openrouter/openai/gpt-5.4-mini\"",
 		);
 		process.exit(1);
 	}
 
 	if (ALLOWED_MODELS.length === 0) {
 		console.error(
-			"Missing ALLOWED_MODELS. Example: ALLOWED_MODELS=openrouter/openai/gpt-5.4-mini,openai-codex/gpt-5.5",
+			"Missing ALLOWED_MODELS in constants.ts. Example: ALLOWED_MODELS = [\"openrouter/openai/gpt-5.4-mini\", \"openai-codex/gpt-5.5\"]",
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(DEFAULT_MODEL)) {
 		console.error(
-			`CHAT_MODEL (${DEFAULT_MODEL}) must be included in ALLOWED_MODELS.`,
+			`CHAT_MODEL (${DEFAULT_MODEL}) must be included in ALLOWED_MODELS in constants.ts.`,
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(MODEL)) {
 		console.error(
-			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL.`,
+			`Active chat model (${MODEL}) must be included in ALLOWED_MODELS in constants.ts. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL in constants.ts.`,
 		);
 		process.exit(1);
 	}
 
 	if (!BACKGROUND_MODEL) {
 		console.error(
-			"Missing BACKGROUND_MODEL. Example: BACKGROUND_MODEL=openai-codex/gpt-5.5",
+			"Missing BACKGROUND_MODEL in constants.ts. Example: BACKGROUND_MODEL = \"openai-codex/gpt-5.5\"",
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_MODELS.includes(BACKGROUND_MODEL)) {
 		console.error(
-			`Background model (${BACKGROUND_MODEL}) must be included in ALLOWED_MODELS. Check BACKGROUND_MODEL or ALLOWED_MODELS.`,
+			`Background model (${BACKGROUND_MODEL}) must be included in ALLOWED_MODELS in constants.ts. Check BACKGROUND_MODEL or ALLOWED_MODELS in constants.ts.`,
 		);
 		process.exit(1);
 	}
 
 	if (!ALLOWED_CHAT_ID) {
 		console.error(
-			"Missing TELEGRAM_ALLOWED_CHAT_ID. This bot is restricted to exactly one Telegram chat.",
+			"Missing TELEGRAM_ALLOWED_CHAT_ID in .env. This bot is restricted to exactly one Telegram chat.",
 		);
 		process.exit(1);
 	}

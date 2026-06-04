@@ -2,32 +2,44 @@ import "dotenv/config";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+	ALLOWED_MODELS as CONFIG_ALLOWED_MODELS,
+	BACKGROUND_MODEL as CONFIG_BACKGROUND_MODEL,
+	CHAT_MODEL,
+	ELEVENLABS_TRANSCRIPTION_LANGUAGE,
+	ELEVENLABS_TRANSCRIPTION_MODEL,
+	ELEVENLABS_TTS_MODEL as CONFIG_ELEVENLABS_TTS_MODEL,
+	ELEVENLABS_TTS_OUTPUT_FORMAT as CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT,
+	ELEVENLABS_TTS_VOICE_ID as CONFIG_ELEVENLABS_TTS_VOICE_ID,
+	EXTENSION_ENTRYPOINT_EXTS as CONFIG_EXTENSION_ENTRYPOINT_EXTS,
+	HEARTBEAT_ENABLED as CONFIG_HEARTBEAT_ENABLED,
+	PI_CHANNEL_DOCUMENT_UPLOAD_DIRS,
+	PI_CHANNEL_DOCUMENT_UPLOAD_EXTS,
+	PI_CHANNEL_IDLE_TIMEOUT_MINUTES,
+	PI_CHANNEL_IMAGE_UPLOAD_DIRS,
+	PI_CHANNEL_MAX_QUEUE_PER_CHAT,
+	PI_CHANNEL_MAX_TTS_CHARS,
+	PI_CHANNEL_SEND_LOCAL_DOCUMENTS,
+	PI_CHANNEL_SEND_LOCAL_IMAGES,
+	PI_CHANNEL_SEND_TOOL_CALLS,
+	PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS,
+	PI_CHANNEL_TOOL_CALL_BATCH_MS,
+	PI_HEARTBEAT_INTERVAL_SECONDS,
+} from "../constants.ts";
 
 export interface ModelRef {
 	provider: string;
 	model: string;
 }
 
-export function envFlag(
-	value: string | undefined,
-	defaultValue: boolean,
-): boolean {
-	if (value === undefined || value.trim() === "") return defaultValue;
-	return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
-}
-
-export function envNumber(
-	value: string | undefined,
+function configNumber(
+	value: number,
 	defaultValue: number,
 	minimum: number,
 ): number {
 	const parsed = Number(value ?? defaultValue);
 	if (!Number.isFinite(parsed)) return defaultValue;
 	return Math.max(minimum, parsed);
-}
-
-export function resolveConfigPath(value: string): string {
-	return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
 
 export function parseModelRef(value: string): ModelRef {
@@ -100,37 +112,32 @@ export function writeActiveModel(model: string): void {
 export const BOT_TOKEN =
 	process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
 
-export const DEFAULT_MODEL = normalizeModelRef(process.env.CHAT_MODEL ?? "");
+export const DEFAULT_MODEL = normalizeModelRef(CHAT_MODEL);
 
-export const ALLOWED_MODELS = (process.env.ALLOWED_MODELS ?? "")
-	.split(",")
-	.map((model) => normalizeModelRef(model))
-	.filter(Boolean);
+export const ALLOWED_MODELS = CONFIG_ALLOWED_MODELS.map((model) =>
+	normalizeModelRef(model),
+).filter(Boolean);
 export const MODEL =
 	readActiveModel(ACTIVE_MODEL_PATH, ALLOWED_MODELS, DEFAULT_MODEL) ??
 	DEFAULT_MODEL;
-export const BACKGROUND_MODEL = normalizeModelRef(
-	process.env.BACKGROUND_MODEL ?? "",
-);
+export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
 
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? "";
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-export const ELEVENLABS_MODEL = "scribe_v2";
-export const ELEVENLABS_LANGUAGE = "en";
+export const ELEVENLABS_MODEL = ELEVENLABS_TRANSCRIPTION_MODEL;
+export const ELEVENLABS_LANGUAGE = ELEVENLABS_TRANSCRIPTION_LANGUAGE;
 export const ELEVENLABS_TTS_VOICE_ID =
-	process.env.ELEVENLABS_TTS_VOICE_ID?.trim() ?? "";
-export const ELEVENLABS_TTS_MODEL =
-	process.env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_v3";
+	CONFIG_ELEVENLABS_TTS_VOICE_ID.trim();
+export const ELEVENLABS_TTS_MODEL = CONFIG_ELEVENLABS_TTS_MODEL.trim();
 export const ELEVENLABS_TTS_OUTPUT_FORMAT =
-	process.env.ELEVENLABS_TTS_OUTPUT_FORMAT?.trim() || "opus_48000_32";
-export const ALLOWED_CHAT_ID =
-	process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? "";
+	CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT.trim();
+export const ALLOWED_CHAT_ID = process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? "";
 
 export const IDLE_TIMEOUT_MS =
-	envNumber(process.env.PI_CHANNEL_IDLE_TIMEOUT_MINUTES, 30, 1) * 60_000;
-export const MAX_QUEUE_PER_CHAT = envNumber(
-	process.env.PI_CHANNEL_MAX_QUEUE_PER_CHAT,
+	configNumber(PI_CHANNEL_IDLE_TIMEOUT_MINUTES, 30, 1) * 60_000;
+export const MAX_QUEUE_PER_CHAT = configNumber(
+	PI_CHANNEL_MAX_QUEUE_PER_CHAT,
 	5,
 	1,
 );
@@ -148,61 +155,40 @@ export const TELEGRAM_DOCUMENT_UPLOAD_LIMIT = 50 * 1024 * 1024;
 export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 export const TMP_DIR = path.join(os.tmpdir(), "pi-channel");
 
-export const MAX_TTS_CHARS = envNumber(
-	process.env.PI_CHANNEL_MAX_TTS_CHARS,
+export const MAX_TTS_CHARS = configNumber(
+	PI_CHANNEL_MAX_TTS_CHARS,
 	2500,
 	100,
 );
 
-export const SEND_TOOL_CALLS = envFlag(
-	process.env.PI_CHANNEL_SEND_TOOL_CALLS,
-	true,
-);
-export const TOOL_CALL_BATCH_MS = envNumber(
-	process.env.PI_CHANNEL_TOOL_CALL_BATCH_MS,
+export const SEND_TOOL_CALLS = PI_CHANNEL_SEND_TOOL_CALLS;
+export const TOOL_CALL_BATCH_MS = configNumber(
+	PI_CHANNEL_TOOL_CALL_BATCH_MS,
 	1500,
 	0,
 );
-export const TOOL_CALL_BATCH_MAX_ITEMS = envNumber(
-	process.env.PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS,
+export const TOOL_CALL_BATCH_MAX_ITEMS = configNumber(
+	PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS,
 	8,
 	1,
 );
 
-export const SEND_LOCAL_IMAGES = true;
-export const LOCAL_IMAGE_UPLOAD_DIRS = (
-	process.env.PI_CHANNEL_IMAGE_UPLOAD_DIRS ??
-	path.join(os.tmpdir(), "create-image")
-)
-	.split(",")
-	.map((s) => s.trim())
-	.filter(Boolean);
+export const SEND_LOCAL_IMAGES = PI_CHANNEL_SEND_LOCAL_IMAGES;
+export const LOCAL_IMAGE_UPLOAD_DIRS = PI_CHANNEL_IMAGE_UPLOAD_DIRS.map((s) =>
+	s.trim(),
+).filter(Boolean);
 
-export const SEND_LOCAL_DOCUMENTS = envFlag(
-	process.env.PI_CHANNEL_SEND_LOCAL_DOCUMENTS,
-	true,
+export const SEND_LOCAL_DOCUMENTS = PI_CHANNEL_SEND_LOCAL_DOCUMENTS;
+export const LOCAL_DOCUMENT_UPLOAD_DIRS = PI_CHANNEL_DOCUMENT_UPLOAD_DIRS.map(
+	(s) => s.trim(),
+).filter(Boolean);
+export const DOCUMENT_UPLOAD_EXTS = PI_CHANNEL_DOCUMENT_UPLOAD_EXTS.map((s) =>
+	s.trim().toLowerCase().replace(/^\./, ""),
+).filter(Boolean);
+
+export const EXTENSION_ENTRYPOINT_EXTS = new Set<string>(
+	CONFIG_EXTENSION_ENTRYPOINT_EXTS,
 );
-export const LOCAL_DOCUMENT_UPLOAD_DIRS = (
-	process.env.PI_CHANNEL_DOCUMENT_UPLOAD_DIRS ??
-	`${path.join(os.tmpdir(), "pi-channel")},${process.cwd()}`
-)
-	.split(",")
-	.map((s) => s.trim())
-	.filter(Boolean);
-export const DOCUMENT_UPLOAD_EXTS = (
-	process.env.PI_CHANNEL_DOCUMENT_UPLOAD_EXTS ??
-	"pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,json"
-)
-	.split(",")
-	.map((s) => s.trim().toLowerCase().replace(/^\./, ""))
-	.filter(Boolean);
-
-export const EXTENSION_ENTRYPOINT_EXTS = new Set([
-	".ts",
-	".js",
-	".mjs",
-	".cjs",
-]);
 export const PROJECT_EXTENSIONS_DIR = path.join(PROJECT_ROOT, "extensions");
 export const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, "skills");
 export const FILES_DIR = path.join(PROJECT_ROOT, "files");
@@ -210,9 +196,9 @@ export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, "system.md");
 export const MEMORY_PATH = path.join(FILES_DIR, "memory.md");
 export const CRON_JOBS_PATH = path.join(FILES_DIR, "cron-jobs.json");
 
-export const HEARTBEAT_ENABLED = true;
+export const HEARTBEAT_ENABLED = CONFIG_HEARTBEAT_ENABLED;
 export const HEARTBEAT_INTERVAL_MS =
-	envNumber(process.env.PI_HEARTBEAT_INTERVAL_SECONDS, 60, 1) * 1000;
+	configNumber(PI_HEARTBEAT_INTERVAL_SECONDS, 60, 1) * 1000;
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, "heartbeat.md");
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, "heartbeat-state.md");
 export const HEARTBEAT_NOOP = "__HEARTBEAT_NOOP__";
