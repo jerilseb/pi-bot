@@ -1,6 +1,14 @@
 import type { ChatRegistry, ChatState } from "./chat-session.ts";
-import { HEARTBEAT_ENABLED, SEND_TOOL_CALLS } from "./config.ts";
+import {
+	ELEVENLABS_API_KEY,
+	HEARTBEAT_ENABLED,
+	SEND_TOOL_CALLS,
+} from "./config.ts";
 import { cronStatusText } from "./cron.ts";
+import {
+	buildElevenLabsUsageTelegramHtml,
+	fetchElevenLabsUsage,
+} from "./elevenlabs-usage.ts";
 import { formatCommandOutput, gitPull } from "./maintenance.ts";
 import { buildModelInlineKeyboard } from "./model-menu.ts";
 import {
@@ -33,6 +41,7 @@ const HELP_TEXT = [
 	"/status — show this chat session status",
 	"/models — choose an allowed chat model",
 	"/openaiusage — show OpenAI Codex usage windows and reset times",
+	"/elevenlabsusage — show ElevenLabs credit/character usage",
 	"/abort — abort the current Pi response",
 	"/new — clear this chat's Pi conversation",
 	"/reload — re-scan extensions/skills and reset all chats",
@@ -115,6 +124,32 @@ const COMMANDS: Record<string, CommandHandler> = {
 			await sendTelegramMessage(
 				chat.chatId,
 				`❌ Failed to fetch OpenAI Codex usage: ${escapeTelegramHtml(message)}`,
+			);
+		}
+	},
+
+	"/elevenlabsusage": async ({ chat }) => {
+		if (!ELEVENLABS_API_KEY) {
+			await sendTelegramMessage(
+				chat.chatId,
+				"❌ No ElevenLabs API key found. Set ELEVENLABS_API_KEY in .env.",
+			);
+			return;
+		}
+
+		await sendTelegramMessage(chat.chatId, "Fetching ElevenLabs usage...");
+
+		try {
+			const usage = await fetchElevenLabsUsage(ELEVENLABS_API_KEY);
+			await sendTelegramMessage(
+				chat.chatId,
+				buildElevenLabsUsageTelegramHtml(usage),
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			await sendTelegramMessage(
+				chat.chatId,
+				`❌ Failed to fetch ElevenLabs usage: ${escapeTelegramHtml(message)}`,
 			);
 		}
 	},
