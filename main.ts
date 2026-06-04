@@ -450,41 +450,7 @@ async function flushToolNotifications(chatId: string): Promise<void> {
 }
 
 function formatToolNotificationBatch(notifications: string[]): string {
-	const compacted = compactAdjacentNotifications(notifications);
-	if (compacted.length === 1) return compacted[0];
-
-	const maxDisplay = Math.max(1, TOOL_CALL_BATCH_MAX_ITEMS);
-	const visible = compacted.slice(0, maxDisplay);
-	const hidden = compacted.length - visible.length;
-	return `🧰 ${visible.join(" → ")}${hidden > 0 ? ` → +${hidden} more` : ""}`;
-}
-
-function compactAdjacentNotifications(notifications: string[]): string[] {
-	const compacted: string[] = [];
-	let previous = "";
-	let count = 0;
-
-	for (const notification of notifications) {
-		if (notification === previous) {
-			count++;
-			continue;
-		}
-		pushCompactedNotification(compacted, previous, count);
-		previous = notification;
-		count = 1;
-	}
-	pushCompactedNotification(compacted, previous, count);
-
-	return compacted;
-}
-
-function pushCompactedNotification(
-	compacted: string[],
-	notification: string,
-	count: number,
-): void {
-	if (!notification || count <= 0) return;
-	compacted.push(count === 1 ? notification : `${notification} ×${count}`);
+	return notifications.join("\n");
 }
 
 function sleep(ms: number): Promise<void> {

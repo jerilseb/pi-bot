@@ -365,17 +365,105 @@ async function findMostRecentSessionForId(
 	);
 }
 
+const MAX_TOOL_NOTIFICATION_DISPLAY_CHARS = 34;
+
 function formatToolStartNotification(
 	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
 	session: AgentSession,
 	cwd: string,
 ): string {
+	const firstArgument = formatFirstToolArgument(event.args);
+	const appendFirstArgument = (label: string) => {
+		if (!firstArgument) return label;
+
+		const maxArgumentChars = Math.max(
+			8,
+			MAX_TOOL_NOTIFICATION_DISPLAY_CHARS - visibleTextLength(label) - 3,
+		);
+		return `${label} (<code>${escapeTelegramHtml(
+			truncateToolArgument(firstArgument, maxArgumentChars),
+		)}</code>)`;
+	};
+
 	const memoryUpdateKind = getMemoryUpdateKind(event, cwd);
-	if (memoryUpdateKind === "long-term") return "🧠 memory updated";
-	if (memoryUpdateKind === "daily") return "🧠 daily memory updated";
+	if (memoryUpdateKind === "long-term") {
+		return appendFirstArgument("🧠 memory updated");
+	}
+	if (memoryUpdateKind === "daily") {
+		return appendFirstArgument("🧠 daily memory updated");
+	}
 
 	const skillName = skillNameForReadTool(event, session, cwd);
-	return skillName ? `📗 ${skillName}` : `🛠 ${event.toolName}`;
+	return appendFirstArgument(
+		skillName
+			? `📗 ${escapeTelegramHtml(skillName)}`
+			: `🛠 ${escapeTelegramHtml(event.toolName)}`,
+	);
+}
+
+function formatFirstToolArgument(args: unknown): string | null {
+	const firstArgument = extractFirstToolArgument(args);
+	if (!firstArgument) return null;
+
+	return formatToolArgumentValue(firstArgument.value);
+}
+
+function extractFirstToolArgument(
+	args: unknown,
+): { name?: string; value: unknown } | null {
+	if (args === null || args === undefined) return null;
+	if (Array.isArray(args)) {
+		return args.length > 0 ? { value: args[0] } : null;
+	}
+	if (typeof args !== "object") return { value: args };
+
+	const [firstEntry] = Object.entries(args as Record<string, unknown>);
+	if (!firstEntry) return null;
+
+	const [name, value] = firstEntry;
+	return { name, value };
+}
+
+function formatToolArgumentValue(value: unknown): string {
+	let text: string;
+	if (typeof value === "string") {
+		text = value.trim() ? value : JSON.stringify(value);
+	} else if (
+		value === null ||
+		typeof value === "number" ||
+		typeof value === "boolean" ||
+		typeof value === "bigint" ||
+		typeof value === "undefined"
+	) {
+		text = String(value);
+	} else {
+		try {
+			text = JSON.stringify(value);
+		} catch {
+			text = String(value);
+		}
+	}
+
+	const compacted = text.replace(/\s+/g, " ").trim();
+	return compacted || text;
+}
+
+function truncateToolArgument(value: string, maxChars: number): string {
+	if (maxChars <= 0) return "";
+	if (value.length <= maxChars) return value;
+	if (maxChars === 1) return "…";
+	return `${value.slice(0, maxChars - 1)}…`;
+}
+
+function visibleTextLength(value: string): number {
+	return value.replace(/<[^>]*>/g, "").length;
+}
+
+function escapeTelegramHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
 }
 
 function getMemoryUpdateKind(
