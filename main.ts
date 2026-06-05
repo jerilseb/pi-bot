@@ -73,8 +73,8 @@ import { voiceStatusText } from "./src/voice.ts";
 validateEnvironment();
 writeModelState(ACTIVE_MODEL_PATH, MODEL);
 
-let EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-let SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
+const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
 const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
 	cwd: process.cwd(),
@@ -194,14 +194,6 @@ function validateEnvironment(): void {
 	}
 }
 
-/** Re-scans local extensions/skills and resets every chat session. */
-function reloadResources(): void {
-	EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-	SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
-	chats.clearAll();
-	backgroundChats.clearAll();
-}
-
 /** Shuts the bot down and exits so PM2 brings the process back up. */
 async function restart(): Promise<void> {
 	await shutdown();
@@ -220,7 +212,6 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 				registry: chats,
 				backgroundRegistry: backgroundChats,
 				getBackgroundModelName,
-				reloadResources,
 				restart,
 			},
 			trimmed,

@@ -56,7 +56,7 @@ npm run typecheck
 - Only one running process should poll a given Telegram bot token.
 - Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested.
 - Temporary downloads/generated files are under the system temp directory.
-- After changing extensions, skills, prompts, or env vars, restart the bot or use the `/reload` command where applicable.
+- After changing extensions, skills, prompts, or env vars, restart the bot.
 
 ## Pi-specific work
 

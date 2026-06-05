@@ -174,7 +174,7 @@ export default function tavilySearchExtension(pi: ExtensionAPI) {
 			? `Tavily web_search: using ${selectedKey.name}`
 			: "Tavily web_search: no API key configured (set TAVILY_API_KEY_1, TAVILY_API_KEY_2, ...)";
 		const type: "info" | "warning" = selectedKey ? "info" : "warning";
-		// Defer one tick: pi's /reload calls rebuildChatFromMessages() after session_start fires, which would clear a synchronous notify.
+		// Defer one tick so session rebuild logic after session_start cannot clear a synchronous notify.
 		setTimeout(() => ctx.ui.notify(message, type), 0);
 	});
 
@@ -192,7 +192,7 @@ export default function tavilySearchExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal) {
 			if (!selectedKey) {
 				throw new Error(
-					"Missing Tavily API key. Set TAVILY_API_KEY_1 (and optionally TAVILY_API_KEY_2, ...) before starting pi, then run /reload.",
+					"Missing Tavily API key. Set TAVILY_API_KEY_1 (and optionally TAVILY_API_KEY_2, ...) before starting pi, then restart the bot.",
 				);
 			}
 

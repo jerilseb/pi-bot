@@ -28,8 +28,6 @@ export interface CommandContext {
 	registry: ChatRegistry;
 	backgroundRegistry: ChatRegistry;
 	getBackgroundModelName(chatId: string): string;
-	/** Re-scans extensions/skills and resets every chat session. */
-	reloadResources(): void;
 	/** Shuts the bot down and exits so PM2 brings it back up. */
 	restart(): Promise<void>;
 }
@@ -44,7 +42,6 @@ const HELP_TEXT = [
 	"/elevenlabsusage — show ElevenLabs credit/character usage",
 	"/abort — abort the current Pi response",
 	"/new — clear this chat's Pi conversation",
-	"/reload — re-scan extensions/skills and reset all chats",
 	"/update — git pull this repo and restart the app",
 	"/restart — exit this process so PM2 can restart it",
 	"/help — show this help",
@@ -172,14 +169,6 @@ const COMMANDS: Record<string, CommandHandler> = {
 		await sendTelegramMessage(
 			chat.chatId,
 			"🔄 Started a fresh Pi conversation for this chat.",
-		);
-	},
-
-	"/reload": async ({ chat, reloadResources }) => {
-		reloadResources();
-		await sendTelegramMessage(
-			chat.chatId,
-			"🔁 Reloaded extensions and skills. All chats reset.",
 		);
 	},
 

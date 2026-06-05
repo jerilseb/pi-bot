@@ -219,7 +219,6 @@ Inside Telegram:
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
 | `/abort` | Stop the current response and clear the queue |
 | `/new` | Reset the Pi conversation for this chat |
-| `/reload` | Re-scan extensions/skills and reset all chats |
 | `/update` | `git pull` this repo and restart the app |
 | `/restart` | Restart the bot process |
 
