@@ -16,7 +16,6 @@ export async function registerBotCommands(): Promise<void> {
 					{ command: "elevenlabsusage", description: "Show ElevenLabs usage" },
 					{ command: "abort", description: "Stop the current Pi response" },
 					{ command: "new", description: "Reset this chat's Pi conversation" },
-					{ command: "reload", description: "Re-scan extensions and skills" },
 					{ command: "update", description: "Git pull and restart the app" },
 					{ command: "restart", description: "Restart the bot process via PM2" },
 				],
