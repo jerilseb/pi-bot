@@ -27,9 +27,24 @@ const CONFIG_ALLOWED_MODELS = [
 	"openrouter/moonshotai/kimi-k2.6",
 ] as const;
 
-// ElevenLabs voice features
+// Speech features
+export type SpeechProvider = "google-genai" | "elevenlabs";
+const CONFIG_SPEECH_TO_TEXT_PROVIDER: SpeechProvider = "google-genai";
+const CONFIG_TEXT_TO_SPEECH_PROVIDER: SpeechProvider = "google-genai";
+
+// Google GenAI speech features
+const GOOGLE_GENAI_TRANSCRIPTION_MODEL = "gemini-3.5-flash";
+const GOOGLE_GENAI_TRANSCRIPTION_PROMPT =
+	"Transcribe this audio accurately. Return only the transcript text.";
+const GOOGLE_GENAI_TTS_MODEL = "gemini-3.1-flash-tts-preview";
+const GOOGLE_GENAI_TTS_VOICE_NAME = "Kore";
+
+// ElevenLabs speech features
 const ELEVENLABS_TRANSCRIPTION_MODEL = "scribe_v2";
 const ELEVENLABS_TRANSCRIPTION_LANGUAGE = "en";
+const ELEVENLABS_TRANSCRIPTION_FETCH_ATTEMPTS = 3;
+const ELEVENLABS_TRANSCRIPTION_FETCH_TIMEOUT_MS = 60_000;
+const ELEVENLABS_TRANSCRIPTION_RETRY_BASE_DELAY_MS = 1_000;
 const CONFIG_ELEVENLABS_TTS_VOICE_ID = "cjVigY5qzO86Huf0OWal";
 const CONFIG_ELEVENLABS_TTS_MODEL = "eleven_v3";
 const CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT = "opus_48000_32";
@@ -106,6 +121,8 @@ export const BOT_TOKEN =
 export const ALLOWED_CHAT_ID = process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? "";
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? "";
+export const GOOGLE_GENAI_API_KEY =
+	process.env.GOOGLE_GENAI_API_KEY ?? process.env.GEMINI_API_KEY ?? "";
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 // ---------------------------------------------------------------------------
@@ -164,8 +181,30 @@ export const TOOL_CALL_BATCH_MAX_ITEMS = configNumber(
 // Voice and transcription
 // ---------------------------------------------------------------------------
 
+export const SPEECH_TO_TEXT_PROVIDER = CONFIG_SPEECH_TO_TEXT_PROVIDER;
+export const TEXT_TO_SPEECH_PROVIDER = CONFIG_TEXT_TO_SPEECH_PROVIDER;
+export const GOOGLE_GENAI_STT_MODEL = GOOGLE_GENAI_TRANSCRIPTION_MODEL.trim();
+export const GOOGLE_GENAI_STT_PROMPT =
+	GOOGLE_GENAI_TRANSCRIPTION_PROMPT.trim();
+export const GOOGLE_GENAI_TTS_MODEL_NAME = GOOGLE_GENAI_TTS_MODEL.trim();
+export const GOOGLE_GENAI_TTS_VOICE = GOOGLE_GENAI_TTS_VOICE_NAME.trim();
 export const ELEVENLABS_MODEL = ELEVENLABS_TRANSCRIPTION_MODEL;
 export const ELEVENLABS_LANGUAGE = ELEVENLABS_TRANSCRIPTION_LANGUAGE;
+export const TRANSCRIPTION_FETCH_ATTEMPTS = configNumber(
+	ELEVENLABS_TRANSCRIPTION_FETCH_ATTEMPTS,
+	3,
+	1,
+);
+export const TRANSCRIPTION_FETCH_TIMEOUT_MS = configNumber(
+	ELEVENLABS_TRANSCRIPTION_FETCH_TIMEOUT_MS,
+	60_000,
+	1_000,
+);
+export const TRANSCRIPTION_RETRY_BASE_DELAY_MS = configNumber(
+	ELEVENLABS_TRANSCRIPTION_RETRY_BASE_DELAY_MS,
+	1_000,
+	100,
+);
 export const ELEVENLABS_TTS_VOICE_ID =
 	CONFIG_ELEVENLABS_TTS_VOICE_ID.trim();
 export const ELEVENLABS_TTS_MODEL = CONFIG_ELEVENLABS_TTS_MODEL.trim();

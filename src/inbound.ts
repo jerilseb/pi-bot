@@ -2,21 +2,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
 	ALLOWED_CHAT_ID,
-	ELEVENLABS_API_KEY,
-	ELEVENLABS_LANGUAGE,
-	ELEVENLABS_MODEL,
 	TELEGRAM_DOWNLOAD_LIMIT,
 	TELEGRAM_FILE_API,
 	TMP_DIR,
-	TRANSCRIPTION_MAX_FILE_SIZE,
 } from "./config.ts";
+import { transcribeAudio } from "./speech.ts";
 import { sendChatAction, telegram } from "./telegram.ts";
-import type {
-	IncomingPrompt,
-	TelegramMessage,
-	TranscriptionResult,
-} from "./types.ts";
-import { errorMessage } from "./util.ts";
+import type { IncomingPrompt, TelegramMessage } from "./types.ts";
 
 export async function toIncomingPrompt(
 	message: TelegramMessage,
@@ -79,8 +71,10 @@ export async function toIncomingPrompt(
 
 		if (isTranscribableAudio(message, mimeType, filename)) {
 			void sendChatAction(chatId);
-			const transcription = await transcribeWithElevenLabs(
+			const transcription = await transcribeAudio(
 				downloaded.localPath,
+				mimeType,
+				filename,
 			);
 			if (transcription.ok && transcription.text) {
 				deleteLocalFile(downloaded.localPath);
@@ -167,63 +161,6 @@ function isTranscribableAudio(
 		".flac",
 		".aac",
 	].includes(ext);
-}
-
-async function transcribeWithElevenLabs(
-	filePath: string,
-): Promise<TranscriptionResult> {
-	if (!ELEVENLABS_API_KEY) {
-		return {
-			ok: false,
-			error: "Set ELEVENLABS_API_KEY to enable ElevenLabs transcription.",
-		};
-	}
-
-	if (!fs.existsSync(filePath))
-		return { ok: false, error: `File not found: ${filePath}` };
-	const stat = fs.statSync(filePath);
-	if (stat.size === 0) return { ok: false, error: "File is empty" };
-	if (stat.size > TRANSCRIPTION_MAX_FILE_SIZE) {
-		return {
-			ok: false,
-			error: `File too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB (max 25MB)`,
-		};
-	}
-
-	try {
-		const form = new FormData();
-		const fileBuffer = fs.readFileSync(filePath);
-		form.append("file", new Blob([fileBuffer]), path.basename(filePath));
-		form.append("model_id", ELEVENLABS_MODEL);
-		if (ELEVENLABS_LANGUAGE) form.append("language_code", ELEVENLABS_LANGUAGE);
-
-		const response = await fetch(
-			"https://api.elevenlabs.io/v1/speech-to-text",
-			{
-				method: "POST",
-				headers: { "xi-api-key": ELEVENLABS_API_KEY },
-				body: form,
-			},
-		);
-
-		if (!response.ok) {
-			const body = await response.text().catch(() => "");
-			return {
-				ok: false,
-				error: `ElevenLabs API error (${response.status}): ${body.slice(0, 200)}`,
-			};
-		}
-
-		const data = (await response.json()) as { text?: string };
-		if (!data.text)
-			return { ok: false, error: "ElevenLabs returned empty transcription" };
-		return { ok: true, text: data.text };
-	} catch (error) {
-		return {
-			ok: false,
-			error: errorMessage(error),
-		};
-	}
 }
 
 function deleteLocalFile(filePath: string): void {

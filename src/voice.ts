@@ -1,22 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { MAX_TTS_CHARS, TELEGRAM_VOICE_UPLOAD_LIMIT } from "./config.ts";
 import {
-	ELEVENLABS_API_KEY,
-	ELEVENLABS_TTS_MODEL,
-	ELEVENLABS_TTS_OUTPUT_FORMAT,
-	ELEVENLABS_TTS_VOICE_ID,
-	MAX_TTS_CHARS,
-	TELEGRAM_VOICE_UPLOAD_LIMIT,
-} from "./config.ts";
-
-const MODEL_CHAR_LIMITS: Record<string, number> = {
-	eleven_v3: 2500,
-};
-const EFFECTIVE_TTS_CHAR_LIMIT = Math.min(
-	MAX_TTS_CHARS,
-	MODEL_CHAR_LIMITS[ELEVENLABS_TTS_MODEL] ?? Number.POSITIVE_INFINITY,
-);
+	synthesizeTtsAudio,
+	textToSpeechConfigured,
+	textToSpeechStatusText,
+	type TtsAudioResult,
+} from "./speech.ts";
 import { telegram } from "./telegram.ts";
+
+const EFFECTIVE_TTS_CHAR_LIMIT = MAX_TTS_CHARS;
 
 const SendVoiceNoteParams = Type.Object({
 	text: Type.String({
@@ -26,13 +19,11 @@ const SendVoiceNoteParams = Type.Object({
 });
 
 export function voiceNotesConfigured(): boolean {
-	return Boolean(ELEVENLABS_API_KEY && ELEVENLABS_TTS_VOICE_ID);
+	return textToSpeechConfigured();
 }
 
 export function voiceStatusText(): string {
-	return voiceNotesConfigured()
-		? "registered and configured (ElevenLabs)"
-		: "registered, but missing ELEVENLABS_API_KEY or ELEVENLABS_TTS_VOICE_ID";
+	return textToSpeechStatusText();
 }
 
 export function telegramVoiceNoteExtension(
@@ -43,9 +34,9 @@ export function telegramVoiceNoteExtension(
 			name: "send_voice_note",
 			label: "Send Voice Note",
 			description:
-				"Send the Telegram user a voice note using ElevenLabs text-to-speech. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.",
+				"Send the Telegram user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.",
 			promptSnippet:
-				"Send a Telegram voice note to the user using ElevenLabs TTS",
+				"Send a Telegram voice note to the user using the configured TTS provider",
 			promptGuidelines: [
 				"Use send_voice_note when the user asks for a voice note, audio reply, spoken summary, or says to reply by voice.",
 				"You may use it proactively for short personal or time-sensitive messages where voice is clearly helpful.",
@@ -55,7 +46,7 @@ export function telegramVoiceNoteExtension(
 			parameters: SendVoiceNoteParams,
 
 			async execute(_toolCallId, params) {
-				await sendTelegramVoiceNote(chatId, params.text);
+				const result = await sendTelegramVoiceNote(chatId, params.text);
 				return {
 					content: [
 						{
@@ -63,10 +54,7 @@ export function telegramVoiceNoteExtension(
 							text: `Voice note sent (${prepareTtsText(params.text).length} characters).`,
 						},
 					],
-					details: {
-						model: ELEVENLABS_TTS_MODEL,
-						outputFormat: ELEVENLABS_TTS_OUTPUT_FORMAT,
-					},
+					details: result,
 				};
 			},
 		});
@@ -76,25 +64,16 @@ export function telegramVoiceNoteExtension(
 export async function sendTelegramVoiceNote(
 	chatId: string,
 	text: string,
-): Promise<void> {
-	const apiKey = ELEVENLABS_API_KEY;
-	const voiceId = ELEVENLABS_TTS_VOICE_ID;
-	if (!apiKey) {
-		throw new Error("Set ELEVENLABS_API_KEY to enable ElevenLabs voice notes.");
-	}
-	if (!voiceId) {
-		throw new Error(
-			"Set ELEVENLABS_TTS_VOICE_ID to enable ElevenLabs voice notes.",
-		);
-	}
-
+): Promise<TtsAudioResult> {
 	const speechText = prepareTtsText(text);
-	if (!speechText) return;
+	if (!speechText) {
+		throw new Error("Voice note text is empty after cleanup.");
+	}
 
-	const audio = await synthesizeWithElevenLabs(speechText, apiKey, voiceId);
-	if (audio.byteLength > TELEGRAM_VOICE_UPLOAD_LIMIT) {
+	const result = await synthesizeTtsAudio(speechText);
+	if (result.audio.byteLength > TELEGRAM_VOICE_UPLOAD_LIMIT) {
 		throw new Error(
-			`Generated voice note is too large: ${(audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
+			`Generated voice note is too large: ${(result.audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
 		);
 	}
 
@@ -102,10 +81,11 @@ export async function sendTelegramVoiceNote(
 	form.append("chat_id", chatId);
 	form.append(
 		"voice",
-		new Blob([audio], { type: "audio/ogg" }),
+		new Blob([result.audio], { type: "audio/ogg" }),
 		"pi-reply.ogg",
 	);
 	await telegram("sendVoice", { method: "POST", body: form });
+	return result;
 }
 
 function prepareTtsText(text: string): string {
@@ -126,36 +106,3 @@ function prepareTtsText(text: string): string {
 	return cleaned;
 }
 
-async function synthesizeWithElevenLabs(
-	text: string,
-	apiKey: string,
-	voiceId: string,
-): Promise<ArrayBuffer> {
-	const query = new URLSearchParams({
-		output_format: ELEVENLABS_TTS_OUTPUT_FORMAT,
-	});
-	const response = await fetch(
-		`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?${query}`,
-		{
-			method: "POST",
-			headers: {
-				"xi-api-key": apiKey,
-				"Content-Type": "application/json",
-				Accept: "audio/ogg",
-			},
-			body: JSON.stringify({
-				text,
-				model_id: ELEVENLABS_TTS_MODEL,
-			}),
-		},
-	);
-
-	if (!response.ok) {
-		const body = await response.text().catch(() => "");
-		throw new Error(
-			`ElevenLabs TTS API error (${response.status}): ${body.slice(0, 300) || response.statusText}`,
-		);
-	}
-
-	return response.arrayBuffer();
-}

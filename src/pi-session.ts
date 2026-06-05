@@ -423,6 +423,13 @@ function formatToolStartNotification(
 		return appendFirstArgument("🧠 daily memory updated");
 	}
 
+	const dailyMemoryReadLabel = getDailyMemoryReadLabel(event, cwd);
+	if (dailyMemoryReadLabel) {
+		return `🧠 read daily memory (<code>${escapeTelegramHtml(
+			dailyMemoryReadLabel,
+		)}</code>)`;
+	}
+
 	const skillName = skillNameForReadTool(event, session, cwd);
 	return appendFirstArgument(
 		skillName
@@ -506,6 +513,44 @@ function getMemoryUpdateKind(
 		return "daily";
 	}
 	return null;
+}
+
+function getDailyMemoryReadLabel(
+	event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+	cwd: string,
+): string | null {
+	if (event.toolName !== "read") return null;
+
+	const readPath = extractToolPath(event.args);
+	if (!readPath) return null;
+
+	const normalizedReadPath = normalizeFilePath(readPath, cwd);
+	if (!isPathInside(normalizedReadPath, normalizeFilePath(DAILY_MEMORY_DIR, cwd))) {
+		return null;
+	}
+
+	const date = dailyMemoryDateFromPath(normalizedReadPath);
+	if (!date) return "unknown day";
+
+	const today = localDateString(new Date());
+	if (date === today) return "today";
+
+	const yesterday = new Date();
+	yesterday.setDate(yesterday.getDate() - 1);
+	if (date === localDateString(yesterday)) return "yesterday";
+
+	return date;
+}
+
+function dailyMemoryDateFromPath(filePath: string): string | null {
+	return path.basename(filePath).match(/^(\d{4}-\d{2}-\d{2})\.md$/)?.[1] ?? null;
+}
+
+function localDateString(date: Date): string {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
 }
 
 function skillNameForReadTool(
