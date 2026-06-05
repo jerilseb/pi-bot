@@ -29,7 +29,7 @@ const CONFIG_ALLOWED_MODELS = [
 
 // Speech features
 export type SpeechProvider = "google-genai" | "elevenlabs";
-const CONFIG_SPEECH_TO_TEXT_PROVIDER: SpeechProvider = "google-genai";
+const CONFIG_SPEECH_TO_TEXT_PROVIDER: SpeechProvider = "elevenlabs";
 const CONFIG_TEXT_TO_SPEECH_PROVIDER: SpeechProvider = "google-genai";
 
 // Google GenAI speech features
