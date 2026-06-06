@@ -1,12 +1,12 @@
 {
-	"name": "web-fetch-extension",
-	"dependencies": {
-		"@types/turndown": "^5.0.6",
-		"turndown": "^7.2.4"
-	},
-	"pi": {
-		"extensions": [
-			"./index.ts"
-		]
-	}
+  "name": "web-fetch-extension",
+  "dependencies": {
+    "@types/turndown": "^5.0.6",
+    "turndown": "^7.2.4"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
 }

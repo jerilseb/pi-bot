@@ -1,35 +1,36 @@
 {
-	"name": "pi-bot",
-	"version": "1.0.0",
-	"description": "",
-	"license": "ISC",
-	"author": "",
-	"type": "module",
-	"scripts": {
-		"dev": "node main.ts",
-		"start": "pm2 start ecosystem.config.cjs --update-env && pm2 save",
-		"stop": "pm2 delete pi-bot || true && pm2 save",
-		"typecheck": "tsc --noEmit"
-	},
-	"dependencies": {
-		"@earendil-works/pi-agent-core": "^0.78.0",
-		"@earendil-works/pi-ai": "^0.78.0",
-		"@earendil-works/pi-coding-agent": "^0.78.0",
-		"@earendil-works/pi-tui": "^0.78.0",
-		"@mozilla/readability": "^0.6.0",
-		"cheerio": "^1.1.2",
-		"cron-parser": "^5.5.0",
-		"dotenv": "^17.4.2",
-		"jsdom": "^27.0.1",
-		"pm2": "^7.0.1",
-		"puppeteer": "^25.1.0",
-		"puppeteer-core": "^25.1.0",
-		"turndown": "^7.2.4",
-		"typebox": "^1.1.38",
-		"typescript": "^6.0.3"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "2.4.13",
-		"@types/node": "^25.6.0"
-	}
+  "name": "pi-bot",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "scripts": {
+    "dev": "node main.ts",
+    "start": "pm2 start ecosystem.config.cjs --update-env && pm2 save",
+    "stop": "pm2 delete pi-bot || true && pm2 save",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.78.0",
+    "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@earendil-works/pi-tui": "^0.78.0",
+    "@mozilla/readability": "^0.6.0",
+    "cheerio": "^1.1.2",
+    "cron-parser": "^5.5.0",
+    "dotenv": "^17.4.2",
+    "jsdom": "^27.0.1",
+    "pm2": "^7.0.1",
+    "puppeteer": "^25.1.0",
+    "puppeteer-core": "^25.1.0",
+    "turndown": "^7.2.4",
+    "typebox": "^1.1.38",
+    "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.13",
+    "@types/node": "^25.6.0"
+  }
 }

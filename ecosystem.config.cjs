@@ -1,13 +1,13 @@
 module.exports = {
-	apps: [
-		{
-			name: "pi-bot",
-			script: "main.ts",
-			interpreter: "node",
-			autorestart: true,
-			restart_delay: 1000,
-			time: true,
-			watch: false,
-		},
-	],
+  apps: [
+    {
+      name: 'pi-bot',
+      script: 'main.ts',
+      interpreter: 'node',
+      autorestart: true,
+      restart_delay: 1000,
+      time: true,
+      watch: false,
+    },
+  ],
 };

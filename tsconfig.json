@@ -1,16 +1,16 @@
 {
-	"compilerOptions": {
-		"target": "ES2022",
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext",
-		"allowImportingTsExtensions": true,
-		"noEmit": true,
-		"strict": true,
-		"skipLibCheck": true,
-		"types": ["node"],
-		"forceConsistentCasingInFileNames": true,
-		"noImplicitOverride": true
-	},
-	"include": ["main.ts", "src/**/*.ts", "extensions/**/*.ts"],
-	"exclude": ["node_modules", "extensions/**/node_modules"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitOverride": true
+  },
+  "include": ["main.ts", "src/**/*.ts", "extensions/**/*.ts"],
+  "exclude": ["node_modules", "extensions/**/node_modules"]
 }
