@@ -1,3 +1,4 @@
+import type { SessionStats } from '@earendil-works/pi-coding-agent';
 import type { ChatRegistry, ChatState } from './chat-session.ts';
 import { ELEVENLABS_API_KEY, HEARTBEAT_ENABLED, SEND_TOOL_CALLS } from './config.ts';
 import { cronStatusText } from './cron.ts';
@@ -22,6 +23,8 @@ export interface CommandContext {
 
 type CommandHandler = (ctx: CommandContext) => Promise<void>;
 
+const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
+
 const HELP_TEXT = [
   'Telegram → Pi bridge commands:',
   '/status — show this chat session status',
@@ -33,6 +36,29 @@ const HELP_TEXT = [
   '/restart — exit this process so PM2 can restart it',
   '/help — show this help',
 ].join('\n');
+
+function formatSessionTokens(stats: SessionStats | null): string {
+  if (!stats) return 'not loaded';
+
+  // Match pi-tps semantics: display input as billable/request input,
+  // including provider cache reads and cache writes. Cache hits are cacheRead.
+  const totalInput = stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite;
+  const cacheDetails = [`cache hits ${formatInteger(stats.tokens.cacheRead)}`];
+  if (stats.tokens.cacheWrite > 0) {
+    cacheDetails.push(`writes ${formatInteger(stats.tokens.cacheWrite)}`);
+  }
+
+  return [
+    `in ${formatInteger(totalInput)}`,
+    `(${cacheDetails.join(', ')})`,
+    `out ${formatInteger(stats.tokens.output)}`,
+    `total ${formatInteger(stats.tokens.total)}`,
+  ].join(', ');
+}
+
+function formatInteger(value: number): string {
+  return NUMBER_FORMAT.format(Math.max(0, Math.round(value)));
+}
 
 const COMMANDS: Record<string, CommandHandler> = {
   '/start': async ({ chat }) => {
@@ -58,6 +84,7 @@ const COMMANDS: Record<string, CommandHandler> = {
         `- Chat queue: ${chat.queue.length}`,
         `- Chat uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
         `- Chat model: ${chat.pi.modelName}`,
+        `- Session tokens: ${formatSessionTokens(chat.pi.getSessionStats())}`,
         `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
         `- Background queue: ${background?.queue.length ?? 0}`,
         `- Background model: ${getBackgroundModelName(chat.chatId)}`,

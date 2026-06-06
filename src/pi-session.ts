@@ -4,6 +4,7 @@ import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
   type AgentSessionEvent,
+  type SessionStats,
   AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
@@ -219,6 +220,10 @@ export class SdkPiSession {
 
   async getApiKeyForProvider(provider: string): Promise<string | undefined> {
     return this.runtime.modelRegistry.getApiKeyForProvider(provider);
+  }
+
+  getSessionStats(): SessionStats | null {
+    return this.session?.getSessionStats() ?? null;
   }
 
   abort(): void {
