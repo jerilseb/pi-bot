@@ -3,7 +3,6 @@ import { Type } from "typebox";
 import { MAX_TTS_CHARS, TELEGRAM_VOICE_UPLOAD_LIMIT } from "./config.ts";
 import {
 	synthesizeTtsAudio,
-	textToSpeechConfigured,
 	textToSpeechStatusText,
 	type TtsAudioResult,
 } from "./speech.ts";
@@ -17,10 +16,6 @@ const SendVoiceNoteParams = Type.Object({
 			"Text to synthesize and send as a Telegram voice note. Keep it concise and conversational.",
 	}),
 });
-
-export function voiceNotesConfigured(): boolean {
-	return textToSpeechConfigured();
-}
 
 export function voiceStatusText(): string {
 	return textToSpeechStatusText();

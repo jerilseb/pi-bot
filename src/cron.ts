@@ -19,7 +19,6 @@ const BUSY_DEFER_MS = 60 * 1000;
 export interface CronController {
 	start(): void;
 	stop(): void;
-	reload(): void;
 }
 
 export function createCronController(options: {
@@ -129,9 +128,6 @@ export function createCronController(options: {
 			unsubscribe = null;
 		},
 
-		reload(): void {
-			scheduleNext();
-		},
 	};
 }
 
