@@ -23,7 +23,9 @@ export interface CommandContext {
 
 type CommandHandler = (ctx: CommandContext) => Promise<void>;
 
-const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
+const TOKEN_NUMBER_FORMAT = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 1,
+});
 
 const HELP_TEXT = [
   'Telegram → Pi bridge commands:',
@@ -43,21 +45,31 @@ function formatSessionTokens(stats: SessionStats | null): string {
   // Match pi-tps semantics: display input as billable/request input,
   // including provider cache reads and cache writes. Cache hits are cacheRead.
   const totalInput = stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite;
-  const cacheDetails = [`cache hits ${formatInteger(stats.tokens.cacheRead)}`];
+  const cacheDetails = [`cache hits ${formatTokenCount(stats.tokens.cacheRead)}`];
   if (stats.tokens.cacheWrite > 0) {
-    cacheDetails.push(`writes ${formatInteger(stats.tokens.cacheWrite)}`);
+    cacheDetails.push(`writes ${formatTokenCount(stats.tokens.cacheWrite)}`);
   }
 
   return [
-    `in ${formatInteger(totalInput)}`,
+    `in ${formatTokenCount(totalInput)}`,
     `(${cacheDetails.join(', ')})`,
-    `out ${formatInteger(stats.tokens.output)}`,
-    `total ${formatInteger(stats.tokens.total)}`,
+    `out ${formatTokenCount(stats.tokens.output)}`,
   ].join(', ');
 }
 
-function formatInteger(value: number): string {
-  return NUMBER_FORMAT.format(Math.max(0, Math.round(value)));
+function formatTokenCount(value: number): string {
+  const rounded = Math.max(0, Math.round(value));
+  if (rounded < 1000) return String(rounded);
+
+  const units = [
+    { suffix: 'b', value: 1_000_000_000 },
+    { suffix: 'm', value: 1_000_000 },
+    { suffix: 'k', value: 1_000 },
+  ] as const;
+  const unit = units.find((candidate) => rounded >= candidate.value);
+  if (!unit) return String(rounded);
+
+  return `${TOKEN_NUMBER_FORMAT.format(rounded / unit.value)}${unit.suffix}`;
 }
 
 const COMMANDS: Record<string, CommandHandler> = {
