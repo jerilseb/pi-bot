@@ -9,7 +9,6 @@ import {
 	buildElevenLabsUsageTelegramHtml,
 	fetchElevenLabsUsage,
 } from "./elevenlabs-usage.ts";
-import { formatCommandOutput, gitPull } from "./maintenance.ts";
 import { buildModelInlineKeyboard } from "./model-menu.ts";
 import {
 	buildOpenAIUsageTelegramHtml,
@@ -42,7 +41,6 @@ const HELP_TEXT = [
 	"/elevenlabsusage — show ElevenLabs credit/character usage",
 	"/abort — abort the current Pi response",
 	"/new — clear this chat's Pi conversation",
-	"/update — git pull this repo and restart the app",
 	"/restart — exit this process so PM2 can restart it",
 	"/help — show this help",
 ].join("\n");
@@ -170,24 +168,6 @@ const COMMANDS: Record<string, CommandHandler> = {
 			chat.chatId,
 			"🔄 Started a fresh Pi conversation for this chat.",
 		);
-	},
-
-	"/update": async ({ chat, restart }) => {
-		await sendTelegramMessage(chat.chatId, "⬇️ Pulling latest changes...");
-		const result = await gitPull();
-		if (!result.ok) {
-			await sendTelegramMessage(
-				chat.chatId,
-				`❌ Update failed:\n${formatCommandOutput(result.output)}`,
-			);
-			return;
-		}
-
-		await sendTelegramMessage(
-			chat.chatId,
-			`✅ Update complete. Restarting app...\n${formatCommandOutput(result.output)}`,
-		);
-		await restart();
 	},
 
 	"/restart": async ({ chat, restart }) => {

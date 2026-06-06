@@ -219,7 +219,6 @@ Inside Telegram:
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
 | `/abort` | Stop the current response and clear the queue |
 | `/new` | Reset the Pi conversation for this chat |
-| `/update` | `git pull` this repo and restart the app |
 | `/restart` | Restart the bot process |
 
 The chat runtime also exposes a constrained `restart_bot` Pi tool. It is intended only for explicit natural-language requests such as “restart yourself” and uses the same graceful shutdown path as `/restart`, letting pm2 bring the process back up.

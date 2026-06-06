@@ -10,8 +10,8 @@
  *
  * This module is the orchestrator: it wires the pieces together and owns the
  * polling loop, per-chat queue, and process lifecycle. Self-contained concerns
- * live in dedicated modules (commands, model-menu, chat-session, maintenance,
- * discovery, system-prompt, env-guard, heartbeat, cron).
+ * live in dedicated modules (commands, model-menu, chat-session, discovery,
+ * system-prompt, env-guard, heartbeat, cron).
  */
 
 import * as fs from "node:fs";
