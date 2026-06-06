@@ -68,13 +68,13 @@ type UpdateScheduledTaskParamsType = Static<typeof UpdateScheduledTaskParams>;
 
 export default function scheduledTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: 'schedule_task',
-    label: 'Schedule Task',
+    name: 'create_schedule_task',
+    label: 'Create Schedule Task',
     description:
       "Create a scheduled task for the Telegram assistant. Use for reminders, recurring checks, or future/proactive work. For kind='once', provide run_at. For kind='interval', provide interval_minutes. For kind='cron', provide a five-field cron schedule and preferably timezone.",
     promptSnippet: 'Schedule one-time, interval, or cron-like Telegram assistant tasks.',
     promptGuidelines: [
-      'Use schedule_task when the user asks you to do something later, at a specific time, or repeatedly.',
+      'Use create_schedule_task when the user asks you to do something later, at a specific time, or repeatedly.',
       'If the user gives a relative time like tomorrow or next week, get the current time with bash date before scheduling.',
       'Prefer timezone-aware ISO timestamps for one-time tasks and IANA timezones for cron tasks.',
       'Keep the scheduled prompt self-contained; include what to check and when to notify the user.',
