@@ -1,5 +1,5 @@
 import type { ChatRegistry } from './chat-session.ts';
-import { ALLOWED_CHAT_ID, ALLOWED_MODELS } from './config.ts';
+import { ALLOWED_MODELS, isAllowedTelegramChat } from './config.ts';
 import {
   answerTelegramCallbackQuery,
   editTelegramMessageText,
@@ -29,7 +29,7 @@ export async function handleModelCallbackQuery(
   if (!data.startsWith(MODEL_CALLBACK_PREFIX)) return;
 
   const chatId = query.message ? String(query.message.chat.id) : '';
-  if (chatId !== ALLOWED_CHAT_ID || !query.message) {
+  if (!isAllowedTelegramChat(chatId) || !query.message) {
     await answerTelegramCallbackQuery(query.id, 'This model menu is no longer valid.');
     return;
   }

@@ -1,4 +1,4 @@
-import { ALLOWED_CHAT_ID, CRON_JOBS_PATH, CRON_NOOP } from './config.ts';
+import { CRON_JOBS_PATH, CRON_NOOP, getPrimaryTelegramChatId } from './config.ts';
 import {
   computeNextRunAt,
   deferCronJob,
@@ -77,18 +77,19 @@ export function createCronController(options: {
       if (!job.enabled || !job.nextRunAt) continue;
       if (new Date(job.nextRunAt).getTime() > now.getTime()) continue;
 
-      if (options.isChatBusy(ALLOWED_CHAT_ID)) {
-        console.log(`[${ALLOWED_CHAT_ID}] cron ${job.id} deferred; chat is busy`);
+      const chatId = getPrimaryTelegramChatId();
+      if (!chatId) continue;
+
+      if (options.isChatBusy(chatId)) {
+        console.log(`[${chatId}] cron ${job.id} deferred; chat is busy`);
         jobs[index] = deferCronJob(job, BUSY_DEFER_MS);
         changed = true;
         continue;
       }
 
-      console.log(
-        `[${ALLOWED_CHAT_ID}] cron ${job.id} due: ${job.title ?? job.prompt.slice(0, 80)}`,
-      );
+      console.log(`[${chatId}] cron ${job.id} due: ${job.title ?? job.prompt.slice(0, 80)}`);
       await options.handleIncoming({
-        chatId: ALLOWED_CHAT_ID,
+        chatId,
         text: buildCronPrompt(job),
         attachments: [],
         source: 'cron',

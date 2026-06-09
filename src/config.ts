@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { configNumber, normalizeModelRef, readActiveModel } from './util.ts';
@@ -98,6 +99,7 @@ export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, 'system.md');
 export const MEMORY_PATH = path.join(FILES_DIR, 'memory.md');
 export const DAILY_MEMORY_DIR = path.join(FILES_DIR, 'memory');
 export const CRON_JOBS_PATH = path.join(FILES_DIR, 'cron-jobs.json');
+export const ALLOWED_CHATS_PATH = path.join(FILES_DIR, 'allowed-chats.json');
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, 'heartbeat.md');
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');
 
@@ -106,7 +108,6 @@ export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');
 // ---------------------------------------------------------------------------
 
 export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
-export const ALLOWED_CHAT_ID = process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? '';
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? '';
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? '';
 export const GOOGLE_GENAI_API_KEY =
@@ -207,3 +208,83 @@ export const HEARTBEAT_INTERVAL_MS = configNumber(PI_HEARTBEAT_INTERVAL_SECONDS,
 
 export const HEARTBEAT_NOOP = '__HEARTBEAT_NOOP__';
 export const CRON_NOOP = '__CRON_NOOP__';
+
+export interface AllowedTelegramChat {
+  id: string;
+  name: string;
+  enabled: boolean;
+  type?: string;
+}
+
+export function ensureAllowedChatsFile(): void {
+  if (fs.existsSync(ALLOWED_CHATS_PATH)) return;
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+  fs.writeFileSync(ALLOWED_CHATS_PATH, '[]\n', 'utf8');
+}
+
+export function readAllowedTelegramChats(): AllowedTelegramChat[] {
+  ensureAllowedChatsFile();
+  const content = fs.readFileSync(ALLOWED_CHATS_PATH, 'utf8').trim();
+  if (!content) return [];
+
+  const parsed = JSON.parse(content) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${ALLOWED_CHATS_PATH} must contain a JSON array of allowed chats`);
+  }
+
+  const seen = new Set<string>();
+  const chats: AllowedTelegramChat[] = [];
+  for (let index = 0; index < parsed.length; index++) {
+    const chat = parseAllowedTelegramChat(parsed[index], index);
+    if (seen.has(chat.id)) continue;
+    seen.add(chat.id);
+    chats.push(chat);
+  }
+  return chats;
+}
+
+export function getAllowedTelegramChatIds(): string[] {
+  return readAllowedTelegramChats()
+    .filter((chat) => chat.enabled)
+    .map((chat) => chat.id);
+}
+
+export function getPrimaryTelegramChatId(): string {
+  return getAllowedTelegramChatIds()[0] ?? '';
+}
+
+export function isAllowedTelegramChat(chatId: string): boolean {
+  return getAllowedTelegramChatIds().includes(chatId.trim());
+}
+
+function parseAllowedTelegramChat(entry: unknown, index: number): AllowedTelegramChat {
+  if (!isRecord(entry)) {
+    throw new Error(`${ALLOWED_CHATS_PATH}[${index}] must be an object`);
+  }
+
+  const id = parseAllowedTelegramChatId(entry.id, index);
+  const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : id;
+  const enabled = typeof entry.enabled === 'boolean' ? entry.enabled : true;
+  const type = typeof entry.type === 'string' && entry.type.trim() ? entry.type.trim() : undefined;
+
+  return {
+    id,
+    name,
+    enabled,
+    ...(type ? { type } : {}),
+  };
+}
+
+function parseAllowedTelegramChatId(value: unknown, index: number): string {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new Error(`${ALLOWED_CHATS_PATH}[${index}].id must be a string or number`);
+  }
+
+  const id = String(value).trim();
+  if (!id) throw new Error(`${ALLOWED_CHATS_PATH}[${index}].id must not be empty`);
+  return id;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

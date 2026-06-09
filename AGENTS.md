@@ -46,7 +46,7 @@ npm run typecheck
 ## Environment and secrets
 
 - Never commit `.env` or real API keys/tokens.
-- Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys.
+- Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys. Allowed Telegram chats live in `files/allowed-chats.json`.
 - Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval.
 - Provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 
@@ -54,7 +54,7 @@ npm run typecheck
 
 - This bot uses Telegram long polling, not webhooks.
 - Only one running process should poll a given Telegram bot token.
-- Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested.
+- Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested. `files/allowed-chats.json` controls which Telegram chats/groups may use the bot.
 - Temporary downloads/generated files are under the system temp directory.
 - After changing extensions, skills, prompts, or env vars, restart the bot.
 

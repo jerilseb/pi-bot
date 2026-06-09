@@ -15,11 +15,12 @@
  */
 
 import * as fs from 'node:fs';
+import { handleGroupAccessRequest } from './src/access-request.ts';
 import { createChatRegistry, type ChatRegistry, type ChatState } from './src/chat-session.ts';
 import { handleCommand } from './src/commands.ts';
 import {
   ACTIVE_MODEL_PATH,
-  ALLOWED_CHAT_ID,
+  ALLOWED_CHATS_PATH,
   ALLOWED_MODELS,
   BACKGROUND_MODEL,
   BOT_TOKEN,
@@ -33,6 +34,7 @@ import {
   TMP_DIR,
   TOOL_CALL_BATCH_MAX_ITEMS,
   TOOL_CALL_BATCH_MS,
+  getAllowedTelegramChatIds,
 } from './src/config.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
@@ -44,6 +46,7 @@ import { sendPiResponse } from './src/outbound.ts';
 import { createPiRuntime, type PiRuntime } from './src/pi-session.ts';
 import {
   activeModelSystemPromptExtension,
+  allowedChatsSystemPromptExtension,
   ensureMemoryFile,
   memorySystemPromptExtension,
   readSystemPrompt,
@@ -75,6 +78,7 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
   extensionFactories: [
     memorySystemPromptExtension,
     activeModelSystemPromptExtension,
+    allowedChatsSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
   requestRestart: restart,
@@ -91,6 +95,7 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
   extensionFactories: [
     memorySystemPromptExtension,
     activeModelSystemPromptExtension,
+    allowedChatsSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
   writeModelState: () => undefined,
@@ -175,9 +180,10 @@ function validateEnvironment(): void {
     process.exit(1);
   }
 
-  if (!ALLOWED_CHAT_ID) {
+  const allowedChatIds = getAllowedTelegramChatIds();
+  if (allowedChatIds.length === 0) {
     console.error(
-      'Missing TELEGRAM_ALLOWED_CHAT_ID in .env. This bot is restricted to exactly one Telegram chat.',
+      `No enabled Telegram chats configured. Add at least one entry to ${ALLOWED_CHATS_PATH}.`,
     );
     process.exit(1);
   }
@@ -327,6 +333,8 @@ async function pollTelegram(): Promise<void> {
 
         if (!update.message) continue;
 
+        if (await handleGroupAccessRequest(update.message)) continue;
+
         const incoming = await toIncomingPrompt(update.message);
         if (incoming) void handleIncoming(incoming);
       }
@@ -340,7 +348,7 @@ async function pollTelegram(): Promise<void> {
 
 function logStartupBanner(): void {
   console.log('Telegram → Pi bridge started');
-  console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
+  console.log(`Allowed chats: ${getAllowedTelegramChatIds().join(', ')}`);
   console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName}`);
   console.log(`Background model: ${BACKGROUND_PI_RUNTIME.modelName}`);
   console.log('Pi runtime: SDK');
@@ -353,10 +361,12 @@ function logStartupBanner(): void {
 }
 
 async function notifyAppStarted(): Promise<void> {
-  try {
-    await sendTelegramMessage(ALLOWED_CHAT_ID, '✅ Bot is up and running.');
-  } catch (error) {
-    console.error('Failed to send startup notification:', errorMessage(error));
+  for (const chatId of getAllowedTelegramChatIds()) {
+    try {
+      await sendTelegramMessage(chatId, '✅ Bot is up and running.');
+    } catch (error) {
+      console.error(`[${chatId}] failed to send startup notification:`, errorMessage(error));
+    }
   }
 }
 

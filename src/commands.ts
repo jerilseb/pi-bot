@@ -30,6 +30,7 @@ const TOKEN_NUMBER_FORMAT = new Intl.NumberFormat('en-US', {
 const HELP_TEXT = [
   'Telegram → Pi bridge commands:',
   '/status — show this chat session status',
+  '/request_access — request access for a new group',
   '/models — choose an allowed chat model',
   '/openaiusage — show OpenAI Codex usage windows and reset times',
   '/elevenlabsusage — show ElevenLabs credit/character usage',

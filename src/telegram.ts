@@ -10,6 +10,7 @@ export async function registerBotCommands(): Promise<void> {
         commands: [
           { command: 'start', description: 'Say hi' },
           { command: 'help', description: 'Show commands' },
+          { command: 'request_access', description: 'Request access for this group' },
           { command: 'status', description: 'Show chat session status' },
           { command: 'models', description: 'Switch chat model' },
           { command: 'openaiusage', description: 'Show OpenAI Codex usage' },

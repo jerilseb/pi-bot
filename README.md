@@ -21,7 +21,7 @@ Most AI tools are either:
 - **Useful on your machine** — it can inspect files, edit code, run tests, use local skills, and work inside a real repository.
 - **Proactive when needed** — it can schedule future tasks, run recurring checks, and keep heartbeat-style monitoring instructions.
 - **Persistent enough to be personal** — it has long-term memory and daily work notes so context does not vanish every session.
-- **Still under your control** — it is restricted to one allowed Telegram chat and secrets stay in your `.env`.
+- **Still under your control** — it is restricted to explicitly allowed Telegram chats and secrets stay in your `.env`.
 
 ## What you can do with it
 
@@ -101,7 +101,7 @@ That means it can remember stable context without stuffing every temporary detai
 
 - Telegram long-polling bot — no public webhook required.
 - One Pi conversation per Telegram chat.
-- Restricted to exactly one allowed Telegram chat ID.
+- Restricted to explicitly allowed Telegram chat IDs.
 - Text, photo, document, audio, and voice-note ingestion.
 - ElevenLabs speech-to-text for voice/audio transcription.
 - ElevenLabs text-to-speech for voice-note replies when requested.
@@ -129,11 +129,29 @@ Create `.env`:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:your-telegram-token
-TELEGRAM_ALLOWED_CHAT_ID=123456789
 OPENROUTER_API_KEY=sk-or-your-key
 ```
 
-Secrets and deployment-specific values live in `.env`. Non-secret defaults and toggles live in `src/config.ts`.
+Create `files/allowed-chats.json`:
+
+```json
+[
+  {
+    "name": "Personal chat",
+    "id": "123456789",
+    "type": "private",
+    "enabled": true
+  },
+  {
+    "name": "Work group",
+    "id": "-1001234567890",
+    "type": "supergroup",
+    "enabled": true
+  }
+]
+```
+
+Secrets and deployment-specific values live in `.env`. Allowed Telegram chats live in `files/allowed-chats.json`, so the agent can manage them by editing that JSON file. Private chats are usually positive IDs; groups/supergroups are usually negative IDs such as `-1001234567890`.
 
 ### 3. Run locally
 
@@ -279,12 +297,13 @@ files/memory/YYYY-MM-DD.md       Daily/session notes
 files/heartbeat.md               Standing heartbeat instructions
 files/heartbeat-state.md         Durable heartbeat state
 files/cron-jobs.json             Scheduled tasks
+files/allowed-chats.json         Allowed Telegram chats/groups
 .active_model                    Active chat model
 ```
 
 ## Safety notes
 
-- The bot is intentionally restricted to one Telegram chat via `TELEGRAM_ALLOWED_CHAT_ID`.
+- The bot is intentionally restricted to enabled entries in `files/allowed-chats.json`.
 - Do not commit `.env` or real API keys.
 - Bots cannot participate in Telegram Secret Chats.
 - True disappearing messages are Telegram chat-level behavior; bot-simulated disappearing messages would require sending and later deleting a normal bot message.

@@ -1,13 +1,18 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ALLOWED_CHAT_ID, TELEGRAM_DOWNLOAD_LIMIT, TELEGRAM_FILE_API, TMP_DIR } from './config.ts';
+import {
+  TELEGRAM_DOWNLOAD_LIMIT,
+  TELEGRAM_FILE_API,
+  TMP_DIR,
+  isAllowedTelegramChat,
+} from './config.ts';
 import { transcribeAudio } from './speech.ts';
 import { sendChatAction, telegram } from './telegram.ts';
 import type { IncomingPrompt, TelegramMessage } from './types.ts';
 
 export async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPrompt | null> {
   const chatId = String(message.chat.id);
-  if (chatId !== ALLOWED_CHAT_ID) return null;
+  if (!isAllowedTelegramChat(chatId)) return null;
 
   const caption = message.caption?.trim() ?? '';
 

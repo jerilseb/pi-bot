@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import {
-  ALLOWED_CHAT_ID,
   HEARTBEAT_ENABLED,
+  getPrimaryTelegramChatId,
   HEARTBEAT_FILE_PATH,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_NOOP,
@@ -45,12 +45,17 @@ export function createHeartbeatController(options: {
     start(): void {
       if (!HEARTBEAT_ENABLED || timer) return;
 
-      const chatId = ALLOWED_CHAT_ID;
+      const chatId = getPrimaryTelegramChatId();
+      if (!chatId) return;
 
       console.log(
         `Heartbeat: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${chatId}`,
       );
-      timer = setInterval(() => void runOnce(chatId), HEARTBEAT_INTERVAL_MS);
+      timer = setInterval(() => {
+        const currentChatId = getPrimaryTelegramChatId();
+        if (!currentChatId) return;
+        void runOnce(currentChatId);
+      }, HEARTBEAT_INTERVAL_MS);
     },
 
     stop(): void {

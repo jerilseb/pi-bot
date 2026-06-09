@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   ACTIVE_MODEL_PATH,
+  ALLOWED_CHATS_PATH,
   DAILY_MEMORY_DIR,
   FILES_DIR,
   MEMORY_PATH,
@@ -105,5 +106,24 @@ function appendActiveModelToSystemPrompt(systemPrompt: string): string {
 export function activeModelSystemPromptExtension(pi: ExtensionAPI): void {
   pi.on('before_agent_start', async (event) => ({
     systemPrompt: appendActiveModelToSystemPrompt(event.systemPrompt),
+  }));
+}
+
+function appendAllowedChatsToSystemPrompt(systemPrompt: string): string {
+  return [
+    systemPrompt,
+    '',
+    '## Telegram chat access',
+    `Allowed Telegram chats file: ${ALLOWED_CHATS_PATH}`,
+    'The file is a JSON array of entries like {"name":"Personal chat","id":"123456789","type":"private","enabled":true}.',
+    'Private chat IDs are usually positive; group/supergroup IDs are usually negative, often starting with -100.',
+    'The bot reads this file dynamically for incoming Telegram updates, so you can allow, rename, disable, or remove chats by editing this JSON file.',
+    'Only add chats the user explicitly wants to authorize. Do not store API keys, tokens, or other secrets in this file.',
+  ].join('\n');
+}
+
+export function allowedChatsSystemPromptExtension(pi: ExtensionAPI): void {
+  pi.on('before_agent_start', async (event) => ({
+    systemPrompt: appendAllowedChatsToSystemPrompt(event.systemPrompt),
   }));
 }
