@@ -249,6 +249,12 @@ export function getAllowedTelegramChatIds(): string[] {
     .map((chat) => chat.id);
 }
 
+export function getPrivateTelegramChatIds(): string[] {
+  return readAllowedTelegramChats()
+    .filter((chat) => chat.enabled && chat.type === 'private')
+    .map((chat) => chat.id);
+}
+
 export function getPrimaryTelegramChatId(): string {
   return getAllowedTelegramChatIds()[0] ?? '';
 }

@@ -35,6 +35,7 @@ import {
   TOOL_CALL_BATCH_MAX_ITEMS,
   TOOL_CALL_BATCH_MS,
   getAllowedTelegramChatIds,
+  getPrivateTelegramChatIds,
 } from './src/config.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
@@ -361,7 +362,7 @@ function logStartupBanner(): void {
 }
 
 async function notifyAppStarted(): Promise<void> {
-  for (const chatId of getAllowedTelegramChatIds()) {
+  for (const chatId of getPrivateTelegramChatIds()) {
     try {
       await sendTelegramMessage(chatId, '✅ Bot is up and running.');
     } catch (error) {
