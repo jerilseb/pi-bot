@@ -1,5 +1,6 @@
 {
   "name": "web-fetch-extension",
+  "type": "module",
   "dependencies": {
     "@types/turndown": "^5.0.6",
     "turndown": "^7.2.4"

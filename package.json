@@ -10,7 +10,9 @@
     "start": "pm2 start ecosystem.config.cjs --update-env && pm2 save",
     "stop": "pm2 delete pi-bot || true && pm2 save",
     "format": "biome format --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.ts",
+    "verify": "npm run typecheck && npm run smoke"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.79.0",

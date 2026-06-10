@@ -9,6 +9,7 @@ import {
   fetchOpenAIUsage,
   OPENAI_CODEX_PROVIDER,
 } from './openai-usage.ts';
+import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
 import { escapeTelegramHtml, sendTelegramInlineKeyboard, sendTelegramMessage } from './telegram.ts';
 import { voiceStatusText } from './voice.ts';
 
@@ -188,9 +189,24 @@ const COMMANDS: Record<string, CommandHandler> = {
   },
 
   '/restart': async ({ chat, restart }) => {
+    await sendTelegramMessage(chat.chatId, '🧪 Running pre-restart checks...');
+
+    const checks = await runPreRestartChecks();
+    if (!checks.ok) {
+      await sendTelegramMessage(
+        chat.chatId,
+        [
+          `❌ Restart blocked. Pre-restart checks failed after ${formatPreRestartDuration(checks.durationMs)}.`,
+          '',
+          `<pre><code>${escapeTelegramHtml(checks.output)}</code></pre>`,
+        ].join('\n'),
+      );
+      return;
+    }
+
     await sendTelegramMessage(
       chat.chatId,
-      '♻️ Restarting bot process. PM2 should bring it back up shortly.',
+      `✅ Pre-restart checks passed in ${formatPreRestartDuration(checks.durationMs)}. Restarting bot process. PM2 should bring it back up shortly.`,
     );
     await restart();
   },

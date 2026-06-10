@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { sendTelegramMessage } from './telegram.ts';
+import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
+import { escapeTelegramHtml, sendTelegramMessage } from './telegram.ts';
 import { textResult } from './tool-result.ts';
 import { errorMessage } from './util.ts';
 
@@ -36,9 +37,25 @@ export function telegramRestartToolExtension(
         }
 
         restartRequested = true;
+        await sendTelegramMessage(chatId, '🧪 Running pre-restart checks...');
+
+        const checks = await runPreRestartChecks();
+        if (!checks.ok) {
+          restartRequested = false;
+          await sendTelegramMessage(
+            chatId,
+            [
+              `❌ Restart blocked. Pre-restart checks failed after ${formatPreRestartDuration(checks.durationMs)}.`,
+              '',
+              `<pre><code>${escapeTelegramHtml(checks.output)}</code></pre>`,
+            ].join('\n'),
+          );
+          return textResult('Restart blocked because pre-restart checks failed.');
+        }
+
         await sendTelegramMessage(
           chatId,
-          '♻️ Restarting bot process. PM2 should bring it back up shortly.',
+          `✅ Pre-restart checks passed in ${formatPreRestartDuration(checks.durationMs)}. Restarting bot process. PM2 should bring it back up shortly.`,
         );
 
         setTimeout(() => {
@@ -48,7 +65,7 @@ export function telegramRestartToolExtension(
         }, RESTART_DELAY_MS);
 
         return textResult(
-          'Restart scheduled. The bot process will exit shortly so PM2 can restart it.',
+          'Restart scheduled after successful pre-restart checks. The bot process will exit shortly so PM2 can restart it.',
         );
       },
     });
