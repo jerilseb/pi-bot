@@ -22,13 +22,13 @@ const TavilySearchParams = Type.Object({
   search_depth: Type.Optional(
     StringEnum(['basic', 'advanced'] as const, {
       description: "Search depth. Use 'advanced' for better research.",
-      default: 'advanced',
+      default: 'basic',
     }),
   ),
   include_answer: Type.Optional(
-    StringEnum(['none', 'basic', 'advanced'] as const, {
+    Type.Boolean({
       description: 'Whether Tavily should synthesize an answer.',
-      default: 'basic',
+      default: false,
     }),
   ),
   max_results: Type.Optional(
@@ -45,7 +45,7 @@ type TavilySearchParamsType = {
   query: string;
   topic?: 'general' | 'news';
   search_depth?: 'basic' | 'advanced';
-  include_answer?: 'none' | 'basic' | 'advanced';
+  include_answer?: boolean;
   max_results?: number;
 };
 
@@ -86,7 +86,7 @@ function buildResultText(data: TavilyResponse, params: TavilySearchParamsType): 
 
   lines.push(`Query: ${data.query ?? params.query}`);
   lines.push(`Topic: ${params.topic ?? 'general'}`);
-  lines.push(`Depth: ${params.search_depth ?? 'advanced'}`);
+  lines.push(`Depth: ${params.search_depth ?? 'basic'}`);
   lines.push(`Results returned: ${results.length}`);
 
   if (typeof data.response_time === 'number') {
@@ -191,8 +191,8 @@ export default function tavilySearchExtension(pi: ExtensionAPI) {
       const requestBody = {
         query: params.query,
         topic: params.topic ?? 'general',
-        search_depth: params.search_depth ?? 'advanced',
-        include_answer: params.include_answer ?? 'basic',
+        search_depth: params.search_depth ?? 'basic',
+        include_answer: params.include_answer ?? false,
         max_results: params.max_results ?? 5,
       };
 
