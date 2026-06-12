@@ -27,6 +27,7 @@ import {
   DEFAULT_MODEL,
   MAX_QUEUE_PER_CHAT,
   MODEL,
+  POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_SKILLS_DIR,
   SEND_TOOL_CALLS,
@@ -36,6 +37,7 @@ import {
   TOOL_CALL_BATCH_MS,
   getAllowedTelegramChatIds,
   getPrivateTelegramChatIds,
+  isAllowedTelegramChat,
 } from './src/config.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
@@ -44,6 +46,13 @@ import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.
 import { toIncomingPrompt } from './src/inbound.ts';
 import { handleModelCallbackQuery } from './src/model-menu.ts';
 import { sendPiResponse } from './src/outbound.ts';
+import {
+  consumePostRestartTasks,
+  ensurePostRestartTasksFile,
+  formatPostRestartTask,
+  type PostRestartTask,
+} from './src/post-restart-tasks.ts';
+import { handleTelegramMenuCallbackQuery } from './src/telegram-menu.ts';
 import { createPiRuntime, type PiRuntime } from './src/pi-session.ts';
 import {
   activeModelSystemPromptExtension,
@@ -105,6 +114,7 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
 fs.mkdirSync(TMP_DIR, { recursive: true });
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
+ensurePostRestartTasksFile();
 
 const chats = createChatRegistry(CHAT_PI_RUNTIME);
 const backgroundChats = createChatRegistry(BACKGROUND_PI_RUNTIME);
@@ -311,6 +321,7 @@ async function pollTelegram(): Promise<void> {
   heartbeat.start();
   cron.start();
   await notifyAppStarted();
+  await enqueuePostRestartTasks();
 
   while (running) {
     try {
@@ -329,6 +340,7 @@ async function pollTelegram(): Promise<void> {
 
         if (update.callback_query) {
           await handleModelCallbackQuery(update.callback_query, chats);
+          await handleTelegramMenuCallbackQuery(update.callback_query, handleIncoming);
           continue;
         }
 
@@ -359,6 +371,7 @@ function logStartupBanner(): void {
   console.log(`Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`);
   console.log(heartbeatStatusText());
   console.log(cronStatusText());
+  console.log(`Post-restart tasks: ${POST_RESTART_TASKS_PATH}`);
 }
 
 async function notifyAppStarted(): Promise<void> {
@@ -369,6 +382,61 @@ async function notifyAppStarted(): Promise<void> {
       console.error(`[${chatId}] failed to send startup notification:`, errorMessage(error));
     }
   }
+}
+
+async function enqueuePostRestartTasks(): Promise<void> {
+  let tasks: PostRestartTask[];
+  try {
+    tasks = consumePostRestartTasks();
+  } catch (error) {
+    console.error('Failed to read post-restart tasks:', errorMessage(error));
+    return;
+  }
+
+  for (const task of tasks) {
+    if (!isAllowedTelegramChat(task.chatId)) {
+      console.warn(
+        `[${task.chatId}] skipping post-restart task for unauthorized chat: ${formatPostRestartTask(task)}`,
+      );
+      continue;
+    }
+
+    console.log(`[${task.chatId}] enqueueing post-restart task: ${formatPostRestartTask(task)}`);
+    try {
+      await sendTelegramMessage(
+        task.chatId,
+        `🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`,
+      );
+      await handleIncoming({
+        chatId: task.chatId,
+        text: buildPostRestartPrompt(task),
+        attachments: [],
+        source: 'telegram',
+      });
+    } catch (error) {
+      console.error(
+        `[${task.chatId}] failed to enqueue post-restart task ${task.id}:`,
+        errorMessage(error),
+      );
+    }
+  }
+}
+
+function buildPostRestartPrompt(task: PostRestartTask): string {
+  return [
+    'This is a post-restart task for the Telegram assistant.',
+    `Task ID: ${task.id}`,
+    ...(task.title ? [`Title: ${task.title}`] : []),
+    `Created at: ${task.createdAt}`,
+    `Current time: ${new Date().toISOString()}`,
+    '',
+    'The bot has restarted successfully. Run these instructions now:',
+    '<post_restart_instructions>',
+    task.prompt,
+    '</post_restart_instructions>',
+    '',
+    'Notify the Telegram user with the result, unless the instructions explicitly say not to.',
+  ].join('\n');
 }
 
 function notifyToolCall(

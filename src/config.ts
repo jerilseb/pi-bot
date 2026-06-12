@@ -99,6 +99,7 @@ export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, 'system.md');
 export const MEMORY_PATH = path.join(FILES_DIR, 'memory.md');
 export const DAILY_MEMORY_DIR = path.join(FILES_DIR, 'memory');
 export const CRON_JOBS_PATH = path.join(FILES_DIR, 'cron-jobs.json');
+export const POST_RESTART_TASKS_PATH = path.join(FILES_DIR, 'post-restart-tasks.json');
 export const ALLOWED_CHATS_PATH = path.join(FILES_DIR, 'allowed-chats.json');
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, 'heartbeat.md');
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');

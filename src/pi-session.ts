@@ -29,6 +29,7 @@ import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
 import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
 import { telegramRestartToolExtension } from './restart-tool.ts';
 import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
+import { telegramMenuExtension } from './telegram-menu.ts';
 import { telegramVoiceNoteExtension } from './voice.ts';
 
 export interface PiRunPromptOptions {
@@ -279,6 +280,7 @@ export class SdkPiSession {
           ? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
           : []),
         telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
+        telegramMenuExtension(this.chatId),
         telegramVoiceNoteExtension(this.chatId),
         ...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
         ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension(this.chatId)] : []),
