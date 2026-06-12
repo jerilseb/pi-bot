@@ -11,9 +11,17 @@ Usage: serve.sh [port] [--public]
        serve.sh [--public] [port]
 
 Starts a preview server for HTML_DIR (default: /tmp/html) and always creates
-a public localtunnel URL. --public is accepted for backwards compatibility.
+a public Cloudflare quick tunnel URL. --public is accepted for backwards
+compatibility.
 EOF
 }
+
+CLOUDFLARED="$(command -v cloudflared || echo "$HOME/.local/bin/cloudflared")"
+if [ ! -x "$CLOUDFLARED" ]; then
+    echo "ERROR: cloudflared not found. Install it with:" >&2
+    echo "  curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o ~/.local/bin/cloudflared && chmod +x ~/.local/bin/cloudflared" >&2
+    exit 1
+fi
 
 for arg in "$@"; do
     case "$arg" in
@@ -44,10 +52,10 @@ if [ -n "$PID" ]; then
     sleep 0.5
 fi
 
-# Kill any existing localtunnel for this port
-LT_PID=$(pgrep -f "localtunnel.*--port $PORT" 2>/dev/null || true)
-if [ -n "$LT_PID" ]; then
-    kill $LT_PID 2>/dev/null || true
+# Kill any existing tunnel for this port
+CF_PID=$(pgrep -f "cloudflared.*--url http://localhost:$PORT" 2>/dev/null || true)
+if [ -n "$CF_PID" ]; then
+    kill $CF_PID 2>/dev/null || true
     sleep 0.5
 fi
 
@@ -75,20 +83,20 @@ fi
 rm -f "$SERVE_LOG"
 
 TUNNEL_URL=""
-LT_PID=""
-LT_OUT_FILE=""
+CF_PID=""
+CF_OUT_FILE=""
 
 if [ "$PUBLIC_PREVIEW" = "true" ]; then
-    # Start localtunnel and capture the URL
-    LT_OUT_FILE=$(mktemp)
-    npx localtunnel --port "$PORT" > "$LT_OUT_FILE" 2>&1 &
-    LT_PID=$!
+    # Start a Cloudflare quick tunnel and capture the URL
+    CF_OUT_FILE=$(mktemp)
+    "$CLOUDFLARED" tunnel --url "http://localhost:$PORT" --no-autoupdate > "$CF_OUT_FILE" 2>&1 &
+    CF_PID=$!
 
-    # Poll for the tunnel URL (npx can take several seconds to start)
+    # Poll for the tunnel URL (cloudflared can take several seconds to start)
     for i in $(seq 1 20); do
         sleep 1
-        if [ -f "$LT_OUT_FILE" ]; then
-            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.loca\.lt' "$LT_OUT_FILE" 2>/dev/null || true)
+        if [ -f "$CF_OUT_FILE" ]; then
+            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$CF_OUT_FILE" 2>/dev/null | head -1 || true)
             if [ -n "$TUNNEL_URL" ]; then
                 break
             fi
@@ -100,15 +108,15 @@ if [ "$PUBLIC_PREVIEW" = "true" ]; then
 fi
 
 echo "SERVE_PID=$SERVE_PID"
-if [ -n "$LT_PID" ]; then
-    echo "LT_PID=$LT_PID"
+if [ -n "$CF_PID" ]; then
+    echo "CF_PID=$CF_PID"
 fi
 echo "PORT=$PORT"
 if [ "$PUBLIC_PREVIEW" = "true" ]; then
     if [ -n "$TUNNEL_URL" ]; then
         echo "TUNNEL_URL=$TUNNEL_URL"
     else
-        echo "TUNNEL_URL=(not available - localtunnel may have failed)"
+        echo "TUNNEL_URL=(not available - cloudflared may have failed)"
     fi
 fi
 echo "HTML_DIR=$HTML_DIR"

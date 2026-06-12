@@ -57,19 +57,17 @@ If your current working directory is the project root, use:
 .pi/skills/html-visualize/scripts/serve.sh [port]
 ```
 
-Default port is `8080`. The script starts the local backing server and automatically creates a public localtunnel URL.
+Default port is `8080`. The script starts the local backing server and automatically creates a public Cloudflare quick tunnel URL (no account or confirmation page; a fresh random URL each run).
 
 ### 3. Share Only the Public URL
 
 After the script runs, give the user the public URL to the specific HTML file:
 
 ```text
-✅ Visualization ready: https://abc123.loca.lt/visualization.html
+✅ Visualization ready: https://random-words.trycloudflare.com/visualization.html
 ```
 
 Do not ask whether they want a public preview. Do not share the localhost URL unless the user explicitly asks for it.
-
-If localtunnel shows a confirmation page, tell the user to click "Click to Continue".
 
 ## Updating the Visualization
 
@@ -81,7 +79,7 @@ When done, kill the server and tunnel for the port:
 
 ```bash
 kill $(lsof -ti :8080) 2>/dev/null
-pkill -f "localtunnel.*--port 8080" 2>/dev/null
+pkill -f "cloudflared.*--url http://localhost:8080" 2>/dev/null
 ```
 
 Or let them run — the next `serve.sh` call will replace them.
