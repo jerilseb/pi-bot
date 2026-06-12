@@ -117,6 +117,17 @@ claude --bare -p "Summarize this file" --allowedTools "Read"
 
 **Bare mode caveat:** `--bare` skips OAuth and keychain reads, so it ignores the login stored in `CLAUDE_CONFIG_DIR` — auth must come from `ANTHROPIC_API_KEY` (or an `apiKeyHelper` via `--settings`). If you're relying on the config dir's subscription login, do **not** use `--bare`. In bare mode, load only what you need via `--append-system-prompt`, `--settings`, `--mcp-config`, `--agents`, or `--plugin-dir`.
 
+## Checking Claude usage limits
+
+Claude Code slash commands can be run in headless mode by passing the slash command as the prompt. Use `/usage` to check subscription usage/quota windows, such as the current 5-hour session and current week percentages and reset times.
+
+```bash
+CLAUDE_CONFIG_DIR="<dir from memory>" timeout 60 \
+  claude -p "/usage" --model "<model from memory>" --output-format json
+```
+
+Parse `.result` from the JSON output and report the usage summary. This command does not consume model tokens in normal use. If it fails, report the authentication/model error and ask how to proceed.
+
 ## Other useful flags
 
 - `--max-turns <n>` — cap agentic turns on `-p` runs.
