@@ -11,6 +11,7 @@ import {
 	DEFAULT_MODEL,
 	MODEL,
 	PROJECT_EXTENSIONS_DIR,
+	PROJECT_ROOT,
 	PROJECT_SKILLS_DIR,
 	getAllowedTelegramChatIds,
 } from "../src/config.ts";
@@ -67,6 +68,24 @@ function validateEnvironment(): void {
 		getAllowedTelegramChatIds().length > 0,
 		`No enabled Telegram chats configured. Check ${ALLOWED_CHATS_PATH}.`,
 	);
+}
+
+/**
+ * Imports every src module so import-time crashes are caught before a restart.
+ * main.ts is excluded: importing it would start the bot (top-level await).
+ */
+async function importAllSourceModules(): Promise<number> {
+	const srcDir = path.join(PROJECT_ROOT, "src");
+	const files = fs
+		.readdirSync(srcDir)
+		.filter((name) => name.endsWith(".ts"))
+		.sort();
+
+	for (const name of files) {
+		await import(pathToFileURL(path.join(srcDir, name)).href);
+	}
+
+	return files.length;
 }
 
 function resolveExtensionImportPaths(extensionPath: string): string[] {
@@ -154,13 +173,14 @@ async function main(): Promise<void> {
 	ensureMemoryFile();
 	assert(readSystemPrompt().trim(), "System prompt is empty.");
 
+	const importedModules = await importAllSourceModules();
 	const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 	const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
 	const registeredTools = await importAndRegisterExtensions(extensionPaths);
 	createSmokeRuntimes(extensionPaths, skillPaths);
 
 	console.log(
-		`Smoke test passed: ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${skillPaths.length} skill(s).`,
+		`Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${skillPaths.length} skill(s).`,
 	);
 }
 
