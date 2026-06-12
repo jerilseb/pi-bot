@@ -31,6 +31,11 @@ If a run fails with an authentication error, that directory is not logged in —
 
 The preferred model for headless runs follows the same rule: use what you know from memory or the conversation, and pass it with `--model`. If you don't know the preferred model, ask the user.
 
+Use exact Claude Code/API model IDs, not display names. Latest high-capability model IDs to prefer when requested:
+
+- Claude Opus 4.8: `claude-opus-4-8`
+- Claude Fable 5: `claude-fable-5`
+
 ```bash
 CLAUDE_CONFIG_DIR="<dir from memory>" timeout 300 \
   claude -p "Review this diff" --model "<model from memory>"
