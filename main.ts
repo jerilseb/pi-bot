@@ -32,6 +32,7 @@ import {
   PROJECT_SKILLS_DIR,
   SEND_TOOL_CALLS,
   SESSIONS_DIR,
+  TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
   TOOL_CALL_BATCH_MAX_ITEMS,
   TOOL_CALL_BATCH_MS,
@@ -43,7 +44,7 @@ import { createCronController, cronStatusText } from './src/cron.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
-import { toIncomingPrompt } from './src/inbound.ts';
+import { ingestionEpoch, toIncomingPrompt } from './src/inbound.ts';
 import { handleModelCallbackQuery } from './src/model-menu.ts';
 import { sendPiResponse } from './src/outbound.ts';
 import {
@@ -68,7 +69,7 @@ import {
   startTyping,
   telegram,
 } from './src/telegram.ts';
-import type { IncomingPrompt, TelegramUpdate } from './src/types.ts';
+import type { IncomingPrompt, TelegramMessage, TelegramUpdate } from './src/types.ts';
 import { errorMessage, isBackgroundSource, writeModelState } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
@@ -332,8 +333,13 @@ async function pollTelegram(): Promise<void> {
       });
       const data = await telegram<{ ok: boolean; result: TelegramUpdate[] }>(
         `getUpdates?${params}`,
+        undefined,
+        TELEGRAM_POLL_TIMEOUT_MS,
       );
-      if (!data.ok) continue;
+      if (!data.ok) {
+        await sleep(5000);
+        continue;
+      }
 
       for (const update of data.result) {
         offset = update.update_id + 1;
@@ -346,16 +352,40 @@ async function pollTelegram(): Promise<void> {
 
         if (!update.message) continue;
 
-        if (await handleGroupAccessRequest(update.message)) continue;
-
-        const incoming = await toIncomingPrompt(update.message);
-        if (incoming) void handleIncoming(incoming);
+        void ingestTelegramMessage(update.message);
       }
     } catch (error) {
       if (!running) break;
       console.error('Polling error:', errorMessage(error));
       await sleep(5000);
     }
+  }
+}
+
+/**
+ * Ingests one Telegram message detached from the polling loop, since media
+ * downloads and audio transcription can take minutes. If /abort or /new bumps
+ * the chat's ingestion epoch while this is in flight, the result is dropped.
+ */
+async function ingestTelegramMessage(message: TelegramMessage): Promise<void> {
+  const chatId = String(message.chat.id);
+  const epoch = ingestionEpoch(chatId);
+
+  try {
+    if (await handleGroupAccessRequest(message)) return;
+
+    const incoming = await toIncomingPrompt(message);
+    if (!incoming) return;
+
+    if (ingestionEpoch(chatId) !== epoch) {
+      console.log(`[${chatId}] dropping message ingested before /abort or /new`);
+      cleanupAttachments(incoming);
+      return;
+    }
+
+    await handleIncoming(incoming);
+  } catch (error) {
+    console.error(`[${chatId}] failed to ingest Telegram message:`, errorMessage(error));
   }
 }
 

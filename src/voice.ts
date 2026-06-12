@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { MAX_TTS_CHARS, TELEGRAM_VOICE_UPLOAD_LIMIT } from './config.ts';
+import { MAX_TTS_CHARS, TELEGRAM_MEDIA_TIMEOUT_MS, TELEGRAM_VOICE_UPLOAD_LIMIT } from './config.ts';
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
 import { telegram } from './telegram.ts';
 
@@ -65,7 +65,7 @@ export async function sendTelegramVoiceNote(chatId: string, text: string): Promi
   const form = new FormData();
   form.append('chat_id', chatId);
   form.append('voice', new Blob([result.audio], { type: 'audio/ogg' }), 'pi-reply.ogg');
-  await telegram('sendVoice', { method: 'POST', body: form });
+  await telegram('sendVoice', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
   return result;
 }
 

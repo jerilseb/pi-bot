@@ -3,12 +3,29 @@ import * as path from 'node:path';
 import {
   TELEGRAM_DOWNLOAD_LIMIT,
   TELEGRAM_FILE_API,
+  TELEGRAM_MEDIA_TIMEOUT_MS,
   TMP_DIR,
   isAllowedTelegramChat,
 } from './config.ts';
 import { transcribeAudio } from './speech.ts';
 import { sendChatAction, telegram } from './telegram.ts';
 import type { IncomingPrompt, TelegramMessage } from './types.ts';
+import { errorMessage } from './util.ts';
+
+/**
+ * Per-chat ingestion epochs. Media ingestion (downloads, transcription) runs
+ * detached from the polling loop, so /abort and /new bump the epoch to drop
+ * ingestion results that finish after the user cancelled.
+ */
+const ingestionEpochs = new Map<string, number>();
+
+export function ingestionEpoch(chatId: string): number {
+  return ingestionEpochs.get(chatId) ?? 0;
+}
+
+export function discardPendingIngestion(chatId: string): void {
+  ingestionEpochs.set(chatId, ingestionEpoch(chatId) + 1);
+}
 
 export async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPrompt | null> {
   const chatId = String(message.chat.id);
@@ -152,24 +169,31 @@ async function downloadTelegramFile(
 ): Promise<{ localPath: string; size: number } | null> {
   if (knownSize > TELEGRAM_DOWNLOAD_LIMIT) return null;
 
-  const info = await telegram<{
-    ok: boolean;
-    result?: { file_path?: string; file_size?: number };
-  }>(`getFile?file_id=${encodeURIComponent(fileId)}`);
-  if (!info.ok || !info.result?.file_path) return null;
-  if ((info.result.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) return null;
+  try {
+    const info = await telegram<{
+      ok: boolean;
+      result?: { file_path?: string; file_size?: number };
+    }>(`getFile?file_id=${encodeURIComponent(fileId)}`);
+    if (!info.ok || !info.result?.file_path) return null;
+    if ((info.result.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) return null;
 
-  const res = await fetch(`${TELEGRAM_FILE_API}/${info.result.file_path}`);
-  if (!res.ok) return null;
+    const res = await fetch(`${TELEGRAM_FILE_API}/${info.result.file_path}`, {
+      signal: AbortSignal.timeout(TELEGRAM_MEDIA_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
 
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.length > TELEGRAM_DOWNLOAD_LIMIT) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length > TELEGRAM_DOWNLOAD_LIMIT) return null;
 
-  const ext = path.extname(info.result.file_path) || path.extname(suggestedName) || '';
-  const safeBase =
-    path.basename(suggestedName, path.extname(suggestedName)).replace(/[^a-zA-Z0-9._-]/g, '_') ||
-    'file';
-  const localPath = path.join(TMP_DIR, `${Date.now()}-${safeBase}${ext}`);
-  fs.writeFileSync(localPath, buffer);
-  return { localPath, size: buffer.length };
+    const ext = path.extname(info.result.file_path) || path.extname(suggestedName) || '';
+    const safeBase =
+      path.basename(suggestedName, path.extname(suggestedName)).replace(/[^a-zA-Z0-9._-]/g, '_') ||
+      'file';
+    const localPath = path.join(TMP_DIR, `${Date.now()}-${safeBase}${ext}`);
+    fs.writeFileSync(localPath, buffer);
+    return { localPath, size: buffer.length };
+  } catch (error) {
+    console.error(`Failed to download Telegram file ${fileId}:`, errorMessage(error));
+    return null;
+  }
 }

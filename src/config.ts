@@ -133,6 +133,11 @@ export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
 
 export const TELEGRAM_API = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
 export const TELEGRAM_FILE_API = BOT_TOKEN ? `https://api.telegram.org/file/bot${BOT_TOKEN}` : '';
+// Client-side fetch deadlines so a silently dead connection cannot hang a call.
+// The poll timeout must exceed the 30s server-side getUpdates hold.
+export const TELEGRAM_API_TIMEOUT_MS = 30_000;
+export const TELEGRAM_POLL_TIMEOUT_MS = 40_000;
+export const TELEGRAM_MEDIA_TIMEOUT_MS = 120_000;
 export const TELEGRAM_MAX_MESSAGE = 4096;
 export const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 export const TELEGRAM_PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;

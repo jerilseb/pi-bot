@@ -8,6 +8,7 @@ import {
   LOCAL_DOCUMENT_UPLOAD_DIRS,
   LOCAL_IMAGE_UPLOAD_DIRS,
   TELEGRAM_DOCUMENT_UPLOAD_LIMIT,
+  TELEGRAM_MEDIA_TIMEOUT_MS,
   TELEGRAM_PHOTO_UPLOAD_LIMIT,
 } from './config.ts';
 import { escapeTelegramHtml, telegram } from './telegram.ts';
@@ -183,7 +184,7 @@ async function uploadImage(
     form.append('caption', escapeTelegramHtml(caption));
     form.append('parse_mode', 'HTML');
   }
-  await telegram(method, { method: 'POST', body: form });
+  await telegram(method, { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
 }
 
 async function uploadDocument(
@@ -199,7 +200,7 @@ async function uploadDocument(
     form.append('caption', escapeTelegramHtml(caption));
     form.append('parse_mode', 'HTML');
   }
-  await telegram('sendDocument', { method: 'POST', body: form });
+  await telegram('sendDocument', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
 }
 
 function imageMimeType(filePath: string): string {

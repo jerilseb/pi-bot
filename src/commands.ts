@@ -9,6 +9,7 @@ import {
   fetchOpenAIUsage,
   OPENAI_CODEX_PROVIDER,
 } from './openai-usage.ts';
+import { discardPendingIngestion } from './inbound.ts';
 import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
 import { escapeTelegramHtml, sendTelegramInlineKeyboard, sendTelegramMessage } from './telegram.ts';
 import { voiceStatusText } from './voice.ts';
@@ -174,15 +175,22 @@ const COMMANDS: Record<string, CommandHandler> = {
   },
 
   '/abort': async ({ chat }) => {
+    discardPendingIngestion(chat.chatId);
     chat.queue.length = 0;
     chat.pi.abort();
     await sendTelegramMessage(chat.chatId, '⏹ Aborting current prompt and clearing queue...');
   },
 
   '/new': async ({ chat }) => {
+    discardPendingIngestion(chat.chatId);
     chat.queue.length = 0;
-    chat.processing = false;
-    chat.pi.reset();
+    // Never force chat.processing or dispose a streaming session here: abort the
+    // in-flight response and queue the session swap, which runPrompt applies in
+    // its finally. When the chat is idle there is no finally coming, so apply
+    // the reset immediately.
+    chat.pi.abort();
+    await chat.pi.requestNewSession();
+    if (!chat.processing) chat.pi.reset();
     chat.messageCount = 0;
     chat.startedAt = Date.now();
     await sendTelegramMessage(chat.chatId, '🔄 Started a fresh Pi conversation for this chat.');

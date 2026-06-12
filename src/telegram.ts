@@ -1,4 +1,4 @@
-import { TELEGRAM_API, TELEGRAM_MAX_MESSAGE } from './config.ts';
+import { TELEGRAM_API, TELEGRAM_API_TIMEOUT_MS, TELEGRAM_MAX_MESSAGE } from './config.ts';
 import { errorMessage } from './util.ts';
 
 export async function registerBotCommands(): Promise<void> {
@@ -134,8 +134,12 @@ export async function sendChatAction(chatId: string): Promise<void> {
 export async function telegram<T = unknown>(
   methodAndQuery: string,
   init?: RequestInit,
+  timeoutMs: number = TELEGRAM_API_TIMEOUT_MS,
 ): Promise<T> {
-  const res = await fetch(`${TELEGRAM_API}/${methodAndQuery}`, init);
+  const res = await fetch(`${TELEGRAM_API}/${methodAndQuery}`, {
+    ...init,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`Telegram ${methodAndQuery} failed (${res.status}): ${body}`);
