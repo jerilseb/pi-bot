@@ -10,7 +10,7 @@ Run the `claude` CLI non-interactively with `-p` / `--print`. Claude Code prints
 ## Golden rules
 
 1. **Always pass `-p`** and a prompt. Never run bare `claude`.
-2. **Always set `CLAUDE_CONFIG_DIR`** — use the directory you know from memory or the conversation; if unknown, ask the user (see below).
+2. **Set `CLAUDE_CONFIG_DIR` and `--model`** from memory or the conversation; if either is unknown, ask the user, then save the answer to memory (see below).
 3. **Always wrap in `timeout`** (e.g. `timeout 300`) — a stuck run would otherwise block this chat's queue indefinitely.
 4. **Pre-approve the tools the task needs** with `--allowedTools` or `--permission-mode`; headless runs cannot answer permission prompts, so an unapproved tool call aborts the run.
 
@@ -26,6 +26,17 @@ CLAUDE_CONFIG_DIR="<dir from memory>" timeout 300 \
 ```
 
 If a run fails with an authentication error, that directory is not logged in — report it to the user and ask how to proceed; do not try other directories on your own.
+
+## Choosing the model
+
+The preferred model for headless runs follows the same rule: use what you know from memory or the conversation, and pass it with `--model`. If you don't know the preferred model, ask the user.
+
+```bash
+CLAUDE_CONFIG_DIR="<dir from memory>" timeout 300 \
+  claude -p "Review this diff" --model "<model from memory>"
+```
+
+Once the user tells you a config directory or preferred model, **store it in memory** so future runs don't need to ask again.
 
 ## Basic usage
 
@@ -103,7 +114,6 @@ claude --bare -p "Summarize this file" --allowedTools "Read"
 
 ## Other useful flags
 
-- `--model <name>` — pick a model for the run.
 - `--max-turns <n>` — cap agentic turns on `-p` runs.
 - `--input-format stream-json` — streaming input (advanced).
 - Skills/commands work in prompts: include `/skill-name` in the prompt string. Interactive-only commands like `/login` and `/config` do not work in `-p` mode.
