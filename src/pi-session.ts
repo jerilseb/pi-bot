@@ -20,6 +20,7 @@ import {
   SEND_LOCAL_IMAGES,
   SESSIONS_DIR,
 } from './config.ts';
+import { backgroundBashExtension } from './background-bash.ts';
 import { formatToolStartNotification } from './tool-notifications.ts';
 import type { Attachment, PiPromptResult } from './types.ts';
 import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
@@ -279,6 +280,7 @@ export class SdkPiSession {
         telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
         telegramMenuExtension(this.chatId),
         telegramVoiceNoteExtension(this.chatId),
+        backgroundBashExtension(this.chatId),
         ...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
         ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension(this.chatId)] : []),
       ],

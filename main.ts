@@ -16,6 +16,7 @@
 
 import * as fs from 'node:fs';
 import { handleGroupAccessRequest } from './src/access-request.ts';
+import { stopAllBackgroundSessions } from './src/background-bash.ts';
 import { createChatRegistry, type ChatRegistry, type ChatState } from './src/chat-session.ts';
 import { handleCommand } from './src/commands.ts';
 import {
@@ -553,6 +554,7 @@ async function shutdown(): Promise<void> {
   cron.stop();
   chats.clearAll();
   backgroundChats.clearAll();
+  await stopAllBackgroundSessions();
 }
 
 process.on('SIGINT', () => void shutdown().then(() => process.exit(0)));

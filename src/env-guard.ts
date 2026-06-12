@@ -2,6 +2,8 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 const ALLOWED_ENV_FILE = '.env.example';
 
+const SHELL_COMMAND_TOOLS = new Set(['bash', 'background_bash_start']);
+
 /**
  * Blocks read/bash tool calls that would touch any `.env` file other than the
  * checked-in `.env.example`, keeping secrets out of the agent's reach.
@@ -18,12 +20,12 @@ export function protectedEnvToolAccessExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (event.toolName === 'bash') {
+    if (SHELL_COMMAND_TOOLS.has(event.toolName)) {
       const command = extractStringProperty(event.input, 'command');
       if (command && bashCommandMentionsProtectedEnv(command)) {
         return {
           block: true,
-          reason: `The bash tool may access ${ALLOWED_ENV_FILE} only; other .env files are protected.`,
+          reason: `The ${event.toolName} tool may access ${ALLOWED_ENV_FILE} only; other .env files are protected.`,
         };
       }
     }
