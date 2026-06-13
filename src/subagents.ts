@@ -10,6 +10,8 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import tavilySearchExtension from '../extensions/tavily-web-search.ts';
+import webFetchExtension from '../extensions/web-fetch/index.ts';
 import {
   SUBAGENT_COMPLETED_TTL_MS,
   SUBAGENT_DEFAULT_MAX_RUNTIME_MS,
@@ -35,9 +37,9 @@ import { errorMessage, formatModelRef, parseModelRef } from './util.ts';
  * - Each sub-agent runs in SessionManager.inMemory(): no chat history, no
  *   long-term memory, no session persistence. The parent passes everything the
  *   sub-agent needs via task/context.
- * - Sub-agent sessions load only the protected-env guard extension and no
- *   skills, so they have no Telegram-facing tools and no subagent_* tools
- *   (no recursion).
+ * - Sub-agent sessions load only the protected-env guard plus web_search and
+ *   web_fetch extensions, and no skills, so they have no Telegram-facing tools
+ *   and no subagent_* tools (no recursion).
  *
  * The registry lives at module level in src/ (imported once by Node), so it is
  * shared across all chats for the lifetime of the bot process. Sub-agents do
@@ -414,16 +416,16 @@ async function createSubagentSession(
   runtime: PiRuntime,
   model: Model<Api>,
 ): Promise<AgentSession> {
-  // Only the protected-env guard extension is loaded. Sub-agents get coding
-  // tools, but cannot reach Telegram, bot lifecycle tools, or subagent_* (no
-  // recursion), and cannot inspect protected .env files.
+  // Only explicitly approved extensions are loaded. Sub-agents get coding and
+  // web research tools, but cannot reach Telegram, bot lifecycle tools, or
+  // subagent_* (no recursion), and cannot inspect protected .env files.
   const resourceLoader = new DefaultResourceLoader({
     cwd: runtime.cwd,
     agentDir: getAgentDir(),
     settingsManager: runtime.settingsManager,
     noExtensions: true,
     noSkills: true,
-    extensionFactories: [protectedEnvToolAccessExtension],
+    extensionFactories: [protectedEnvToolAccessExtension, tavilySearchExtension, webFetchExtension],
     systemPromptOverride: () => SUBAGENT_SYSTEM_PROMPT,
   });
   await resourceLoader.reload();

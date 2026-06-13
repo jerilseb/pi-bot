@@ -29,7 +29,7 @@ const MAX_RUNTIME_CAP_MS = 24 * 60 * 60_000;
 const MAX_RUNNING_SESSIONS = 12;
 const COMPLETED_SESSION_TTL_MS = 30 * 60_000;
 const STOP_WAIT_MS = 5_000;
-const NOTIFICATION_OUTPUT_MAX_CHARS = 2_500;
+const NOTIFICATION_OUTPUT_MAX_CHARS = 3_000;
 
 type BackgroundBashStatus = 'running' | 'exited' | 'stopped' | 'failed';
 
