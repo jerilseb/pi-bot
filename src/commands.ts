@@ -11,6 +11,7 @@ import {
 } from './openai-usage.ts';
 import { discardPendingIngestion } from './inbound.ts';
 import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
+import { cancelChatSubagents, runningSubagentCount } from './subagents.ts';
 import { escapeTelegramHtml, sendTelegramInlineKeyboard, sendTelegramMessage } from './telegram.ts';
 import { voiceStatusText } from './voice.ts';
 
@@ -103,6 +104,7 @@ const COMMANDS: Record<string, CommandHandler> = {
         `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
         `- Background queue: ${background?.queue.length ?? 0}`,
         `- Background model: ${getBackgroundModelName(chat.chatId)}`,
+        `- Sub-agents running: ${runningSubagentCount(chat.chatId)}`,
         `- Voice note tool: ${voiceStatusText()}`,
         `- Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`,
         `- Heartbeat: ${HEARTBEAT_ENABLED ? 'enabled' : 'off'}`,
@@ -178,7 +180,13 @@ const COMMANDS: Record<string, CommandHandler> = {
     discardPendingIngestion(chat.chatId);
     chat.queue.length = 0;
     chat.pi.abort();
-    await sendTelegramMessage(chat.chatId, '⏹ Aborting current prompt and clearing queue...');
+    const cancelledSubagents = await cancelChatSubagents(chat.chatId);
+    await sendTelegramMessage(
+      chat.chatId,
+      cancelledSubagents > 0
+        ? `⏹ Aborting current prompt, clearing queue, and cancelling ${cancelledSubagents} sub-agent${cancelledSubagents === 1 ? '' : 's'}...`
+        : '⏹ Aborting current prompt and clearing queue...',
+    );
   },
 
   '/new': async ({ chat }) => {
