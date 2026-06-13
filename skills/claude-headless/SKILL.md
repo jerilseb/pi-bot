@@ -92,6 +92,16 @@ claude -p "Explain recursion" --output-format stream-json --verbose --include-pa
 
 For bot use, `--output-format json` is usually best: parse `.result` for the answer and keep `.session_id` for follow-ups.
 
+When running Claude through `background_bash_start` for normal user tasks, pipe the JSON envelope to `jq -r '.result'` so the background bash completion output is the clean Claude answer, not raw JSON metadata:
+
+```bash
+CLAUDE_CONFIG_DIR="<dir from memory>" timeout 300 \
+  claude -p "Summarize the latest commit" --model "<model from memory>" --output-format json \
+  | jq -r '.result'
+```
+
+Use the raw JSON output only when the user explicitly asks for metadata/usage or you need it internally for a follow-up. Do not show `.session_id`, `.total_cost_usd`, or `.usage` in normal task results.
+
 ## Multi-turn conversations
 
 ```bash
@@ -137,4 +147,4 @@ Parse `.result` from the JSON output and report the usage summary. This command 
 
 ## Reporting back
 
-Relay Claude's result to the user, prefixed with what was run. Include the cost from `.total_cost_usd` if the user cares about spend. If the run timed out or hit a permission abort, say so explicitly and suggest the fix (longer timeout, extra `--allowedTools` entry).
+Relay only Claude's task result to the user for normal work. Do not include Claude metadata such as session ID, token/cost details, or usage unless the user explicitly asks for usage/metadata. If the run timed out or hit a permission abort, say so explicitly and suggest the fix (longer timeout, extra `--allowedTools` entry).

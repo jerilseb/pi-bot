@@ -29,6 +29,7 @@ const MAX_RUNTIME_CAP_MS = 24 * 60 * 60_000;
 const MAX_RUNNING_SESSIONS = 12;
 const COMPLETED_SESSION_TTL_MS = 30 * 60_000;
 const STOP_WAIT_MS = 5_000;
+const NOTIFICATION_OUTPUT_MAX_CHARS = 2_500;
 
 type BackgroundBashStatus = 'running' | 'exited' | 'stopped' | 'failed';
 
@@ -350,7 +351,8 @@ async function notifySessionEnd(session: BackgroundBashSession): Promise<void> {
       session.chatId,
       [
         `${ok ? '✅' : '❌'} Background bash <code>${session.id}</code> ${escapeTelegramHtml(summary)}`,
-        `<code>$ ${escapeTelegramHtml(session.command)}</code>`,
+        'Output:',
+        `<pre><code>${escapeTelegramHtml(formatOutputNotificationPreview(session))}</code></pre>`,
       ].join('\n'),
     );
   } catch (error) {
@@ -429,6 +431,26 @@ function formatOutputSnapshot(session: BackgroundBashSession): string {
   const shownLines = text.split('\n').length;
   const notice = `[Truncated: showing last ${shownLines} of ${snapshot.totalLines} lines (${formatSize(snapshot.totalBytes)} total)${snapshot.fullOutputPath ? `. Full output: ${snapshot.fullOutputPath}` : ''}]`;
   return `${text}\n\n${notice}`;
+}
+
+function formatOutputNotificationPreview(session: BackgroundBashSession): string {
+  const snapshot = session.output.snapshot();
+  const output = extractResultFromJsonOutput(snapshot.content.trimEnd()) ?? formatOutputSnapshot(session);
+  if (output.length <= NOTIFICATION_OUTPUT_MAX_CHARS) return output;
+
+  const head = output.slice(0, NOTIFICATION_OUTPUT_MAX_CHARS);
+  return `${head}\n[Truncated for notification: showing first ${head.length} chars. Use background_bash_read with session_id "${session.id}" for more.]`;
+}
+
+function extractResultFromJsonOutput(output: string): string | null {
+  if (!output.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(output) as { result?: unknown };
+    return typeof parsed.result === 'string' && parsed.result.trim() ? parsed.result.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function runtimeMs(session: BackgroundBashSession): number {
