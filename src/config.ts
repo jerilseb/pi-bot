@@ -251,6 +251,7 @@ export const HEARTBEAT_INTERVAL_MS = configNumber(PI_HEARTBEAT_INTERVAL_SECONDS,
 
 export const HEARTBEAT_NOOP = '__HEARTBEAT_NOOP__';
 export const CRON_NOOP = '__CRON_NOOP__';
+export const BACKGROUND_BASH_NOOP = '__BACKGROUND_BASH_NOOP__';
 
 export interface AllowedTelegramChat {
   id: string;

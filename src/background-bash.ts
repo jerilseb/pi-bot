@@ -6,14 +6,15 @@ import {
   formatSize,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import { BACKGROUND_BASH_NOOP } from './config.ts';
 import { BoundedOutputBuffer } from './output-buffer.ts';
-import { escapeTelegramHtml, sendTelegramMessage } from './telegram.ts';
 import { textResult } from './tool-result.ts';
 import { errorMessage } from './util.ts';
 
 /**
  * Background bash sessions for the Pi agent: start long-running shell commands
- * without blocking the agent turn, then poll, list, and stop them later.
+ * without blocking the agent turn, then poll, list, stop, and report their
+ * completion back to the main chat agent later.
  *
  * The registry lives at module level in src/ (imported once by Node), so it is
  * shared across all chats and Pi sessions for the lifetime of the bot process.
@@ -29,7 +30,7 @@ const MAX_RUNTIME_CAP_MS = 24 * 60 * 60_000;
 const MAX_RUNNING_SESSIONS = 12;
 const COMPLETED_SESSION_TTL_MS = 30 * 60_000;
 const STOP_WAIT_MS = 5_000;
-const NOTIFICATION_OUTPUT_MAX_CHARS = 3_000;
+const REPORT_OUTPUT_MAX_CHARS = 3_000;
 
 type BackgroundBashStatus = 'running' | 'exited' | 'stopped' | 'failed';
 
@@ -45,12 +46,29 @@ interface BackgroundBashSession {
   exitCode: number | null;
   status: BackgroundBashStatus;
   statusDetail: string | null;
-  /** True once start returned a session ID; gates the exit notification. */
+  /** True once start returned a session ID; gates the completion report. */
   backgrounded: boolean;
   done: Promise<void>;
 }
 
+export interface BackgroundBashReport {
+  sessionId: string;
+  chatId: string;
+  command: string;
+  cwd: string;
+  outcome: string;
+  output: string;
+}
+
+type BackgroundBashReportHandler = (report: BackgroundBashReport) => Promise<void>;
+
 const sessions = new Map<string, BackgroundBashSession>();
+let reportHandler: BackgroundBashReportHandler | null = null;
+
+/** Wires completion reports into the bot's incoming-prompt pipeline. Called from main.ts. */
+export function setBackgroundBashReportHandler(handler: BackgroundBashReportHandler): void {
+  reportHandler = handler;
+}
 
 const StartParams = Type.Object({
   command: Type.String({ description: 'Bash command to run in the background.', minLength: 1 }),
@@ -155,7 +173,7 @@ export function backgroundBashExtension(chatId: string): (pi: ExtensionAPI) => v
             `Command: ${session.command}`,
             `Cwd: ${session.cwd}`,
             `Status: running (max runtime ${formatDuration(maxRuntimeMs)})`,
-            `Poll with background_bash_read using session_id "${session.id}"; a Telegram notification is sent when it finishes.`,
+            `Poll with background_bash_read using session_id "${session.id}"; an internal [background-bash-report] message with the result is delivered to this chat agent when it finishes.`,
             'Output so far:',
             formatOutputSnapshot(session),
           ].join('\n'),
@@ -317,7 +335,7 @@ function startSession(
     .finally(() => {
       session.endedAt = Date.now();
       session.output.finish();
-      void notifySessionEnd(session);
+      void reportSessionEnd(session);
     });
 
   sessions.set(session.id, session);
@@ -338,26 +356,26 @@ async function stopSessions(targets: BackgroundBashSession[]): Promise<number> {
   return running.length;
 }
 
-async function notifySessionEnd(session: BackgroundBashSession): Promise<void> {
+async function reportSessionEnd(session: BackgroundBashSession): Promise<void> {
   if (!session.backgrounded || session.status === 'stopped') return;
 
-  const ok = session.status === 'exited' && session.exitCode === 0;
-  const summary =
-    session.status === 'exited'
-      ? `finished with exit code ${session.exitCode}`
-      : `failed: ${session.statusDetail ?? 'unknown error'}`;
+  if (!reportHandler) {
+    console.error(`[${session.chatId}] no background bash report handler set; dropping report`);
+    return;
+  }
+
   try {
-    await sendTelegramMessage(
-      session.chatId,
-      [
-        `${ok ? '✅' : '❌'} Background bash <code>${session.id}</code> ${escapeTelegramHtml(summary)}`,
-        'Output:',
-        `<pre><code>${escapeTelegramHtml(formatOutputNotificationPreview(session))}</code></pre>`,
-      ].join('\n'),
-    );
+    await reportHandler({
+      sessionId: session.id,
+      chatId: session.chatId,
+      command: session.command,
+      cwd: session.cwd,
+      outcome: describeReportOutcome(session),
+      output: formatOutputReportPreview(session),
+    });
   } catch (error) {
     console.error(
-      `[${session.chatId}] failed to send background bash notification:`,
+      `[${session.chatId}] failed to deliver background bash report:`,
       errorMessage(error),
     );
   }
@@ -392,6 +410,13 @@ function describeCompletion(session: BackgroundBashSession): string {
     return `Command completed in ${formatDuration(runtimeMs(session))}\nExit code: ${session.exitCode}`;
   }
   return `Command ${describeStatus(session)} after ${formatDuration(runtimeMs(session))}`;
+}
+
+function describeReportOutcome(session: BackgroundBashSession): string {
+  if (session.status === 'exited') {
+    return `finished with exit code ${session.exitCode} in ${formatDuration(runtimeMs(session))}`;
+  }
+  return `${describeStatus(session)} after ${formatDuration(runtimeMs(session))}`;
 }
 
 function describeStatusLine(session: BackgroundBashSession): string {
@@ -433,13 +458,32 @@ function formatOutputSnapshot(session: BackgroundBashSession): string {
   return `${text}\n\n${notice}`;
 }
 
-function formatOutputNotificationPreview(session: BackgroundBashSession): string {
+export function formatBackgroundBashReportPrompt(report: BackgroundBashReport): string {
+  return [
+    `[background-bash-report] Background bash ${report.sessionId} ${report.outcome}.`,
+    '',
+    'Command:',
+    report.command,
+    '',
+    'Working directory:',
+    report.cwd,
+    '',
+    'Output:',
+    report.output || '(no output)',
+    '',
+    'This is an internal report from a background bash session you started earlier, not a message from the user.',
+    'The user has not been notified separately. Review the result, continue any follow-up work yourself, and only send a user-visible message if it is useful.',
+    `If no user-visible update is needed, reply exactly ${BACKGROUND_BASH_NOOP}.`,
+  ].join('\n');
+}
+
+function formatOutputReportPreview(session: BackgroundBashSession): string {
   const snapshot = session.output.snapshot();
   const output = extractResultFromJsonOutput(snapshot.content.trimEnd()) ?? formatOutputSnapshot(session);
-  if (output.length <= NOTIFICATION_OUTPUT_MAX_CHARS) return output;
+  if (output.length <= REPORT_OUTPUT_MAX_CHARS) return output;
 
-  const head = output.slice(0, NOTIFICATION_OUTPUT_MAX_CHARS);
-  return `${head}\n[Truncated for notification: showing first ${head.length} chars. Use background_bash_read with session_id "${session.id}" for more.]`;
+  const head = output.slice(0, REPORT_OUTPUT_MAX_CHARS);
+  return `${head}\n[Truncated for report: showing first ${head.length} chars. Use background_bash_read with session_id "${session.id}" for more.]`;
 }
 
 function extractResultFromJsonOutput(output: string): string | null {

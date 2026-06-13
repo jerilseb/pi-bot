@@ -16,7 +16,11 @@
 
 import * as fs from 'node:fs';
 import { handleGroupAccessRequest } from './src/access-request.ts';
-import { stopAllBackgroundSessions } from './src/background-bash.ts';
+import {
+  formatBackgroundBashReportPrompt,
+  setBackgroundBashReportHandler,
+  stopAllBackgroundSessions,
+} from './src/background-bash.ts';
 import { createChatRegistry, type ChatRegistry, type ChatState } from './src/chat-session.ts';
 import { handleCommand } from './src/commands.ts';
 import {
@@ -161,6 +165,18 @@ setSubagentReportHandler(async (report) => {
   });
 });
 
+// Backgrounded bash sessions report back to the main chat agent as internal
+// background-bash-report prompts instead of sending direct Telegram messages.
+setBackgroundBashReportHandler(async (report) => {
+  await handleIncoming({
+    chatId: report.chatId,
+    text: formatBackgroundBashReportPrompt(report),
+    attachments: [],
+    source: 'background-bash-report',
+    suppressNoop: true,
+  });
+});
+
 function validateEnvironment(): void {
   if (!BOT_TOKEN) {
     console.error(
@@ -259,7 +275,8 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
     if (handled) return;
   }
 
-  const bypassQueueLimit = prompt.source === 'subagent-report';
+  const bypassQueueLimit =
+    prompt.source === 'subagent-report' || prompt.source === 'background-bash-report';
   if (!bypassQueueLimit && chat.queue.length >= MAX_QUEUE_PER_CHAT) {
     cleanupAttachments(prompt);
     if (!isBackgroundSource(prompt.source)) {

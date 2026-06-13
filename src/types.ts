@@ -63,7 +63,7 @@ export interface IncomingPrompt {
   chatId: string;
   text: string;
   attachments: Attachment[];
-  source?: 'telegram' | 'heartbeat' | 'cron' | 'subagent-report';
+  source?: 'telegram' | 'heartbeat' | 'cron' | 'subagent-report' | 'background-bash-report';
   suppressNoop?: boolean;
 }
 

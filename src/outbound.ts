@@ -1,4 +1,4 @@
-import { CRON_NOOP, HEARTBEAT_NOOP } from './config.ts';
+import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP } from './config.ts';
 import { sendTelegramMessage } from './telegram.ts';
 import type { PiPromptResult } from './types.ts';
 
@@ -25,7 +25,9 @@ function isNoopResponse(text: string): boolean {
   return (
     normalized.includes(HEARTBEAT_NOOP) ||
     normalized.includes(CRON_NOOP) ||
+    normalized.includes(BACKGROUND_BASH_NOOP) ||
     normalized.includes('HEARTBEAT_NOOP') ||
-    normalized.includes('CRON_NOOP')
+    normalized.includes('CRON_NOOP') ||
+    normalized.includes('BACKGROUND_BASH_NOOP')
   );
 }
