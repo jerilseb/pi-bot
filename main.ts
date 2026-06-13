@@ -33,6 +33,7 @@ import {
   PROJECT_SKILLS_DIR,
   SEND_TOOL_CALLS,
   SESSIONS_DIR,
+  SUBAGENT_MODEL,
   TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
   TOOL_CALL_BATCH_MAX_ITEMS,
@@ -56,6 +57,11 @@ import {
 } from './src/post-restart-tasks.ts';
 import { handleTelegramMenuCallbackQuery } from './src/telegram-menu.ts';
 import { createPiRuntime, type PiRuntime } from './src/pi-session.ts';
+import {
+  cancelAllSubagents,
+  formatSubagentReportPrompt,
+  setSubagentReportHandler,
+} from './src/subagents.ts';
 import {
   activeModelSystemPromptExtension,
   allowedChatsSystemPromptExtension,
@@ -143,6 +149,18 @@ const cron = createCronController({
   isRunning: () => running,
 });
 
+// Backgrounded sub-agents report back to the main chat agent as internal
+// subagent-report prompts, which go through the normal per-chat queue.
+setSubagentReportHandler(async (report) => {
+  await handleIncoming({
+    chatId: report.chatId,
+    text: formatSubagentReportPrompt(report),
+    attachments: [],
+    source: 'subagent-report',
+    suppressNoop: true,
+  });
+});
+
 function validateEnvironment(): void {
   if (!BOT_TOKEN) {
     console.error(
@@ -193,6 +211,20 @@ function validateEnvironment(): void {
     process.exit(1);
   }
 
+  if (!SUBAGENT_MODEL) {
+    console.error(
+      'Missing CONFIG_SUBAGENT_MODEL in src/config.ts. Example: CONFIG_SUBAGENT_MODEL = "openai-codex/gpt-5.4-mini"',
+    );
+    process.exit(1);
+  }
+
+  if (!ALLOWED_MODELS.includes(SUBAGENT_MODEL)) {
+    console.error(
+      `Sub-agent model (${SUBAGENT_MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts.`,
+    );
+    process.exit(1);
+  }
+
   const allowedChatIds = getAllowedTelegramChatIds();
   if (allowedChatIds.length === 0) {
     console.error(
@@ -227,7 +259,8 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
     if (handled) return;
   }
 
-  if (chat.queue.length >= MAX_QUEUE_PER_CHAT) {
+  const bypassQueueLimit = prompt.source === 'subagent-report';
+  if (!bypassQueueLimit && chat.queue.length >= MAX_QUEUE_PER_CHAT) {
     cleanupAttachments(prompt);
     if (!isBackgroundSource(prompt.source)) {
       await sendTelegramMessage(
@@ -264,7 +297,7 @@ async function processQueue(chat: ChatState, registry: ChatRegistry): Promise<vo
       ? { stop: () => undefined }
       : startTyping(prompt.chatId);
     try {
-      const logLabel = isBackgroundSource(prompt.source) ? prompt.source : 'prompt';
+      const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
       console.log(`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`);
       const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
         onToolCall: SEND_TOOL_CALLS
@@ -395,6 +428,7 @@ function logStartupBanner(): void {
   console.log(`Allowed chats: ${getAllowedTelegramChatIds().join(', ')}`);
   console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName}`);
   console.log(`Background model: ${BACKGROUND_PI_RUNTIME.modelName}`);
+  console.log(`Sub-agent model: ${SUBAGENT_MODEL}`);
   console.log('Pi runtime: SDK');
   console.log(`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(', ') : 'none'}`);
   console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(', ') : 'none'}`);
@@ -554,6 +588,7 @@ async function shutdown(): Promise<void> {
   cron.stop();
   chats.clearAll();
   backgroundChats.clearAll();
+  await cancelAllSubagents();
   await stopAllBackgroundSessions();
 }
 

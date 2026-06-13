@@ -13,11 +13,13 @@ import {
 	PROJECT_EXTENSIONS_DIR,
 	PROJECT_ROOT,
 	PROJECT_SKILLS_DIR,
+	SUBAGENT_MODEL,
 	getAllowedTelegramChatIds,
 } from "../src/config.ts";
 import { discoverExtensionPaths, discoverSkillPaths } from "../src/discovery.ts";
 import { protectedEnvToolAccessExtension } from "../src/env-guard.ts";
-import { createPiRuntime } from "../src/pi-session.ts";
+import { createPiRuntime, type PiRuntime } from "../src/pi-session.ts";
+import { subagentToolsExtension } from "../src/subagents.ts";
 import {
 	activeModelSystemPromptExtension,
 	allowedChatsSystemPromptExtension,
@@ -63,6 +65,11 @@ function validateEnvironment(): void {
 	assert(
 		ALLOWED_MODELS.includes(BACKGROUND_MODEL),
 		`Background model (${BACKGROUND_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
+	);
+	assert(SUBAGENT_MODEL, "Missing sub-agent model.");
+	assert(
+		ALLOWED_MODELS.includes(SUBAGENT_MODEL),
+		`Sub-agent model (${SUBAGENT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
 	);
 	assert(
 		getAllowedTelegramChatIds().length > 0,
@@ -139,7 +146,7 @@ async function importAndRegisterExtensions(extensionPaths: string[]): Promise<nu
 	return registeredTools;
 }
 
-function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): void {
+function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): PiRuntime {
 	const common = {
 		cwd: process.cwd(),
 		getExtensionPaths: () => extensionPaths,
@@ -153,7 +160,7 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): vo
 		],
 	};
 
-	createPiRuntime({
+	const chatRuntime = createPiRuntime({
 		...common,
 		model: MODEL,
 		sessionPrefix: "smoke-chat",
@@ -166,6 +173,32 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): vo
 		sessionPrefix: "smoke-background",
 		writeModelState: () => undefined,
 	});
+
+	return chatRuntime;
+}
+
+function verifySubagentTools(runtime: PiRuntime): number {
+	const registeredTools = new Set<string>();
+	const fakePi = {
+		registerTool(tool: unknown) {
+			assert(isRecord(tool), "Sub-agent extension attempted to register a non-object tool.");
+			assert(
+				typeof tool.name === "string" && tool.name.trim(),
+				"Sub-agent extension registered a tool without a name.",
+			);
+			registeredTools.add(tool.name);
+		},
+		on() {
+			return () => undefined;
+		},
+	} as unknown as ExtensionAPI;
+
+	subagentToolsExtension("smoke-chat", runtime)(fakePi);
+
+	for (const name of ["subagent_start", "subagent_read", "subagent_cancel", "subagent_list"]) {
+		assert(registeredTools.has(name), `Sub-agent extension did not register ${name}.`);
+	}
+	return registeredTools.size;
 }
 
 async function main(): Promise<void> {
@@ -177,10 +210,11 @@ async function main(): Promise<void> {
 	const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 	const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
 	const registeredTools = await importAndRegisterExtensions(extensionPaths);
-	createSmokeRuntimes(extensionPaths, skillPaths);
+	const chatRuntime = createSmokeRuntimes(extensionPaths, skillPaths);
+	const subagentTools = verifySubagentTools(chatRuntime);
 
 	console.log(
-		`Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${skillPaths.length} skill(s).`,
+		`Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
 	);
 }
 

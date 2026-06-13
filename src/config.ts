@@ -80,6 +80,16 @@ const PI_CHANNEL_DOCUMENT_UPLOAD_EXTS = [
 const CONFIG_HEARTBEAT_ENABLED = true;
 const PI_HEARTBEAT_INTERVAL_SECONDS = 3600;
 
+// Sub-agents spawned by the main agent
+const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.4-mini';
+const PI_SUBAGENT_MAX_RUNNING = 3;
+const PI_SUBAGENT_DEFAULT_YIELD_MS = 5_000;
+const PI_SUBAGENT_MAX_YIELD_MS = 30_000;
+const PI_SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 10 * 60_000;
+const PI_SUBAGENT_MAX_RUNTIME_CAP_MS = 60 * 60_000;
+const PI_SUBAGENT_MAX_RESULT_CHARS = 6_000;
+const PI_SUBAGENT_COMPLETED_TTL_MS = 30 * 60_000;
+
 // Local Pi extension discovery
 const CONFIG_EXTENSION_ENTRYPOINT_EXTS = ['.ts', '.js', '.mjs', '.cjs'] as const;
 
@@ -203,6 +213,31 @@ export const LOCAL_DOCUMENT_UPLOAD_DIRS = PI_CHANNEL_DOCUMENT_UPLOAD_DIRS.map((s
 export const DOCUMENT_UPLOAD_EXTS = PI_CHANNEL_DOCUMENT_UPLOAD_EXTS.map((s) =>
   s.trim().toLowerCase().replace(/^\./, ''),
 ).filter(Boolean);
+
+// ---------------------------------------------------------------------------
+// Sub-agent config
+// ---------------------------------------------------------------------------
+
+export const SUBAGENT_MODEL = normalizeModelRef(CONFIG_SUBAGENT_MODEL);
+export const SUBAGENT_MAX_RUNNING = configNumber(PI_SUBAGENT_MAX_RUNNING, 3, 1);
+export const SUBAGENT_DEFAULT_YIELD_MS = configNumber(PI_SUBAGENT_DEFAULT_YIELD_MS, 5_000, 0);
+export const SUBAGENT_MAX_YIELD_MS = configNumber(PI_SUBAGENT_MAX_YIELD_MS, 30_000, 0);
+export const SUBAGENT_DEFAULT_MAX_RUNTIME_MS = configNumber(
+  PI_SUBAGENT_DEFAULT_MAX_RUNTIME_MS,
+  10 * 60_000,
+  1_000,
+);
+export const SUBAGENT_MAX_RUNTIME_CAP_MS = configNumber(
+  PI_SUBAGENT_MAX_RUNTIME_CAP_MS,
+  60 * 60_000,
+  1_000,
+);
+export const SUBAGENT_MAX_RESULT_CHARS = configNumber(PI_SUBAGENT_MAX_RESULT_CHARS, 6_000, 500);
+export const SUBAGENT_COMPLETED_TTL_MS = configNumber(
+  PI_SUBAGENT_COMPLETED_TTL_MS,
+  30 * 60_000,
+  60_000,
+);
 
 // ---------------------------------------------------------------------------
 // Pi resources and scheduled prompt config

@@ -27,6 +27,7 @@ import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
 import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
 import { telegramRestartToolExtension } from './restart-tool.ts';
 import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
+import { subagentToolsExtension } from './subagents.ts';
 import { telegramMenuExtension } from './telegram-menu.ts';
 import { telegramVoiceNoteExtension } from './voice.ts';
 
@@ -278,6 +279,7 @@ export class SdkPiSession {
           ? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
           : []),
         telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
+        subagentToolsExtension(this.chatId, this.runtime),
         telegramMenuExtension(this.chatId),
         telegramVoiceNoteExtension(this.chatId),
         backgroundBashExtension(this.chatId),
