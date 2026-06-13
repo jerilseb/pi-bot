@@ -89,6 +89,7 @@ const PI_SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 10 * 60_000;
 const PI_SUBAGENT_MAX_RUNTIME_CAP_MS = 60 * 60_000;
 const PI_SUBAGENT_MAX_RESULT_CHARS = 6_000;
 const PI_SUBAGENT_COMPLETED_TTL_MS = 30 * 60_000;
+const CONFIG_SUBAGENT_SKILLS = ['pdf'] as const;
 
 // Local Pi extension discovery
 const CONFIG_EXTENSION_ENTRYPOINT_EXTS = ['.ts', '.js', '.mjs', '.cjs'] as const;
@@ -238,6 +239,7 @@ export const SUBAGENT_COMPLETED_TTL_MS = configNumber(
   30 * 60_000,
   60_000,
 );
+export const SUBAGENT_SKILLS = CONFIG_SUBAGENT_SKILLS.map((skill) => skill.trim()).filter(Boolean);
 
 // ---------------------------------------------------------------------------
 // Pi resources and scheduled prompt config

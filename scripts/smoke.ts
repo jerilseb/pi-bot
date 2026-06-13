@@ -14,6 +14,7 @@ import {
 	PROJECT_ROOT,
 	PROJECT_SKILLS_DIR,
 	SUBAGENT_MODEL,
+	SUBAGENT_SKILLS,
 	getAllowedTelegramChatIds,
 } from "../src/config.ts";
 import { discoverExtensionPaths, discoverSkillPaths } from "../src/discovery.ts";
@@ -177,6 +178,20 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Pi
 	return chatRuntime;
 }
 
+function verifySubagentSkillConfig(skillPaths: string[]): void {
+	const discovered = new Set(
+		skillPaths.flatMap((skillPath) => [
+			path.basename(skillPath),
+			path.basename(skillPath).replace(/\.[^.]+$/, ""),
+			path.basename(path.dirname(skillPath)),
+		]),
+	);
+
+	for (const skill of SUBAGENT_SKILLS) {
+		assert(discovered.has(skill), `Configured sub-agent skill was not discovered: ${skill}`);
+	}
+}
+
 function verifySubagentTools(runtime: PiRuntime): number {
 	const registeredTools = new Set<string>();
 	const fakePi = {
@@ -209,6 +224,7 @@ async function main(): Promise<void> {
 	const importedModules = await importAllSourceModules();
 	const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 	const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
+	verifySubagentSkillConfig(skillPaths);
 	const registeredTools = await importAndRegisterExtensions(extensionPaths);
 	const chatRuntime = createSmokeRuntimes(extensionPaths, skillPaths);
 	const subagentTools = verifySubagentTools(chatRuntime);

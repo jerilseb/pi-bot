@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import * as path from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
@@ -21,6 +22,7 @@ import {
   SUBAGENT_MAX_RUNTIME_CAP_MS,
   SUBAGENT_MAX_YIELD_MS,
   SUBAGENT_MODEL,
+  SUBAGENT_SKILLS,
 } from './config.ts';
 import { protectedEnvToolAccessExtension } from './env-guard.ts';
 import type { PiRuntime } from './pi-session.ts';
@@ -38,8 +40,8 @@ import { errorMessage, formatModelRef, parseModelRef } from './util.ts';
  *   long-term memory, no session persistence. The parent passes everything the
  *   sub-agent needs via task/context.
  * - Sub-agent sessions load only the protected-env guard plus web_search and
- *   web_fetch extensions, and no skills, so they have no Telegram-facing tools
- *   and no subagent_* tools (no recursion).
+ *   web_fetch extensions, and only explicitly whitelisted skills, so they have
+ *   no Telegram-facing tools and no subagent_* tools (no recursion).
  *
  * The registry lives at module level in src/ (imported once by Node), so it is
  * shared across all chats for the lifetime of the bot process. Sub-agents do
@@ -416,15 +418,17 @@ async function createSubagentSession(
   runtime: PiRuntime,
   model: Model<Api>,
 ): Promise<AgentSession> {
-  // Only explicitly approved extensions are loaded. Sub-agents get coding and
-  // web research tools, but cannot reach Telegram, bot lifecycle tools, or
-  // subagent_* (no recursion), and cannot inspect protected .env files.
+  // Only explicitly approved extensions and skills are loaded. Sub-agents get
+  // coding, web research, and whitelisted skill guidance, but cannot reach
+  // Telegram, bot lifecycle tools, or subagent_* (no recursion), and cannot
+  // inspect protected .env files.
   const resourceLoader = new DefaultResourceLoader({
     cwd: runtime.cwd,
     agentDir: getAgentDir(),
     settingsManager: runtime.settingsManager,
     noExtensions: true,
     noSkills: true,
+    additionalSkillPaths: filterSubagentSkillPaths(runtime.getSkillPaths()),
     extensionFactories: [protectedEnvToolAccessExtension, tavilySearchExtension, webFetchExtension],
     systemPromptOverride: () => SUBAGENT_SYSTEM_PROMPT,
   });
@@ -441,6 +445,21 @@ async function createSubagentSession(
     tools: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'],
   });
   return session;
+}
+
+function filterSubagentSkillPaths(skillPaths: string[]): string[] {
+  const allowed = new Set(SUBAGENT_SKILLS);
+  if (allowed.size === 0) return [];
+
+  return skillPaths.filter((skillPath) => {
+    const basename = path.basename(skillPath);
+    if (allowed.has(basename)) return true;
+
+    const nameWithoutExt = basename.replace(/\.[^.]+$/, '');
+    if (allowed.has(nameWithoutExt)) return true;
+
+    return allowed.has(path.basename(path.dirname(skillPath)));
+  });
 }
 
 function resolveSubagentModel(runtime: PiRuntime): { model: Model<Api>; modelName: string } {
