@@ -9,11 +9,10 @@
     "web"
   ],
   "scripts": {
-    "dev": "concurrently -k -n api,web -c blue,green \"node main.ts\" \"npm:web:dev\"",
+    "dev": "concurrently -k -n api,web -c blue,green \"node main.ts\" \"npm:dev:web\"",
     "dev:api": "node main.ts",
-    "web:dev": "npm --workspace web run dev",
-    "web:build": "npm --workspace web run build",
-    "build": "npm run web:build",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm --workspace web run build",
     "start": "npm run build && pm2 start ecosystem.config.cjs --update-env && pm2 save",
     "stop": "pm2 delete pi-bot || true && pm2 save",
     "format": "biome format --write .",

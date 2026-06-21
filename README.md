@@ -121,7 +121,7 @@ WEB_PUSH_SUBJECT=mailto:you@example.com
 WEB_TLS_HOST=your-machine.your-tailnet.ts.net
 ```
 
-Web Push and microphone capture require a **secure origin** (HTTPS/WSS) in the browser. Set `WEB_TLS_HOST` and drop a Tailscale cert in `certs/<host>.{crt,key}`; `npm run web:dev` then serves HTTPS on 5173, reachable over your tailnet.
+Web Push and microphone capture require a **secure origin** (HTTPS/WSS) in the browser. Set `WEB_TLS_HOST` and drop a Tailscale cert in `certs/<host>.{crt,key}`; `npm run dev:web` then serves HTTPS on 5173, reachable over your tailnet.
 
 ### Optional integrations
 
@@ -169,7 +169,7 @@ npm start   # npm run build && pm2 start ecosystem.config.cjs --update-env && pm
 npm stop    # pm2 delete pi-bot || true && pm2 save
 ```
 
-For a secure origin (required for Web Push and microphone access), serve HTTPS over your tailnet: issue a cert with `tailscale cert <host>` into `certs/<host>.{crt,key}`, set `WEB_TLS_HOST`, and run the dev server (`npm run web:dev`) on 5173 — or terminate TLS with `tailscale serve` in front of the production server on 8787.
+For a secure origin (required for Web Push and microphone access), serve HTTPS over your tailnet: issue a cert with `tailscale cert <host>` into `certs/<host>.{crt,key}`, set `WEB_TLS_HOST`, and run the dev server (`npm run dev:web`) on 5173 — or terminate TLS with `tailscale serve` in front of the production server on 8787.
 
 Operational notes:
 

@@ -62,7 +62,7 @@ npm run typecheck
 ## Operational notes
 
 - The server binds `127.0.0.1:8787` and serves plain HTTP. Remote access is over Tailscale; there is no app-level auth.
-- Web Push and microphone capture require a secure origin (HTTPS/WSS) in the browser. Set `WEB_TLS_HOST` (+ `certs/<host>.{crt,key}`, e.g. a `tailscale cert`) so `npm run web:dev` serves HTTPS directly on 5173. The `certs/` dir is gitignored.
+- Web Push and microphone capture require a secure origin (HTTPS/WSS) in the browser. Set `WEB_TLS_HOST` (+ `certs/<host>.{crt,key}`, e.g. a `tailscale cert`) so `npm run dev:web` serves HTTPS directly on 5173. The `certs/` dir is gitignored.
 - Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested. Web runtime state lives in `files/web-assets/`, `files/web-history/`, and `files/web-push-subscriptions.json`.
 - A single default web conversation is used (`chatId = "web"`). The registry is keyed by chatId, so named conversations can be added later.
 - After changing extensions, skills, prompts, or env vars, restart the server. After changing `web/`, rebuild (`npm run build`) for the production path.
