@@ -100,8 +100,12 @@ function Header(props: {
   return (
     <header className="header">
       <div className="brand">
-        <span className={`dot ${props.connected ? 'dot-on' : 'dot-off'}`} title={props.status} />
-        <strong>J-Rex</strong>
+        <img
+          src="/j-rex-192.png"
+          alt="J-Rex"
+          className={`brand-avatar ${props.connected ? 'brand-avatar-connected' : ''}`}
+          title={props.status}
+        />
       </div>
       <div className="header-controls">
         <select
@@ -240,6 +244,7 @@ function Composer({
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -342,12 +347,14 @@ function Composer({
         const form = new FormData();
         form.append('file', blob, 'mic.webm');
         setBusy(true);
+        setTranscribing(true);
         try {
           const res = await fetch('/api/transcribe', { method: 'POST', body: form });
           const data = (await res.json()) as { text?: string; error?: string };
           if (data.text) setText((t) => (t ? `${t} ${data.text}` : data.text || ''));
           else if (data.error) alert(`Transcription failed: ${data.error}`);
         } finally {
+          setTranscribing(false);
           setBusy(false);
         }
       };
@@ -442,6 +449,16 @@ function Composer({
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
               <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
             </svg>
+          </button>
+        ) : transcribing ? (
+          <button
+            type="button"
+            className="send-btn mic-btn transcribing-btn"
+            disabled
+            aria-label="Transcribing voice"
+            title="Transcribing voice…"
+          >
+            <span className="spinner" aria-hidden="true" />
           </button>
         ) : hasContent ? (
           <button
