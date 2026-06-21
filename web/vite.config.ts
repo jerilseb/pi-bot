@@ -27,7 +27,9 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       port: 5173,
       ...(tlsHost ? { allowedHosts: [tlsHost] } : {}),
-      ...(httpsEnabled ? { https: { cert: readFileSync(certPath), key: readFileSync(keyPath) } } : {}),
+      ...(httpsEnabled
+        ? { https: { cert: readFileSync(certPath), key: readFileSync(keyPath) } }
+        : {}),
       proxy: {
         '/ws': { target: 'ws://127.0.0.1:8787', ws: true },
         '/api': { target: 'http://127.0.0.1:8787', changeOrigin: true },

@@ -293,9 +293,7 @@ export function subagentToolsExtension(
 
 /** Cancels this chat's running sub-agents. Used by /abort. */
 export async function cancelChatSubagents(chatId: string): Promise<number> {
-  return cancelSubagents(
-    [...subagents.values()].filter((subagent) => subagent.chatId === chatId),
-  );
+  return cancelSubagents([...subagents.values()].filter((subagent) => subagent.chatId === chatId));
 }
 
 /** Cancels every sub-agent regardless of chat. Called from main.ts on shutdown. */
@@ -414,10 +412,7 @@ async function runSubagent(
   }
 }
 
-async function createSubagentSession(
-  runtime: PiRuntime,
-  model: Model<Api>,
-): Promise<AgentSession> {
+async function createSubagentSession(runtime: PiRuntime, model: Model<Api>): Promise<AgentSession> {
   // Only explicitly approved extensions and skills are loaded. Sub-agents get
   // coding, web research, and whitelisted skill guidance, but cannot reach
   // Web UI, bot lifecycle tools, or subagent_* (no recursion), and cannot
@@ -551,10 +546,7 @@ async function reportSubagentEnd(subagent: Subagent): Promise<void> {
       result: formatResult(subagent),
     });
   } catch (error) {
-    console.error(
-      `[${subagent.chatId}] failed to deliver sub-agent report:`,
-      errorMessage(error),
-    );
+    console.error(`[${subagent.chatId}] failed to deliver sub-agent report:`, errorMessage(error));
   }
 }
 
@@ -631,7 +623,10 @@ function formatListEntry(subagent: Subagent): string {
 
 function formatResult(subagent: Subagent): string {
   const full = subagent.outputTail.trim() || '(no output)';
-  if (full.length <= SUBAGENT_MAX_RESULT_CHARS && subagent.outputChars <= subagent.outputTail.length) {
+  if (
+    full.length <= SUBAGENT_MAX_RESULT_CHARS &&
+    subagent.outputChars <= subagent.outputTail.length
+  ) {
     return full;
   }
 

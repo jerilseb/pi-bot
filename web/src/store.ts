@@ -2,7 +2,14 @@ import type { AttachmentRef, MenuOptionRef, ServerEvent } from './protocol.ts';
 
 export type Entry =
   | { kind: 'user'; id: string; text: string; attachments: AttachmentRef[] }
-  | { kind: 'assistant'; id: string; runId?: string; text: string; thinking: string; streaming: boolean }
+  | {
+      kind: 'assistant';
+      id: string;
+      runId?: string;
+      text: string;
+      thinking: string;
+      streaming: boolean;
+    }
   | {
       kind: 'tool';
       id: string;
@@ -24,7 +31,15 @@ export type Entry =
       caption?: string;
     }
   | { kind: 'voice'; id: string; url: string; mimeType: string }
-  | { kind: 'menu'; id: string; menuId: string; text: string; options: MenuOptionRef[]; allowCancel: boolean; resolved: boolean }
+  | {
+      kind: 'menu';
+      id: string;
+      menuId: string;
+      text: string;
+      options: MenuOptionRef[];
+      allowCancel: boolean;
+      resolved: boolean;
+    }
   | { kind: 'notice'; id: string; text: string; level: 'info' | 'warn' | 'error' };
 
 export interface ChatState {
@@ -60,7 +75,11 @@ function assistantId(runId: string | undefined): string {
   return `assistant-${runId ?? 'na'}`;
 }
 
-function insertBeforeStreamingAssistant(entries: Entry[], runId: string | undefined, entry: Entry): Entry[] {
+function insertBeforeStreamingAssistant(
+  entries: Entry[],
+  runId: string | undefined,
+  entry: Entry,
+): Entry[] {
   const assistantIndex = entries.findIndex(
     (e) => e.kind === 'assistant' && e.runId === runId && e.streaming,
   );
@@ -218,7 +237,12 @@ function reduceEntries(entries: Entry[], event: ServerEvent): Entry[] {
     case 'voice':
       return [
         ...entries,
-        { kind: 'voice', id: `v-${event.seq}`, url: event.payload.url, mimeType: event.payload.mimeType },
+        {
+          kind: 'voice',
+          id: `v-${event.seq}`,
+          url: event.payload.url,
+          mimeType: event.payload.mimeType,
+        },
       ];
 
     case 'menu':
@@ -238,7 +262,12 @@ function reduceEntries(entries: Entry[], event: ServerEvent): Entry[] {
     case 'notice':
       return [
         ...entries,
-        { kind: 'notice', id: `n-${event.seq}`, text: event.payload.text, level: event.payload.level },
+        {
+          kind: 'notice',
+          id: `n-${event.seq}`,
+          text: event.payload.text,
+          level: event.payload.level,
+        },
       ];
 
     case 'model_changed':
@@ -295,7 +324,12 @@ export function reducer(state: ChatState, action: Action): ChatState {
       ...state,
       entries: [
         ...state.entries,
-        { kind: 'notice', id: `e-${Date.now()}-${Math.random()}`, text: event.payload.message, level: 'error' },
+        {
+          kind: 'notice',
+          id: `e-${Date.now()}-${Math.random()}`,
+          text: event.payload.message,
+          level: 'error',
+        },
       ],
     };
   }

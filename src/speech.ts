@@ -103,6 +103,30 @@ export async function synthesizeTtsAudio(text: string): Promise<TtsAudioResult> 
   );
 }
 
+export async function transcodeAudioToMp3(audio: ArrayBuffer): Promise<ArrayBuffer> {
+  const mp3Buffer = await runFfmpeg(
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-i',
+      'pipe:0',
+      '-vn',
+      '-ac',
+      '1',
+      '-codec:a',
+      'libmp3lame',
+      '-b:a',
+      '64k',
+      '-f',
+      'mp3',
+      'pipe:1',
+    ],
+    Buffer.from(audio),
+  );
+  return bufferToArrayBuffer(mp3Buffer);
+}
+
 function checkAudioFile(filePath: string): TranscriptionResult | null {
   if (!fs.existsSync(filePath)) {
     return { ok: false, error: `File not found: ${filePath}` };

@@ -165,10 +165,18 @@ export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
  * named conversations can be added later without rework. */
 export const WEB_CHAT_ID = 'web';
 
-export const WEB_UI_PORT = configNumber(Number(process.env.WEB_UI_PORT) || CONFIG_WEB_UI_PORT, 8787, 1);
+export const WEB_UI_PORT = configNumber(
+  Number(process.env.WEB_UI_PORT) || CONFIG_WEB_UI_PORT,
+  8787,
+  1,
+);
 export const WEB_UI_HOST = (process.env.WEB_UI_HOST ?? CONFIG_WEB_UI_HOST).trim() || '127.0.0.1';
 export const WEB_HISTORY_MAX = configNumber(CONFIG_WEB_HISTORY_MAX, 500, 1);
-export const WEB_UPLOAD_MAX_BYTES = configNumber(CONFIG_WEB_UPLOAD_MAX_BYTES, 50 * 1024 * 1024, 1024);
+export const WEB_UPLOAD_MAX_BYTES = configNumber(
+  CONFIG_WEB_UPLOAD_MAX_BYTES,
+  50 * 1024 * 1024,
+  1024,
+);
 export const WEB_UPLOAD_ABANDONED_TTL_MS =
   configNumber(CONFIG_WEB_UPLOAD_ABANDONED_TTL_MINUTES, 30, 1) * 60_000;
 export const WEB_TOOL_UPDATE_THROTTLE_MS = configNumber(CONFIG_WEB_TOOL_UPDATE_THROTTLE_MS, 250, 0);

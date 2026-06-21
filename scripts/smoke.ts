@@ -1,78 +1,74 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { pathToFileURL } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
-	ACTIVE_MODEL_PATH,
-	ALLOWED_MODELS,
-	BACKGROUND_MODEL,
-	DEFAULT_MODEL,
-	MODEL,
-	PROJECT_EXTENSIONS_DIR,
-	PROJECT_ROOT,
-	PROJECT_SKILLS_DIR,
-	SUBAGENT_MODEL,
-	SUBAGENT_SKILLS,
-} from "../src/config.ts";
-import { Value } from "typebox/value";
-import { discoverExtensionPaths, discoverSkillPaths } from "../src/discovery.ts";
-import { protectedEnvToolAccessExtension } from "../src/env-guard.ts";
-import { createPiRuntime, redactAndCap, type PiRuntime } from "../src/pi-session.ts";
+  ACTIVE_MODEL_PATH,
+  ALLOWED_MODELS,
+  BACKGROUND_MODEL,
+  DEFAULT_MODEL,
+  MODEL,
+  PROJECT_EXTENSIONS_DIR,
+  PROJECT_ROOT,
+  PROJECT_SKILLS_DIR,
+  SUBAGENT_MODEL,
+  SUBAGENT_SKILLS,
+} from '../src/config.ts';
+import { Value } from 'typebox/value';
+import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts';
+import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
+import { createPiRuntime, redactAndCap, type PiRuntime } from '../src/pi-session.ts';
+import { ClientMessageSchema, DURABLE_EVENT_TYPES, PUSH_EVENT_TYPES } from '../src/web/protocol.ts';
+import { subagentToolsExtension } from '../src/subagents.ts';
 import {
-	ClientMessageSchema,
-	DURABLE_EVENT_TYPES,
-	PUSH_EVENT_TYPES,
-} from "../src/web/protocol.ts";
-import { subagentToolsExtension } from "../src/subagents.ts";
-import {
-	activeModelSystemPromptExtension,
-	ensureMemoryFile,
-	memorySystemPromptExtension,
-	readSystemPrompt,
-} from "../src/system-prompt.ts";
-import { writeModelState } from "../src/util.ts";
+  activeModelSystemPromptExtension,
+  ensureMemoryFile,
+  memorySystemPromptExtension,
+  readSystemPrompt,
+} from '../src/system-prompt.ts';
+import { writeModelState } from '../src/util.ts';
 
-const INDEX_ENTRYPOINTS = ["index.ts", "index.js", "index.mjs", "index.cjs"] as const;
+const INDEX_ENTRYPOINTS = ['index.ts', 'index.js', 'index.mjs', 'index.cjs'] as const;
 
 type ExtensionModule = {
-	default?: unknown;
+  default?: unknown;
 };
 
 type PackageJson = {
-	pi?: {
-		extensions?: unknown;
-	};
+  pi?: {
+    extensions?: unknown;
+  };
 };
 
 function assert(condition: unknown, message: string): asserts condition {
-	if (!condition) throw new Error(message);
+  if (!condition) throw new Error(message);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function validateEnvironment(): void {
-	assert(DEFAULT_MODEL, "Missing default chat model.");
-	assert(ALLOWED_MODELS.length > 0, "No allowed chat models configured.");
-	assert(
-		ALLOWED_MODELS.includes(DEFAULT_MODEL),
-		`Default chat model (${DEFAULT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
-	);
-	assert(
-		ALLOWED_MODELS.includes(MODEL),
-		`Active chat model (${MODEL}) must be present in CONFIG_ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH}.`,
-	);
-	assert(BACKGROUND_MODEL, "Missing background model.");
-	assert(
-		ALLOWED_MODELS.includes(BACKGROUND_MODEL),
-		`Background model (${BACKGROUND_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
-	);
-	assert(SUBAGENT_MODEL, "Missing sub-agent model.");
-	assert(
-		ALLOWED_MODELS.includes(SUBAGENT_MODEL),
-		`Sub-agent model (${SUBAGENT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
-	);
+  assert(DEFAULT_MODEL, 'Missing default chat model.');
+  assert(ALLOWED_MODELS.length > 0, 'No allowed chat models configured.');
+  assert(
+    ALLOWED_MODELS.includes(DEFAULT_MODEL),
+    `Default chat model (${DEFAULT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
+  );
+  assert(
+    ALLOWED_MODELS.includes(MODEL),
+    `Active chat model (${MODEL}) must be present in CONFIG_ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH}.`,
+  );
+  assert(BACKGROUND_MODEL, 'Missing background model.');
+  assert(
+    ALLOWED_MODELS.includes(BACKGROUND_MODEL),
+    `Background model (${BACKGROUND_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
+  );
+  assert(SUBAGENT_MODEL, 'Missing sub-agent model.');
+  assert(
+    ALLOWED_MODELS.includes(SUBAGENT_MODEL),
+    `Sub-agent model (${SUBAGENT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
+  );
 }
 
 /**
@@ -80,193 +76,211 @@ function validateEnvironment(): void {
  * main.ts is excluded: importing it would start the bot (top-level await).
  */
 async function importAllSourceModules(): Promise<number> {
-	const srcDir = path.join(PROJECT_ROOT, "src");
-	const files = fs
-		.readdirSync(srcDir)
-		.filter((name) => name.endsWith(".ts"))
-		.sort();
+  const srcDir = path.join(PROJECT_ROOT, 'src');
+  const files = fs
+    .readdirSync(srcDir)
+    .filter((name) => name.endsWith('.ts'))
+    .sort();
 
-	for (const name of files) {
-		await import(pathToFileURL(path.join(srcDir, name)).href);
-	}
+  for (const name of files) {
+    await import(pathToFileURL(path.join(srcDir, name)).href);
+  }
 
-	return files.length;
+  return files.length;
 }
 
 function resolveExtensionImportPaths(extensionPath: string): string[] {
-	const stat = fs.statSync(extensionPath);
-	if (stat.isFile()) return [extensionPath];
+  const stat = fs.statSync(extensionPath);
+  if (stat.isFile()) return [extensionPath];
 
-	const packageJsonPath = path.join(extensionPath, "package.json");
-	if (fs.existsSync(packageJsonPath)) {
-		const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as PackageJson;
-		const extensionEntries = packageJson.pi?.extensions;
-		if (Array.isArray(extensionEntries) && extensionEntries.length > 0) {
-			return extensionEntries.map((entry) => {
-				assert(typeof entry === "string", `${packageJsonPath}: pi.extensions entries must be strings.`);
-				return path.resolve(extensionPath, entry);
-			});
-		}
-	}
+  const packageJsonPath = path.join(extensionPath, 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as PackageJson;
+    const extensionEntries = packageJson.pi?.extensions;
+    if (Array.isArray(extensionEntries) && extensionEntries.length > 0) {
+      return extensionEntries.map((entry) => {
+        assert(
+          typeof entry === 'string',
+          `${packageJsonPath}: pi.extensions entries must be strings.`,
+        );
+        return path.resolve(extensionPath, entry);
+      });
+    }
+  }
 
-	for (const entrypoint of INDEX_ENTRYPOINTS) {
-		const candidate = path.join(extensionPath, entrypoint);
-		if (fs.existsSync(candidate)) return [candidate];
-	}
+  for (const entrypoint of INDEX_ENTRYPOINTS) {
+    const candidate = path.join(extensionPath, entrypoint);
+    if (fs.existsSync(candidate)) return [candidate];
+  }
 
-	throw new Error(`Could not find an importable extension entrypoint for ${extensionPath}.`);
+  throw new Error(`Could not find an importable extension entrypoint for ${extensionPath}.`);
 }
 
 async function importAndRegisterExtensions(extensionPaths: string[]): Promise<number> {
-	let registeredTools = 0;
+  let registeredTools = 0;
 
-	const fakePi = {
-		registerTool(tool: unknown) {
-			assert(isRecord(tool), "Extension attempted to register a non-object tool.");
-			assert(typeof tool.name === "string" && tool.name.trim(), "Extension registered a tool without a name.");
-			registeredTools++;
-		},
-		on(eventName: unknown, callback: unknown) {
-			assert(typeof eventName === "string" && eventName.trim(), "Extension registered an invalid event name.");
-			assert(typeof callback === "function", `Extension event ${eventName} must use a function callback.`);
-			return () => undefined;
-		},
-	} as unknown as ExtensionAPI;
+  const fakePi = {
+    registerTool(tool: unknown) {
+      assert(isRecord(tool), 'Extension attempted to register a non-object tool.');
+      assert(
+        typeof tool.name === 'string' && tool.name.trim(),
+        'Extension registered a tool without a name.',
+      );
+      registeredTools++;
+    },
+    on(eventName: unknown, callback: unknown) {
+      assert(
+        typeof eventName === 'string' && eventName.trim(),
+        'Extension registered an invalid event name.',
+      );
+      assert(
+        typeof callback === 'function',
+        `Extension event ${eventName} must use a function callback.`,
+      );
+      return () => undefined;
+    },
+  } as unknown as ExtensionAPI;
 
-	for (const extensionPath of extensionPaths) {
-		for (const importPath of resolveExtensionImportPaths(extensionPath)) {
-			const module = (await import(pathToFileURL(importPath).href)) as ExtensionModule;
-			assert(typeof module.default === "function", `${importPath} must export a default extension function.`);
-			(module.default as (pi: ExtensionAPI) => void)(fakePi);
-		}
-	}
+  for (const extensionPath of extensionPaths) {
+    for (const importPath of resolveExtensionImportPaths(extensionPath)) {
+      const module = (await import(pathToFileURL(importPath).href)) as ExtensionModule;
+      assert(
+        typeof module.default === 'function',
+        `${importPath} must export a default extension function.`,
+      );
+      (module.default as (pi: ExtensionAPI) => void)(fakePi);
+    }
+  }
 
-	return registeredTools;
+  return registeredTools;
 }
 
 function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): PiRuntime {
-	const common = {
-		cwd: process.cwd(),
-		getExtensionPaths: () => extensionPaths,
-		getSkillPaths: () => skillPaths,
-		systemPromptOverride: () => readSystemPrompt(),
-		extensionFactories: [
-			memorySystemPromptExtension,
-			activeModelSystemPromptExtension,
-			protectedEnvToolAccessExtension,
-		],
-	};
+  const common = {
+    cwd: process.cwd(),
+    getExtensionPaths: () => extensionPaths,
+    getSkillPaths: () => skillPaths,
+    systemPromptOverride: () => readSystemPrompt(),
+    extensionFactories: [
+      memorySystemPromptExtension,
+      activeModelSystemPromptExtension,
+      protectedEnvToolAccessExtension,
+    ],
+  };
 
-	const chatRuntime = createPiRuntime({
-		...common,
-		model: MODEL,
-		sessionPrefix: "smoke-chat",
-		writeModelState: (model) => writeModelState(ACTIVE_MODEL_PATH, model),
-	});
+  const chatRuntime = createPiRuntime({
+    ...common,
+    model: MODEL,
+    sessionPrefix: 'smoke-chat',
+    writeModelState: (model) => writeModelState(ACTIVE_MODEL_PATH, model),
+  });
 
-	createPiRuntime({
-		...common,
-		model: BACKGROUND_MODEL,
-		sessionPrefix: "smoke-background",
-		writeModelState: () => undefined,
-	});
+  createPiRuntime({
+    ...common,
+    model: BACKGROUND_MODEL,
+    sessionPrefix: 'smoke-background',
+    writeModelState: () => undefined,
+  });
 
-	return chatRuntime;
+  return chatRuntime;
 }
 
 function verifySubagentSkillConfig(skillPaths: string[]): void {
-	const discovered = new Set(
-		skillPaths.flatMap((skillPath) => [
-			path.basename(skillPath),
-			path.basename(skillPath).replace(/\.[^.]+$/, ""),
-			path.basename(path.dirname(skillPath)),
-		]),
-	);
+  const discovered = new Set(
+    skillPaths.flatMap((skillPath) => [
+      path.basename(skillPath),
+      path.basename(skillPath).replace(/\.[^.]+$/, ''),
+      path.basename(path.dirname(skillPath)),
+    ]),
+  );
 
-	for (const skill of SUBAGENT_SKILLS) {
-		assert(discovered.has(skill), `Configured sub-agent skill was not discovered: ${skill}`);
-	}
+  for (const skill of SUBAGENT_SKILLS) {
+    assert(discovered.has(skill), `Configured sub-agent skill was not discovered: ${skill}`);
+  }
 }
 
 function verifySubagentTools(runtime: PiRuntime): number {
-	const registeredTools = new Set<string>();
-	const fakePi = {
-		registerTool(tool: unknown) {
-			assert(isRecord(tool), "Sub-agent extension attempted to register a non-object tool.");
-			assert(
-				typeof tool.name === "string" && tool.name.trim(),
-				"Sub-agent extension registered a tool without a name.",
-			);
-			registeredTools.add(tool.name);
-		},
-		on() {
-			return () => undefined;
-		},
-	} as unknown as ExtensionAPI;
+  const registeredTools = new Set<string>();
+  const fakePi = {
+    registerTool(tool: unknown) {
+      assert(isRecord(tool), 'Sub-agent extension attempted to register a non-object tool.');
+      assert(
+        typeof tool.name === 'string' && tool.name.trim(),
+        'Sub-agent extension registered a tool without a name.',
+      );
+      registeredTools.add(tool.name);
+    },
+    on() {
+      return () => undefined;
+    },
+  } as unknown as ExtensionAPI;
 
-	subagentToolsExtension("smoke-chat", runtime)(fakePi);
+  subagentToolsExtension('smoke-chat', runtime)(fakePi);
 
-	for (const name of ["subagent_start", "subagent_read", "subagent_cancel", "subagent_list"]) {
-		assert(registeredTools.has(name), `Sub-agent extension did not register ${name}.`);
-	}
-	return registeredTools.size;
+  for (const name of ['subagent_start', 'subagent_read', 'subagent_cancel', 'subagent_list']) {
+    assert(registeredTools.has(name), `Sub-agent extension did not register ${name}.`);
+  }
+  return registeredTools.size;
 }
 
 function verifyWebProtocol(): void {
-	// Live-only events must never be persisted; durable records must be.
-	for (const live of ["assistant_delta", "thinking_delta", "tool_start", "tool_update"]) {
-		assert(!DURABLE_EVENT_TYPES.has(live as never), `${live} must not be durable.`);
-	}
-	for (const durable of [
-		"user_message",
-		"assistant_message",
-		"tool_record",
-		"file",
-		"voice",
-		"menu",
-		"notice",
-	]) {
-		assert(DURABLE_EVENT_TYPES.has(durable as never), `${durable} must be durable.`);
-	}
-	assert(PUSH_EVENT_TYPES.has("assistant_message"), "assistant_message must be push-worthy.");
+  // Live-only events must never be persisted; durable records must be.
+  for (const live of ['assistant_delta', 'thinking_delta', 'tool_start', 'tool_update']) {
+    assert(!DURABLE_EVENT_TYPES.has(live as never), `${live} must not be durable.`);
+  }
+  for (const durable of [
+    'user_message',
+    'assistant_message',
+    'tool_record',
+    'file',
+    'voice',
+    'menu',
+    'notice',
+  ]) {
+    assert(DURABLE_EVENT_TYPES.has(durable as never), `${durable} must be durable.`);
+  }
+  assert(PUSH_EVENT_TYPES.has('assistant_message'), 'assistant_message must be push-worthy.');
 
-	// Redaction masks obvious secrets and caps oversized output.
-	assert(
-		redactAndCap("api_key=abcdef1234567890").includes("redacted"),
-		"redactAndCap should mask secrets.",
-	);
-	assert(
-		redactAndCap("x".repeat(50_000)).endsWith("…(truncated)"),
-		"redactAndCap should truncate oversized output.",
-	);
+  // Redaction masks obvious secrets and caps oversized output.
+  assert(
+    redactAndCap('api_key=abcdef1234567890').includes('redacted'),
+    'redactAndCap should mask secrets.',
+  );
+  assert(
+    redactAndCap('x'.repeat(50_000)).endsWith('…(truncated)'),
+    'redactAndCap should truncate oversized output.',
+  );
 
-	// Client messages are validated at runtime; unknown/extra fields are rejected.
-	assert(Value.Check(ClientMessageSchema, { type: "prompt", text: "hi" }), "valid prompt rejected.");
-	assert(
-		!Value.Check(ClientMessageSchema, { type: "prompt", text: "hi", evil: 1 }),
-		"extra fields should be rejected.",
-	);
-	assert(!Value.Check(ClientMessageSchema, { type: "nope" }), "unknown type should be rejected.");
-	assert(!Value.Check(ClientMessageSchema, "string"), "non-object should be rejected.");
+  // Client messages are validated at runtime; unknown/extra fields are rejected.
+  assert(
+    Value.Check(ClientMessageSchema, { type: 'prompt', text: 'hi' }),
+    'valid prompt rejected.',
+  );
+  assert(
+    !Value.Check(ClientMessageSchema, { type: 'prompt', text: 'hi', evil: 1 }),
+    'extra fields should be rejected.',
+  );
+  assert(!Value.Check(ClientMessageSchema, { type: 'nope' }), 'unknown type should be rejected.');
+  assert(!Value.Check(ClientMessageSchema, 'string'), 'non-object should be rejected.');
 }
 
 async function main(): Promise<void> {
-	validateEnvironment();
-	ensureMemoryFile();
-	assert(readSystemPrompt().trim(), "System prompt is empty.");
-	verifyWebProtocol();
+  validateEnvironment();
+  ensureMemoryFile();
+  assert(readSystemPrompt().trim(), 'System prompt is empty.');
+  verifyWebProtocol();
 
-	const importedModules = await importAllSourceModules();
-	const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-	const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
-	verifySubagentSkillConfig(skillPaths);
-	const registeredTools = await importAndRegisterExtensions(extensionPaths);
-	const chatRuntime = createSmokeRuntimes(extensionPaths, skillPaths);
-	const subagentTools = verifySubagentTools(chatRuntime);
+  const importedModules = await importAllSourceModules();
+  const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+  const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
+  verifySubagentSkillConfig(skillPaths);
+  const registeredTools = await importAndRegisterExtensions(extensionPaths);
+  const chatRuntime = createSmokeRuntimes(extensionPaths, skillPaths);
+  const subagentTools = verifySubagentTools(chatRuntime);
 
-	console.log(
-		`Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
-	);
+  console.log(
+    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
+  );
 }
 
 await main();

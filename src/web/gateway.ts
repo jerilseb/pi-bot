@@ -131,7 +131,11 @@ export function emit(chatId: string, input: ServerEventInput): ServerEvent {
   return event;
 }
 
-export function notice(chatId: string, text: string, level: 'info' | 'warn' | 'error' = 'info'): void {
+export function notice(
+  chatId: string,
+  text: string,
+  level: 'info' | 'warn' | 'error' = 'info',
+): void {
   emit(chatId, { type: 'notice', payload: { text, level } });
 }
 

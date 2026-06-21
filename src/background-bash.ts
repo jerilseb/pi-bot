@@ -479,7 +479,8 @@ export function formatBackgroundBashReportPrompt(report: BackgroundBashReport): 
 
 function formatOutputReportPreview(session: BackgroundBashSession): string {
   const snapshot = session.output.snapshot();
-  const output = extractResultFromJsonOutput(snapshot.content.trimEnd()) ?? formatOutputSnapshot(session);
+  const output =
+    extractResultFromJsonOutput(snapshot.content.trimEnd()) ?? formatOutputSnapshot(session);
   if (output.length <= REPORT_OUTPUT_MAX_CHARS) return output;
 
   const head = output.slice(0, REPORT_OUTPUT_MAX_CHARS);

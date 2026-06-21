@@ -380,7 +380,10 @@ async function enqueuePostRestartTasks(): Promise<void> {
   for (const task of tasks) {
     console.log(`[${task.chatId}] enqueueing post-restart task: ${formatPostRestartTask(task)}`);
     try {
-      gateway.notice(task.chatId, `🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`);
+      gateway.notice(
+        task.chatId,
+        `🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`,
+      );
       await handleIncoming({
         chatId: task.chatId,
         text: buildPostRestartPrompt(task),

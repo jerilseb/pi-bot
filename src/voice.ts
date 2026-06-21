@@ -1,7 +1,12 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { MAX_TTS_CHARS, VOICE_UPLOAD_LIMIT } from './config.ts';
-import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
+import {
+  synthesizeTtsAudio,
+  textToSpeechStatusText,
+  transcodeAudioToMp3,
+  type TtsAudioResult,
+} from './speech.ts';
 import { register as registerAsset } from './web/assets.ts';
 import * as gateway from './web/gateway.ts';
 
@@ -9,8 +14,7 @@ const EFFECTIVE_TTS_CHAR_LIMIT = MAX_TTS_CHARS;
 
 const SendVoiceNoteParams = Type.Object({
   text: Type.String({
-    description:
-      'Text to synthesize and send as a voice note. Keep it concise and conversational.',
+    description: 'Text to synthesize and send as a voice note. Keep it concise and conversational.',
   }),
 });
 
@@ -57,18 +61,21 @@ export async function sendVoiceNote(chatId: string, text: string): Promise<TtsAu
   }
 
   const result = await synthesizeTtsAudio(speechText);
-  if (result.audio.byteLength > VOICE_UPLOAD_LIMIT) {
+  const audio = isMp3Output(result.outputFormat)
+    ? result.audio
+    : await transcodeAudioToMp3(result.audio);
+  if (audio.byteLength > VOICE_UPLOAD_LIMIT) {
     throw new Error(
-      `Generated voice note is too large: ${(result.audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
+      `Generated voice note is too large: ${(audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
     );
   }
 
-  const mimeType = 'audio/ogg';
+  const mimeType = 'audio/mpeg';
   const assetId = registerAsset({
-    source: Buffer.from(result.audio),
+    source: Buffer.from(audio),
     mimeType,
     kind: 'voice',
-    name: 'pi-reply.ogg',
+    name: 'pi-reply.mp3',
     origin: 'generated',
   });
   gateway.emit(chatId, {
@@ -76,6 +83,10 @@ export async function sendVoiceNote(chatId: string, text: string): Promise<TtsAu
     payload: { assetId, url: `/api/files/${assetId}`, mimeType },
   });
   return result;
+}
+
+function isMp3Output(outputFormat: string): boolean {
+  return /\b(?:mp3|mpeg)\b/i.test(outputFormat);
 }
 
 function prepareTtsText(text: string): string {

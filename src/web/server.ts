@@ -5,10 +5,22 @@ import * as path from 'node:path';
 import { Busboy, type BusboyHeaders } from '@fastify/busboy';
 import { Value } from 'typebox/value';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { TMP_DIR, WEB_DIST_DIR, WEB_UI_HOST, WEB_UI_PORT, WEB_UPLOAD_MAX_BYTES } from '../config.ts';
+import {
+  TMP_DIR,
+  WEB_DIST_DIR,
+  WEB_UI_HOST,
+  WEB_UI_PORT,
+  WEB_UPLOAD_MAX_BYTES,
+} from '../config.ts';
 import type { Attachment, IncomingPrompt, TranscriptionResult } from '../types.ts';
 import { errorMessage } from '../util.ts';
-import { type AssetKind, registerUpload, resolve as resolveAsset, markConsumed, getMeta } from './assets.ts';
+import {
+  type AssetKind,
+  registerUpload,
+  resolve as resolveAsset,
+  markConsumed,
+  getMeta,
+} from './assets.ts';
 import * as gateway from './gateway.ts';
 import { resolveMenuSelection } from './menu.ts';
 import { ClientMessageSchema, type ClientMessage } from './protocol.ts';
@@ -278,8 +290,11 @@ function serveStatic(res: http.ServerResponse, urlPath: string): void {
 
   if (fs.existsSync(target) && fs.statSync(target).isFile()) {
     res.writeHead(200, {
-      'content-type': STATIC_CONTENT_TYPES[path.extname(target).toLowerCase()] ?? 'application/octet-stream',
-      ...(rel.startsWith('assets/') ? { 'cache-control': 'public, max-age=31536000, immutable' } : {}),
+      'content-type':
+        STATIC_CONTENT_TYPES[path.extname(target).toLowerCase()] ?? 'application/octet-stream',
+      ...(rel.startsWith('assets/')
+        ? { 'cache-control': 'public, max-age=31536000, immutable' }
+        : {}),
     });
     fs.createReadStream(target).pipe(res);
     return;
@@ -368,14 +383,17 @@ async function handleClientMessage(
         type: 'user_message',
         payload: { text, attachments: attachmentRefs(uploadIds) },
       });
-      await deps.handleIncoming({ chatId, text: text || 'Describe this attachment.', attachments, source: 'web' });
+      await deps.handleIncoming({
+        chatId,
+        text: text || 'Describe this attachment.',
+        attachments,
+        source: 'web',
+      });
       return;
     }
 
     case 'menu_select': {
-      const selection = message.cancel
-        ? { cancel: true }
-        : { optionIndex: message.optionIndex };
+      const selection = message.cancel ? { cancel: true } : { optionIndex: message.optionIndex };
       const result = resolveMenuSelection(chatId, message.menuId, selection);
       if ('error' in result) {
         gateway.sendTo(ws, { type: 'error', payload: { message: result.error } }, chatId);
@@ -383,7 +401,12 @@ async function handleClientMessage(
       }
       const echo = message.cancel ? 'Cancelled.' : 'Selection sent.';
       gateway.emit(chatId, { type: 'user_message', payload: { text: echo, attachments: [] } });
-      await deps.handleIncoming({ chatId, text: result.promptText, attachments: [], source: 'web' });
+      await deps.handleIncoming({
+        chatId,
+        text: result.promptText,
+        attachments: [],
+        source: 'web',
+      });
       return;
     }
 
@@ -399,7 +422,12 @@ async function handleClientMessage(
       if (deps.isBusy()) {
         gateway.sendTo(
           ws,
-          { type: 'error', payload: { message: 'Wait for the current response to finish before switching models.' } },
+          {
+            type: 'error',
+            payload: {
+              message: 'Wait for the current response to finish before switching models.',
+            },
+          },
           chatId,
         );
         return;
@@ -476,7 +504,11 @@ export function createWebServer(deps: WebServerDeps): WebServerHandle {
 
     ws.on('message', (data: Buffer, isBinary: boolean) => {
       if (isBinary) {
-        gateway.sendTo(ws, { type: 'error', payload: { message: 'Binary frames are not accepted.' } }, deps.chatId);
+        gateway.sendTo(
+          ws,
+          { type: 'error', payload: { message: 'Binary frames are not accepted.' } },
+          deps.chatId,
+        );
         return;
       }
       let parsed: unknown;
@@ -487,7 +519,11 @@ export function createWebServer(deps: WebServerDeps): WebServerHandle {
         return;
       }
       if (!Value.Check(ClientMessageSchema, parsed)) {
-        gateway.sendTo(ws, { type: 'error', payload: { message: 'Invalid message.' } }, deps.chatId);
+        gateway.sendTo(
+          ws,
+          { type: 'error', payload: { message: 'Invalid message.' } },
+          deps.chatId,
+        );
         return;
       }
       void handleClientMessage(ws, parsed, deps).catch((error) => {

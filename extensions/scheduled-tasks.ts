@@ -90,8 +90,7 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'list_scheduled_tasks',
     label: 'List Scheduled Tasks',
-    description:
-      'List scheduled one-time, interval, and cron-like tasks for the assistant.',
+    description: 'List scheduled one-time, interval, and cron-like tasks for the assistant.',
     promptSnippet: 'List scheduled assistant tasks.',
     parameters: ListScheduledTasksParams,
     async execute() {

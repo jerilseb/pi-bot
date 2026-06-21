@@ -10,7 +10,11 @@ const MAX_MENU_EXPIRY_MINUTES = 24 * 60;
 const MAX_MENU_OPTIONS = 12;
 
 const MenuOptionParams = Type.Object({
-  label: Type.String({ description: 'Button text shown to the user.', minLength: 1, maxLength: 64 }),
+  label: Type.String({
+    description: 'Button text shown to the user.',
+    minLength: 1,
+    maxLength: 64,
+  }),
   value: Type.Optional(
     Type.String({
       description: 'Optional machine-readable value. Defaults to the label.',
@@ -128,7 +132,8 @@ export function resolveMenuSelection(
     return { promptText: buildMenuCancelledPrompt(menu) };
   }
 
-  const option = selection.optionIndex !== undefined ? menu.options[selection.optionIndex] : undefined;
+  const option =
+    selection.optionIndex !== undefined ? menu.options[selection.optionIndex] : undefined;
   if (!option) {
     return { error: 'That menu option is no longer available.' };
   }

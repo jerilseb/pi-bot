@@ -139,9 +139,7 @@ const PromptMessage = Type.Object(
   {
     type: Type.Literal('prompt'),
     text: Type.String({ maxLength: 200_000 }),
-    uploadIds: Type.Optional(
-      Type.Array(Type.String({ maxLength: 200 }), { maxItems: 20 }),
-    ),
+    uploadIds: Type.Optional(Type.Array(Type.String({ maxLength: 200 }), { maxItems: 20 })),
   },
   { additionalProperties: false },
 );
@@ -156,10 +154,7 @@ const MenuSelectMessage = Type.Object(
   { additionalProperties: false },
 );
 
-const AbortMessage = Type.Object(
-  { type: Type.Literal('abort') },
-  { additionalProperties: false },
-);
+const AbortMessage = Type.Object({ type: Type.Literal('abort') }, { additionalProperties: false });
 
 const NewSessionMessage = Type.Object(
   { type: Type.Literal('new') },

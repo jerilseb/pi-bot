@@ -30,8 +30,9 @@ Key files:
 
 - Install: `npm install` (npm workspaces install the `web/` package too)
 - Local dev: `npm run dev` — runs the Node backend (API + WS on 8787) and the Vite dev server (5173) concurrently. Open **http://localhost:5173** (Vite proxies `/ws` and `/api/*` to 8787, with HMR).
+- PM2 + Vite dev: `npm start` — starts/reloads the backend (`pi-bot`) and Vite dev server (`pi-bot-web`) under PM2. Open **http://localhost:5173**. Stop both with `npm stop`.
 - Build the web UI: `npm run build` (→ `web/dist`). **Required** before production serving.
-- Production serve: `npm start` (builds then starts under PM2). Open **http://localhost:8787**.
+- Production backend serve: `npm run start:prod` (builds `web/dist`, then starts/reloads only the backend under PM2). Open **http://localhost:8787**.
 - Typecheck: `npm run typecheck` (root + `web/`)
 - Smoke/verify: `npm run verify`
 

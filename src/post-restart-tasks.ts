@@ -89,7 +89,9 @@ function normalizePostRestartTask(value: unknown): PostRestartTask {
     chatId: record.chatId,
     prompt: record.prompt,
     ...(record.title ? { title: String(record.title) } : {}),
-    createdAt: record.createdAt ? requireValidDate(record.createdAt, 'createdAt').toISOString() : new Date().toISOString(),
+    createdAt: record.createdAt
+      ? requireValidDate(record.createdAt, 'createdAt').toISOString()
+      : new Date().toISOString(),
   };
 }
 

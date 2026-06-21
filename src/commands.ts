@@ -74,7 +74,10 @@ function formatTokenCount(value: number): string {
 
 const COMMANDS: Record<string, CommandHandler> = {
   '/start': async ({ chat }) => {
-    gateway.notice(chat.chatId, "👋 Hi! Send me a message and I'll ask Pi. Use /help for commands.");
+    gateway.notice(
+      chat.chatId,
+      "👋 Hi! Send me a message and I'll ask Pi. Use /help for commands.",
+    );
   },
 
   '/help': async ({ chat }) => {
@@ -145,7 +148,11 @@ const COMMANDS: Record<string, CommandHandler> = {
 
   '/elevenlabsusage': async ({ chat }) => {
     if (!ELEVENLABS_API_KEY) {
-      gateway.notice(chat.chatId, '❌ No ElevenLabs API key found. Set ELEVENLABS_API_KEY in .env.', 'error');
+      gateway.notice(
+        chat.chatId,
+        '❌ No ElevenLabs API key found. Set ELEVENLABS_API_KEY in .env.',
+        'error',
+      );
       return;
     }
 

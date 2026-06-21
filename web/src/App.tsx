@@ -44,17 +44,14 @@ export default function App() {
     socketRef.current?.send({ type: 'prompt', text, ...(uploadIds.length ? { uploadIds } : {}) });
   }, []);
 
-  const onMenuSelect = useCallback(
-    (menuId: string, optionIndex: number | null) => {
-      socketRef.current?.send(
-        optionIndex === null
-          ? { type: 'menu_select', menuId, cancel: true }
-          : { type: 'menu_select', menuId, optionIndex },
-      );
-      dispatch({ type: 'resolveMenu', menuId });
-    },
-    [],
-  );
+  const onMenuSelect = useCallback((menuId: string, optionIndex: number | null) => {
+    socketRef.current?.send(
+      optionIndex === null
+        ? { type: 'menu_select', menuId, cancel: true }
+        : { type: 'menu_select', menuId, optionIndex },
+    );
+    dispatch({ type: 'resolveMenu', menuId });
+  }, []);
 
   return (
     <div className="app">
@@ -162,7 +159,13 @@ function EntryView({
                       <img src={a.url} alt={a.name} className="att-image" />
                     </a>
                   ) : (
-                    <a key={a.assetId} href={a.url} target="_blank" rel="noreferrer" className="att-file">
+                    <a
+                      key={a.assetId}
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="att-file"
+                    >
                       📎 {a.name}
                     </a>
                   ),
@@ -227,7 +230,11 @@ function EntryView({
       );
 
     case 'notice':
-      return <div className={`notice notice-${entry.level}`}><Markdown text={entry.text} /></div>;
+      return (
+        <div className={`notice notice-${entry.level}`}>
+          <Markdown text={entry.text} />
+        </div>
+      );
   }
 }
 
@@ -245,12 +252,30 @@ function Composer({
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  // Telegram-style swipe-left-to-cancel: track how far left the thumb has slid
+  // (slideX, ≤ 0) and whether it's past the cancel threshold (cancelArmed).
+  const [slideX, setSlideX] = useState(0);
+  const [cancelArmed, setCancelArmed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const holdingRef = useRef(false);
+  // discardRef tells the recorder's onstop handler to drop the audio instead of
+  // transcribing it. startXRef is the pointer's X at hold start; cancelArmedRef
+  // mirrors cancelArmed so the pointerup handler reads a fresh value.
+  const discardRef = useRef(false);
+  const startXRef = useRef(0);
+  const cancelArmedRef = useRef(false);
+
+  // How far left (px) the thumb must travel during a hold to cancel the recording.
+  const DISCARD_THRESHOLD = 90;
 
   const hasContent = text.trim().length > 0 || uploads.length > 0;
+
+  const setRecordingGestureActive = useCallback((active: boolean) => {
+    document.documentElement.classList.toggle('recording-gesture', active);
+    if (active) window.getSelection()?.removeAllRanges();
+  }, []);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -270,9 +295,16 @@ function Composer({
     return () => window.removeEventListener('resize', resizeTextarea);
   }, [resizeTextarea]);
 
+  useEffect(() => {
+    return () => setRecordingGestureActive(false);
+  }, [setRecordingGestureActive]);
+
   const submit = async () => {
     if (!text.trim() && uploads.length === 0) return;
-    onSend(text.trim(), uploads.map((u) => u.uploadId));
+    onSend(
+      text.trim(),
+      uploads.map((u) => u.uploadId),
+    );
     setText('');
     setUploads([]);
   };
@@ -322,14 +354,20 @@ function Composer({
   // and transcribes into the composer. holdingRef guards an early release that
   // happens before getUserMedia resolves.
   const startRecording = async () => {
-    if (recording || holdingRef.current || busy) return;
+    if (recording || holdingRef.current || busy) {
+      setRecordingGestureActive(false);
+      return;
+    }
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setRecordingGestureActive(false);
       alert(
         'Microphone needs a secure connection. Open this app over HTTPS (or localhost) — plain http:// blocks mic access on iOS/Safari.',
       );
       return;
     }
+    setRecordingGestureActive(true);
     holdingRef.current = true;
+    discardRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!holdingRef.current) {
@@ -343,6 +381,11 @@ function Composer({
       recorder.onstop = async () => {
         for (const track of stream.getTracks()) track.stop();
         setRecording(false);
+        if (discardRef.current) {
+          // Swiped left past the threshold — drop the audio without transcribing.
+          discardRef.current = false;
+          return;
+        }
         const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
         const form = new FormData();
         form.append('file', blob, 'mic.webm');
@@ -362,18 +405,25 @@ function Composer({
       recorder.start();
       setRecording(true);
     } catch (err) {
+      setRecordingGestureActive(false);
       holdingRef.current = false;
       setRecording(false);
       const name = err instanceof DOMException ? err.name : '';
-      if (name === 'NotAllowedError') alert('Microphone permission was denied. Allow it in Safari site settings.');
+      if (name === 'NotAllowedError')
+        alert('Microphone permission was denied. Allow it in Safari site settings.');
       else if (name === 'NotFoundError') alert('No microphone was found.');
       else alert(`Could not start recording: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = (discard = false) => {
+    setRecordingGestureActive(false);
     if (!holdingRef.current) return;
     holdingRef.current = false;
+    discardRef.current = discard;
+    cancelArmedRef.current = false;
+    setSlideX(0);
+    setCancelArmed(false);
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== 'inactive') recorder.stop();
   };
@@ -470,49 +520,84 @@ function Composer({
             title="Send"
           >
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path
-                d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"
-                fill="currentColor"
-              />
+              <path d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z" fill="currentColor" />
             </svg>
           </button>
         ) : (
-          <button
-            type="button"
-            className={`send-btn mic-btn ${recording ? 'recording' : ''}`}
-            disabled={busy}
-            aria-label={recording ? 'Recording — release to send' : 'Hold to record voice'}
-            title="Hold to record"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              try {
-                e.currentTarget.setPointerCapture(e.pointerId);
-              } catch {}
-              void startRecording();
-            }}
-            onPointerUp={(e) => {
-              try {
-                e.currentTarget.releasePointerCapture(e.pointerId);
-              } catch {}
-              stopRecording();
-            }}
-            onPointerCancel={() => stopRecording()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path
-                d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z"
-                fill="currentColor"
-              />
-              <path
-                d="M19 11a7 7 0 0 1-14 0M12 18v3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+          <>
+            {recording && (
+              <div className={`record-hint ${cancelArmed ? 'armed' : ''}`} aria-hidden="true">
+                {cancelArmed ? 'Release to cancel' : '‹ Slide to cancel'}
+              </div>
+            )}
+            <button
+              type="button"
+              className={`send-btn mic-btn ${recording ? 'recording' : ''} ${
+                cancelArmed ? 'cancel-armed' : ''
+              }`}
+              disabled={busy}
+              aria-label={
+                recording
+                  ? 'Recording — release to send, swipe left to cancel'
+                  : 'Hold to record voice'
+              }
+              title="Hold to record"
+              style={
+                recording
+                  ? {
+                      transform: `translate(${slideX}px, -32px) scale(2.6)`,
+                      transition: slideX < 0 ? 'none' : undefined,
+                    }
+                  : undefined
+              }
+              onPointerDown={(e) => {
+                e.preventDefault();
+                setRecordingGestureActive(true);
+                startXRef.current = e.clientX;
+                cancelArmedRef.current = false;
+                setSlideX(0);
+                setCancelArmed(false);
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {}
+                void startRecording();
+              }}
+              onPointerMove={(e) => {
+                e.preventDefault();
+                if (!holdingRef.current) return;
+                window.getSelection()?.removeAllRanges();
+                const offset = Math.min(0, e.clientX - startXRef.current);
+                setSlideX(offset);
+                const armed = offset <= -DISCARD_THRESHOLD;
+                if (armed !== cancelArmedRef.current) {
+                  cancelArmedRef.current = armed;
+                  setCancelArmed(armed);
+                }
+              }}
+              onPointerUp={(e) => {
+                try {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                } catch {}
+                stopRecording(cancelArmedRef.current);
+              }}
+              onPointerCancel={() => stopRecording(true)}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path
+                  d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z"
+                  fill="currentColor"
+                />
+                <path
+                  d="M19 11a7 7 0 0 1-14 0M12 18v3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </>
         )}
       </div>
     </footer>
