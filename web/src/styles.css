@@ -394,6 +394,15 @@ body {
 }
 .icon-btn {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0 !important;
+}
+.icon-btn svg {
+  display: block;
 }
 .icon-btn.recording {
   border-color: var(--error) !important;
@@ -402,13 +411,16 @@ body {
 .composer textarea {
   flex: 1;
   resize: none;
+  min-height: 38px;
   max-height: 180px;
+  overflow-y: hidden;
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 9px 12px;
   font-family: inherit;
+  line-height: 1.35;
   /* 16px keeps iOS Safari from auto-zooming when the field is focused. */
   font-size: 16px;
 }
@@ -430,4 +442,40 @@ body {
 }
 .send-btn:disabled {
   opacity: 0.6;
+}
+.stop-btn {
+  background: var(--error) !important;
+}
+.mic-btn {
+  background: var(--panel-2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  /* Smoothly grow/shrink as the hold starts and ends (Telegram-style). */
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transform-origin: center;
+  /* Stop the hold gesture from scrolling / selecting / triggering long-press menus. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.mic-btn.recording {
+  background: var(--error) !important;
+  color: #fff !important;
+  border-color: var(--error) !important;
+  /* Grow large and lift up out from under the thumb while held (Telegram-style). */
+  transform: translateY(-32px) scale(2.6);
+  z-index: 5;
+  animation: mic-halo 1.1s ease-in-out infinite;
+}
+@keyframes mic-halo {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(255, 107, 107, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 107, 0);
+  }
 }

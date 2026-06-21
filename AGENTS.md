@@ -46,7 +46,7 @@ npm run typecheck
 - TypeScript ESM project (`"type": "module"`) using `NodeNext` module resolution (backend).
 - Include explicit `.ts` extensions in local TypeScript imports.
 - Keep strict TypeScript compatibility; avoid `any` unless there is a clear boundary reason.
-- Match existing formatting: tabs for indentation, double quotes, semicolons (web/ uses Vite/React defaults).
+- Match existing formatting, enforced by Biome (`biome.json`): 2-space indentation, single quotes, semicolons, 100-char line width. Run `npm run format` to apply. (web/ uses Vite/React defaults).
 - Prefer small, focused modules and typed helper functions.
 - Preserve long-running behavior: do not block the per-chat queue, and keep file/upload operations best-effort where appropriate.
 - The gateway is the only module that knows about WebSocket/push; extensions and core never import `ws`.

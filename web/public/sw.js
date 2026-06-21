@@ -19,8 +19,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/icon.svg',
-      badge: '/icon.svg',
+      icon: '/j-rex-192.png',
+      badge: '/j-rex-192.png',
       data: { url: data.url || '/' },
       tag: 'jrex-message',
       renotify: true,

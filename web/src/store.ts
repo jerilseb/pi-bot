@@ -60,6 +60,14 @@ function assistantId(runId: string | undefined): string {
   return `assistant-${runId ?? 'na'}`;
 }
 
+function insertBeforeStreamingAssistant(entries: Entry[], runId: string | undefined, entry: Entry): Entry[] {
+  const assistantIndex = entries.findIndex(
+    (e) => e.kind === 'assistant' && e.runId === runId && e.streaming,
+  );
+  if (assistantIndex === -1) return [...entries, entry];
+  return [...entries.slice(0, assistantIndex), entry, ...entries.slice(assistantIndex)];
+}
+
 /** Applies a single event to the entry list. Pure on entries. */
 function reduceEntries(entries: Entry[], event: ServerEvent): Entry[] {
   switch (event.type) {
@@ -124,11 +132,8 @@ function reduceEntries(entries: Entry[], event: ServerEvent): Entry[] {
       const id = assistantId(event.runId);
       const existing = entries.find((e) => e.id === id && e.kind === 'assistant');
       if (existing && existing.kind === 'assistant') {
-        return entries.map((e) =>
-          e.id === id && e.kind === 'assistant'
-            ? { ...e, text: event.payload.text, streaming: false }
-            : e,
-        );
+        const updated: Entry = { ...existing, text: event.payload.text, streaming: false };
+        return [...entries.filter((e) => e.id !== id), updated];
       }
       return [
         ...entries,
@@ -147,20 +152,17 @@ function reduceEntries(entries: Entry[], event: ServerEvent): Entry[] {
       if (entries.some((e) => e.kind === 'tool' && e.toolCallId === event.payload.toolCallId)) {
         return entries;
       }
-      return [
-        ...entries,
-        {
-          kind: 'tool',
-          id: `tool-${event.payload.toolCallId}`,
-          toolCallId: event.payload.toolCallId,
-          name: event.payload.name,
-          label: event.payload.label,
-          args: event.payload.args,
-          result: '',
-          isError: false,
-          status: 'running',
-        },
-      ];
+      return insertBeforeStreamingAssistant(entries, event.runId, {
+        kind: 'tool',
+        id: `tool-${event.payload.toolCallId}`,
+        toolCallId: event.payload.toolCallId,
+        name: event.payload.name,
+        label: event.payload.label,
+        args: event.payload.args,
+        result: '',
+        isError: false,
+        status: 'running',
+      });
 
     case 'tool_update':
       return entries.map((e) =>
@@ -186,20 +188,17 @@ function reduceEntries(entries: Entry[], event: ServerEvent): Entry[] {
             : e,
         );
       }
-      return [
-        ...entries,
-        {
-          kind: 'tool',
-          id: `tool-${event.payload.toolCallId}`,
-          toolCallId: event.payload.toolCallId,
-          name: event.payload.name,
-          label: event.payload.label,
-          args: event.payload.args,
-          result: event.payload.result,
-          isError: event.payload.isError,
-          status: 'done',
-        },
-      ];
+      return insertBeforeStreamingAssistant(entries, event.runId, {
+        kind: 'tool',
+        id: `tool-${event.payload.toolCallId}`,
+        toolCallId: event.payload.toolCallId,
+        name: event.payload.name,
+        label: event.payload.label,
+        args: event.payload.args,
+        result: event.payload.result,
+        isError: event.payload.isError,
+        status: 'done',
+      });
     }
 
     case 'file':
