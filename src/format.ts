@@ -1,7 +1,7 @@
-import { escapeTelegramHtml } from './telegram.ts';
+/** Neutral Markdown formatting helpers used by usage reports rendered in the web UI. */
 
-export function telegramCode(value: string): string {
-  return `<code>${escapeTelegramHtml(value)}</code>`;
+export function code(value: string): string {
+  return `\`${value}\``;
 }
 
 export function titleCase(value: string | null | undefined): string {

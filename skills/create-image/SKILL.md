@@ -104,7 +104,7 @@ Options:
 - For edits, ask for or locate an accessible input image URL before running the helper.
 - Include exact typography in quotes when text must appear in the image.
 - Include composition, style, lighting, palette, camera/lens, and aspect ratio when relevant.
-- The output file extension is chosen from the returned image content type; generated files are normally suitable for Telegram upload.
+- The output file extension is chosen from the returned image content type; generated files are normally suitable for sending to the user.
 
 ## After Generation or Editing
 

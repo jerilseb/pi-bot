@@ -1,5 +1,4 @@
-import { escapeTelegramHtml } from './telegram.ts';
-import { telegramCode as code, titleCase, usageBar } from './telegram-format.ts';
+import { code, titleCase, usageBar } from './format.ts';
 
 const OPENAI_CODEX_PROVIDER = 'openai-codex';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
@@ -201,26 +200,26 @@ export async function fetchOpenAIUsage(
 
 function windowReport(window: UsageWindow): string[] {
   return [
-    `<b>${escapeTelegramHtml(titleCase(window.name))} Window</b>`,
-    `• Used: ${code(formatPercent(window.usedPercent))} ${code(usageBar(window.usedPercent))}`,
-    `• Window: ${code(formatWindow(window.windowMinutes))}`,
-    `• Resets in: ${code(formatDuration(window.resetAfterSeconds))}`,
-    `• Reset at: ${code(formatResetAt(window.resetAt))}`,
+    `**${titleCase(window.name)} Window**`,
+    `- Used: ${code(formatPercent(window.usedPercent))} ${code(usageBar(window.usedPercent))}`,
+    `- Window: ${code(formatWindow(window.windowMinutes))}`,
+    `- Resets in: ${code(formatDuration(window.resetAfterSeconds))}`,
+    `- Reset at: ${code(formatResetAt(window.resetAt))}`,
   ];
 }
 
-export function buildOpenAIUsageTelegramHtml(usage: OpenAIUsage, warnings: string[]): string {
+export function buildOpenAIUsageMarkdown(usage: OpenAIUsage, warnings: string[]): string {
   const lines = [
-    '<b>OpenAI Codex Usage</b>',
+    '**OpenAI Codex Usage**',
     '',
-    '<b>Account</b>',
-    `• Plan: ${code(titleCase(usage.planType))}`,
-    `• Limit: ${code(titleCase(usage.activeLimit))}`,
-    `• Credits: ${code(formatCredits(usage))}`,
+    '**Account**',
+    `- Plan: ${code(titleCase(usage.planType))}`,
+    `- Limit: ${code(titleCase(usage.activeLimit))}`,
+    `- Credits: ${code(formatCredits(usage))}`,
   ];
 
   if (usage.primaryOverSecondaryLimitPercent !== undefined) {
-    lines.push(`• Overage: ${code(formatPercent(usage.primaryOverSecondaryLimitPercent))}`);
+    lines.push(`- Overage: ${code(formatPercent(usage.primaryOverSecondaryLimitPercent))}`);
   }
 
   lines.push('', ...windowReport(usage.primary));
@@ -231,9 +230,9 @@ export function buildOpenAIUsageTelegramHtml(usage: OpenAIUsage, warnings: strin
   }
 
   if (warnings.length > 0) {
-    lines.push('', '<b>Warnings</b>');
+    lines.push('', '**Warnings**');
     for (const warning of warnings) {
-      lines.push(`• ${escapeTelegramHtml(warning)}`);
+      lines.push(`- ${warning}`);
     }
   }
 

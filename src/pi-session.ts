@@ -19,20 +19,25 @@ import {
   SEND_LOCAL_DOCUMENTS,
   SEND_LOCAL_IMAGES,
   SESSIONS_DIR,
+  TOOL_DATA_CAP_BYTES,
+  WEB_TOOL_UPDATE_THROTTLE_MS,
 } from './config.ts';
 import { backgroundBashExtension } from './background-bash.ts';
-import { formatToolStartNotification } from './tool-notifications.ts';
+import { formatToolStartLabel } from './tool-notifications.ts';
 import type { Attachment, PiPromptResult } from './types.ts';
 import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
-import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
-import { telegramRestartToolExtension } from './restart-tool.ts';
-import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
+import { documentUploadExtension, imageUploadExtension } from './uploads.ts';
+import { restartToolExtension } from './restart-tool.ts';
+import { newSessionToolExtension } from './session-switch-tool.ts';
 import { subagentToolsExtension } from './subagents.ts';
-import { telegramMenuExtension } from './telegram-menu.ts';
-import { telegramVoiceNoteExtension } from './voice.ts';
+import { webMenuExtension } from './web/menu.ts';
+import { webVoiceNoteExtension } from './voice.ts';
+import type { PiStreamEvent } from './web/protocol.ts';
 
 export interface PiRunPromptOptions {
-  onToolCall?: (notification: string) => void;
+  /** Streams normalized Pi events for live rendering. Each call carries no runId;
+   * the caller tags events with the runId for this run. */
+  onEvent?: (event: PiStreamEvent) => void;
 }
 
 export interface PiRuntime {
@@ -173,6 +178,8 @@ export class SdkPiSession {
     const chunks: string[] = [];
     const toolOutputs: string[] = [];
     let errorMessage = '';
+    const toolUpdateLastSent = new Map<string, number>();
+    const toolArgs = new Map<string, string>();
     const unsubscribe = session.subscribe((event) => {
       this.collectPromptEvent(
         event,
@@ -182,7 +189,9 @@ export class SdkPiSession {
         (message) => {
           errorMessage = message;
         },
-        options.onToolCall,
+        options.onEvent,
+        toolUpdateLastSent,
+        toolArgs,
       );
     });
 
@@ -276,15 +285,15 @@ export class SdkPiSession {
       extensionFactories: [
         ...this.runtime.extensionFactories,
         ...(this.runtime.requestRestart
-          ? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
+          ? [restartToolExtension(this.chatId, this.runtime.requestRestart)]
           : []),
-        telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
+        newSessionToolExtension((task) => this.requestNewSession(task)),
         subagentToolsExtension(this.chatId, this.runtime),
-        telegramMenuExtension(this.chatId),
-        telegramVoiceNoteExtension(this.chatId),
+        webMenuExtension(this.chatId),
+        webVoiceNoteExtension(this.chatId),
         backgroundBashExtension(this.chatId),
-        ...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
-        ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension(this.chatId)] : []),
+        ...(SEND_LOCAL_IMAGES ? [imageUploadExtension(this.chatId)] : []),
+        ...(SEND_LOCAL_DOCUMENTS ? [documentUploadExtension(this.chatId)] : []),
       ],
       systemPromptOverride: this.runtime.systemPromptOverride,
     });
@@ -306,7 +315,7 @@ export class SdkPiSession {
   }
 
   private async createSessionManager(): Promise<SessionManager> {
-    const sessionId = buildTelegramSessionId(this.runtime.sessionPrefix, this.chatId);
+    const sessionId = buildSessionId(this.runtime.sessionPrefix, this.chatId);
 
     if (!this.forceNewSessionOnNextStart) {
       const existingSession = await findMostRecentSessionForId(
@@ -330,12 +339,18 @@ export class SdkPiSession {
     chunks: string[],
     toolOutputs: string[],
     setError: (message: string) => void,
-    onToolCall: ((notification: string) => void) | undefined,
+    onEvent: ((event: PiStreamEvent) => void) | undefined,
+    toolUpdateLastSent: Map<string, number>,
+    toolArgs: Map<string, string>,
   ): void {
     if (event.type === 'message_update') {
       const delta = event.assistantMessageEvent;
       if (delta.type === 'text_delta') {
         chunks.push(delta.delta);
+        onEvent?.({ kind: 'text_delta', text: delta.delta });
+      }
+      if (delta.type === 'thinking_delta') {
+        onEvent?.({ kind: 'thinking_delta', text: delta.delta });
       }
       if (delta.type === 'error') {
         setError(delta.error.errorMessage || 'Pi agent failed while generating a response');
@@ -343,12 +358,42 @@ export class SdkPiSession {
     }
 
     if (event.type === 'tool_execution_start') {
-      onToolCall?.(formatToolStartNotification(event, session, this.runtime.cwd));
+      const args = redactArgs(event.args);
+      toolArgs.set(event.toolCallId, args);
+      onEvent?.({
+        kind: 'tool_start',
+        toolCallId: event.toolCallId,
+        name: event.toolName,
+        label: formatToolStartLabel(event, session, this.runtime.cwd),
+        args,
+      });
+    }
+
+    if (event.type === 'tool_execution_update') {
+      const now = Date.now();
+      const last = toolUpdateLastSent.get(event.toolCallId) ?? 0;
+      if (now - last >= WEB_TOOL_UPDATE_THROTTLE_MS) {
+        toolUpdateLastSent.set(event.toolCallId, now);
+        onEvent?.({
+          kind: 'tool_update',
+          toolCallId: event.toolCallId,
+          partial: redactAndCap(extractToolResultText(event.partialResult)),
+        });
+      }
     }
 
     if (event.type === 'tool_execution_end') {
       const output = extractToolResultText(event.result);
       if (output) toolOutputs.push(output);
+      onEvent?.({
+        kind: 'tool_end',
+        toolCallId: event.toolCallId,
+        name: event.toolName,
+        label: formatToolEndLabel(event.toolName),
+        args: toolArgs.get(event.toolCallId) ?? '',
+        result: redactAndCap(output),
+        isError: event.isError,
+      });
     }
 
     if (event.type === 'agent_end') {
@@ -362,7 +407,42 @@ export class SdkPiSession {
   }
 }
 
-function buildTelegramSessionId(prefix: string, chatId: string): string {
+/** Truncates to a byte cap and masks obvious secret patterns. */
+const SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}/g,
+  /\bAKIA[0-9A-Z]{12,}/g,
+  /\bBearer\s+[A-Za-z0-9._-]{10,}/gi,
+  /\b[A-Za-z0-9_-]*(?:token|secret|password|api[_-]?key)["']?\s*[:=]\s*["']?[A-Za-z0-9._-]{6,}/gi,
+];
+
+export function redactAndCap(value: string, cap = TOOL_DATA_CAP_BYTES): string {
+  let masked = value;
+  for (const pattern of SECRET_PATTERNS) {
+    masked = masked.replace(pattern, '***redacted***');
+  }
+  const buffer = Buffer.from(masked, 'utf8');
+  if (buffer.byteLength <= cap) return masked;
+  return `${buffer.subarray(0, cap).toString('utf8')}…(truncated)`;
+}
+
+function redactArgs(args: unknown): string {
+  let serialized: string;
+  if (typeof args === 'string') serialized = args;
+  else {
+    try {
+      serialized = JSON.stringify(args);
+    } catch {
+      serialized = String(args);
+    }
+  }
+  return redactAndCap(serialized);
+}
+
+function formatToolEndLabel(toolName: string): string {
+  return `🛠 ${toolName}`;
+}
+
+function buildSessionId(prefix: string, chatId: string): string {
   const sanitized = `${prefix}-${chatId}`
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[^A-Za-z0-9]+/, '')

@@ -4,10 +4,8 @@ import { pathToFileURL } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	ACTIVE_MODEL_PATH,
-	ALLOWED_CHATS_PATH,
 	ALLOWED_MODELS,
 	BACKGROUND_MODEL,
-	BOT_TOKEN,
 	DEFAULT_MODEL,
 	MODEL,
 	PROJECT_EXTENSIONS_DIR,
@@ -15,15 +13,19 @@ import {
 	PROJECT_SKILLS_DIR,
 	SUBAGENT_MODEL,
 	SUBAGENT_SKILLS,
-	getAllowedTelegramChatIds,
 } from "../src/config.ts";
+import { Value } from "typebox/value";
 import { discoverExtensionPaths, discoverSkillPaths } from "../src/discovery.ts";
 import { protectedEnvToolAccessExtension } from "../src/env-guard.ts";
-import { createPiRuntime, type PiRuntime } from "../src/pi-session.ts";
+import { createPiRuntime, redactAndCap, type PiRuntime } from "../src/pi-session.ts";
+import {
+	ClientMessageSchema,
+	DURABLE_EVENT_TYPES,
+	PUSH_EVENT_TYPES,
+} from "../src/web/protocol.ts";
 import { subagentToolsExtension } from "../src/subagents.ts";
 import {
 	activeModelSystemPromptExtension,
-	allowedChatsSystemPromptExtension,
 	ensureMemoryFile,
 	memorySystemPromptExtension,
 	readSystemPrompt,
@@ -51,7 +53,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validateEnvironment(): void {
-	assert(BOT_TOKEN, "Missing TELEGRAM_BOT_TOKEN or BOT_TOKEN.");
 	assert(DEFAULT_MODEL, "Missing default chat model.");
 	assert(ALLOWED_MODELS.length > 0, "No allowed chat models configured.");
 	assert(
@@ -71,10 +72,6 @@ function validateEnvironment(): void {
 	assert(
 		ALLOWED_MODELS.includes(SUBAGENT_MODEL),
 		`Sub-agent model (${SUBAGENT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
-	);
-	assert(
-		getAllowedTelegramChatIds().length > 0,
-		`No enabled Telegram chats configured. Check ${ALLOWED_CHATS_PATH}.`,
 	);
 }
 
@@ -156,7 +153,6 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Pi
 		extensionFactories: [
 			memorySystemPromptExtension,
 			activeModelSystemPromptExtension,
-			allowedChatsSystemPromptExtension,
 			protectedEnvToolAccessExtension,
 		],
 	};
@@ -216,10 +212,49 @@ function verifySubagentTools(runtime: PiRuntime): number {
 	return registeredTools.size;
 }
 
+function verifyWebProtocol(): void {
+	// Live-only events must never be persisted; durable records must be.
+	for (const live of ["assistant_delta", "thinking_delta", "tool_start", "tool_update"]) {
+		assert(!DURABLE_EVENT_TYPES.has(live as never), `${live} must not be durable.`);
+	}
+	for (const durable of [
+		"user_message",
+		"assistant_message",
+		"tool_record",
+		"file",
+		"voice",
+		"menu",
+		"notice",
+	]) {
+		assert(DURABLE_EVENT_TYPES.has(durable as never), `${durable} must be durable.`);
+	}
+	assert(PUSH_EVENT_TYPES.has("assistant_message"), "assistant_message must be push-worthy.");
+
+	// Redaction masks obvious secrets and caps oversized output.
+	assert(
+		redactAndCap("api_key=abcdef1234567890").includes("redacted"),
+		"redactAndCap should mask secrets.",
+	);
+	assert(
+		redactAndCap("x".repeat(50_000)).endsWith("…(truncated)"),
+		"redactAndCap should truncate oversized output.",
+	);
+
+	// Client messages are validated at runtime; unknown/extra fields are rejected.
+	assert(Value.Check(ClientMessageSchema, { type: "prompt", text: "hi" }), "valid prompt rejected.");
+	assert(
+		!Value.Check(ClientMessageSchema, { type: "prompt", text: "hi", evil: 1 }),
+		"extra fields should be rejected.",
+	);
+	assert(!Value.Check(ClientMessageSchema, { type: "nope" }), "unknown type should be rejected.");
+	assert(!Value.Check(ClientMessageSchema, "string"), "non-object should be rejected.");
+}
+
 async function main(): Promise<void> {
 	validateEnvironment();
 	ensureMemoryFile();
 	assert(readSystemPrompt().trim(), "System prompt is empty.");
+	verifyWebProtocol();
 
 	const importedModules = await importAllSourceModules();
 	const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);

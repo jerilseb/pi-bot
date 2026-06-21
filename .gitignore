@@ -15,3 +15,8 @@ debug-*.png
 .active_model
 sessions/
 workspace/
+web/dist/
+certs/
+*.crt
+*.key
+*.pem

@@ -104,7 +104,7 @@ const StopParams = Type.Object({
 const ListParams = Type.Object({
   all_chats: Type.Optional(
     Type.Boolean({
-      description: 'List sessions started from all Telegram chats, not just this one.',
+      description: 'List sessions started from all chats, not just this one.',
     }),
   ),
 });
@@ -112,7 +112,7 @@ const ListParams = Type.Object({
 const StopAllParams = Type.Object({
   all_chats: Type.Optional(
     Type.Boolean({
-      description: 'Stop sessions started from all Telegram chats, not just this one.',
+      description: 'Stop sessions started from all chats, not just this one.',
     }),
   ),
 });

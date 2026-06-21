@@ -2,18 +2,17 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { DAILY_MEMORY_DIR, MEMORY_PATH } from './config.ts';
-import { escapeTelegramHtml } from './telegram.ts';
 
 /**
- * Formats Pi tool-execution events into short Telegram HTML notifications,
- * with special labels for memory file access and skill reads.
+ * Formats Pi tool-execution events into short plain-text labels for the web UI
+ * tool cards, with special labels for memory file access and skill reads.
  */
 
 type ToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_execution_start' }>;
 
-const MAX_TOOL_NOTIFICATION_DISPLAY_CHARS = 34;
+const MAX_TOOL_NOTIFICATION_DISPLAY_CHARS = 40;
 
-export function formatToolStartNotification(
+export function formatToolStartLabel(
   event: ToolExecutionStartEvent,
   session: AgentSession,
   cwd: string,
@@ -22,13 +21,8 @@ export function formatToolStartNotification(
   const appendFirstArgument = (label: string) => {
     if (!firstArgument) return label;
 
-    const maxArgumentChars = Math.max(
-      8,
-      MAX_TOOL_NOTIFICATION_DISPLAY_CHARS - visibleTextLength(label) - 3,
-    );
-    return `${label} (<code>${escapeTelegramHtml(
-      truncateToolArgument(firstArgument, maxArgumentChars),
-    )}</code>)`;
+    const maxArgumentChars = Math.max(8, MAX_TOOL_NOTIFICATION_DISPLAY_CHARS - label.length - 3);
+    return `${label} (${truncateToolArgument(firstArgument, maxArgumentChars)})`;
   };
 
   const memoryUpdateKind = getMemoryUpdateKind(event, cwd);
@@ -41,13 +35,11 @@ export function formatToolStartNotification(
 
   const dailyMemoryReadLabel = getDailyMemoryReadLabel(event, cwd);
   if (dailyMemoryReadLabel) {
-    return `🧠 read daily memory (<code>${escapeTelegramHtml(dailyMemoryReadLabel)}</code>)`;
+    return `🧠 read daily memory (${dailyMemoryReadLabel})`;
   }
 
   const skillName = skillNameForReadTool(event, session, cwd);
-  return appendFirstArgument(
-    skillName ? `📗 ${escapeTelegramHtml(skillName)}` : `🛠 ${escapeTelegramHtml(event.toolName)}`,
-  );
+  return appendFirstArgument(skillName ? `📗 ${skillName}` : `🛠 ${event.toolName}`);
 }
 
 function formatFirstToolArgument(args: unknown): string | null {
@@ -100,10 +92,6 @@ function truncateToolArgument(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   if (maxChars === 1) return '…';
   return `${value.slice(0, maxChars - 1)}…`;
-}
-
-function visibleTextLength(value: string): number {
-  return value.replace(/<[^>]*>/g, '').length;
 }
 
 function getMemoryUpdateKind(

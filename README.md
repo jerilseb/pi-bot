@@ -1,118 +1,53 @@
 # pi-bot
 
-> Your private AI operator in Telegram — always nearby, able to chat, code, research, remember, schedule work, inspect files, create visuals, and restart itself when you ask.
+> Your private AI operator in the browser — always nearby, able to chat, code, research, remember, schedule work, inspect files, create visuals, and restart itself when you ask.
 
-`pi-bot` turns a normal Telegram chat into a practical personal AI workspace powered by the [Pi coding agent SDK](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Instead of opening a terminal, a browser, a separate AI app, and a task manager, you can message one bot and let it coordinate the work.
-
-It is designed for people who want an assistant that lives where they already communicate: Telegram. Think of it as a lightweight alternative to heavier agent setups like OpenClaw or Hermes agents when you mainly want a private, practical assistant you can message from anywhere.
+`pi-bot` turns a browser tab into a practical personal AI workspace powered by the [Pi coding agent SDK](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). You talk to it over a WebSocket, so you get live token streaming, rich tool-call and thinking display, inline files/images, voice in/out, a model picker, and — as an installable PWA — Web Push notifications even when the tab is closed.
 
 ## Why this exists
 
-Most AI tools are either:
+Most AI tools are either chat-only assistants that cannot touch your local files, coding agents stuck in a terminal, automation tools that need ceremony for simple reminders, or bots that forget everything once the conversation ends.
 
-- chat-only assistants that cannot touch your local files or tools,
-- coding agents that live in a terminal and are awkward to use from a phone,
-- automation tools that need a lot of ceremony for simple reminders or checks,
-- or bots that forget everything once the conversation ends.
+`pi-bot` combines those into one lightweight personal assistant:
 
-`pi-bot` exists to combine those into one lightweight personal assistant:
-
-- **Available from your phone** — send voice notes, screenshots, PDFs, documents, and quick instructions from Telegram.
+- **Available from any browser** — type, attach screenshots/PDFs/documents, or record a voice note.
 - **Useful on your machine** — it can inspect files, edit code, run tests, use local skills, and work inside a real repository.
-- **Proactive when needed** — it can schedule future tasks, run recurring checks, and keep heartbeat-style monitoring instructions.
-- **Persistent enough to be personal** — it has long-term memory and daily work notes so context does not vanish every session.
-- **Still under your control** — it is restricted to explicitly allowed Telegram chats and secrets stay in your `.env`.
+- **Proactive when needed** — schedule future tasks, run recurring checks, and keep heartbeat-style monitoring instructions. Background results arrive via Web Push and are replayed when you reopen the app.
+- **Persistent enough to be personal** — long-term memory and daily work notes so context does not vanish every session.
+- **Still under your control** — it binds to localhost and secrets stay in your `.env`; reach it remotely over your Tailscale tailnet.
 
-## What you can do with it
+## Architecture
 
-### Talk to your AI from anywhere
-
-Send a text message, voice note, screenshot, file, or PDF from Telegram. The bot forwards the request to a Pi agent session and replies back in the same chat.
-
-Examples:
-
-```text
-Summarize this document.
-What is wrong with this screenshot?
-Turn this voice note into an action list.
-Explain this error like I am debugging it on my phone.
+```
+Browser (React PWA)
+   │  WebSocket  (prompts, commands, menu select, model, visibility)
+   │  HTTP: GET /, /api/files/:id, POST /api/upload, /api/transcribe, /api/push/subscribe
+   ▼
+Node HTTP + WS server (src/web/server.ts)
+   ├── inbound: WS prompt / uploaded file ──► IncomingPrompt ──► handleIncoming() ──► per-chat queue
+   │                                                                    │
+   │                                              chat.pi.runPrompt(..., { onEvent })  (streamed)
+   │                                                                    │
+   └── outbound: gateway.emit(event)  ◄── streamed Pi events + final response
+            ├── live → connected WebSocket clients
+            ├── persist → replay buffer (files/web-history/<chatId>.jsonl)
+            └── notify → Web Push when no client is visible
 ```
 
-### Use it as a coding assistant
-
-Because the bot runs on your machine, it can work with local repositories, inspect files, run commands, make edits, and typecheck changes.
-
-Examples:
-
-```text
-Check the failing TypeScript errors and fix them.
-Find where the Telegram upload limit is configured.
-Add a README section for deployment.
-Commit and push the changes.
-```
-
-### Research the web without leaving Telegram
-
-`pi-bot` includes web search and browser-style page fetching tools, so it can look up current information and summarize it for you.
-
-Examples:
-
-```text
-Search for the latest OpenAI Codex pricing changes.
-Compare these two libraries and tell me which one fits this project.
-Fetch this URL and summarize the key points.
-```
-
-### Create and inspect rich artifacts
-
-The bot can use skills for PDFs, image generation, browser automation, HTML visualizations, and more.
-
-Examples:
-
-```text
-Extract the tables from this PDF.
-Make an interactive chart from this CSV.
-Generate a simple poster for this event.
-Open this site and test the login flow.
-```
-
-### Schedule work and reminders
-
-Ask it to do something later, once, repeatedly, or on a cron-like schedule.
-
-Examples:
-
-```text
-Remind me tomorrow at 9 AM to send the proposal.
-Every weekday morning, check my heartbeat instructions.
-Every 30 minutes, check whether this service is back online.
-```
-
-### Keep a useful memory trail
-
-`pi-bot` separates memory into two layers:
-
-- `files/memory.md` for durable facts and preferences.
-- `files/memory/YYYY-MM-DD.md` for daily work logs, commands, commits, and temporary findings.
-
-That means it can remember stable context without stuffing every temporary detail into the long-term prompt.
+The protocol is enveloped (`{ seq, runId, chatId, ts, type, payload }`) and split into **live-only** events (deltas, tool start/update) that animate the active run, and **durable records** (user/assistant messages, tool records, files, voice, menus, notices) that are persisted and replayed on reconnect.
 
 ## Feature highlights
 
-- Telegram long-polling bot — no public webhook required.
-- One Pi conversation per Telegram chat.
-- Restricted to explicitly allowed Telegram chat IDs.
-- Text, photo, document, audio, and voice-note ingestion.
-- ElevenLabs speech-to-text for voice/audio transcription.
-- ElevenLabs text-to-speech for voice-note replies when requested.
-- Generated local image and document uploads back to Telegram.
-- Tavily `web_search` and browser-style `web_fetch` tools.
-- Scheduled one-time, interval, and cron-like tasks.
-- Heartbeat loop for proactive monitoring instructions.
+- Browser chat UI over a WebSocket — live token-by-token streaming.
+- Collapsible tool-call cards (name, args, result, error state) and thinking blocks.
+- Inline images/documents and an audio player for voice replies; Markdown rendering.
+- File/image upload and microphone capture (speech-to-text) from the composer.
+- Model picker, plus `/status`, `/abort`, `/new`, `/restart`, usage commands.
+- Buffer-and-replay: reconnecting restores recent history; background output triggers Web Push.
+- Installable PWA with a service worker for Web Push (opt-in via VAPID keys).
+- Scheduled one-time, interval, and cron-like tasks; heartbeat loop for proactive monitoring.
 - Long-term memory plus daily/session notes.
-- Model switching with Telegram inline buttons.
-- Usage commands for OpenAI Codex and ElevenLabs.
-- Pi skills for browser automation, image generation, HTML visualizations, email via Himalaya, and PDF work.
+- Tavily `web_search`, browser-style `web_fetch`, and Pi skills (PDF, image generation, browser automation, HTML visualizations, email).
 - Graceful self-restart through `/restart` or an explicit natural-language restart request.
 
 ## Quick start
@@ -123,49 +58,30 @@ That means it can remember stable context without stuffing every temporary detai
 npm install
 ```
 
+This is an npm workspace; it installs the `web/` frontend package too.
+
 ### 2. Create your environment file
 
-Create `.env`:
-
 ```bash
-TELEGRAM_BOT_TOKEN=123456:your-telegram-token
-OPENROUTER_API_KEY=sk-or-your-key
+cp .env.example .env
+# then set OPENROUTER_API_KEY (or authenticate openai-codex via Pi)
 ```
 
-Create `files/allowed-chats.json`:
-
-```json
-[
-  {
-    "name": "Personal chat",
-    "id": "123456789",
-    "type": "private",
-    "enabled": true
-  },
-  {
-    "name": "Work group",
-    "id": "-1001234567890",
-    "type": "supergroup",
-    "enabled": true
-  }
-]
-```
-
-Secrets and deployment-specific values live in `.env`. Allowed Telegram chats live in `files/allowed-chats.json`, so the agent can manage them by editing that JSON file. Private chats are usually positive IDs; groups/supergroups are usually negative IDs such as `-1001234567890`.
-
-### 3. Run locally
+### 3. Run locally (dev)
 
 ```bash
 npm run dev
 ```
 
-### 4. Run under pm2
+This runs the Node backend (API + WS on **8787**) and the Vite dev server (**5173**) concurrently. Open **http://localhost:5173** — Vite proxies `/ws` and `/api/*` to 8787 and gives you HMR for the UI.
+
+### 4. Production serve
 
 ```bash
-npm start
+npm start   # builds web/dist, then starts under pm2
 ```
 
-The startup logs show the active chat model, background model, enabled extensions, and discovered skills.
+Then open **http://localhost:8787** (the Node server serves the built `web/dist`). The startup logs show the active chat model, background model, enabled extensions, and discovered skills.
 
 ## Configuration
 
@@ -175,17 +91,9 @@ The default chat model is configured in `src/config.ts`:
 export const CHAT_MODEL = "openai-codex/gpt-5.4-mini";
 ```
 
-The active chat model can be changed from Telegram with `/models` and is persisted in `.active_model`.
+The active chat model can be changed from the web UI model picker and is persisted in `.active_model`. Background heartbeat/cron prompts use `CONFIG_BACKGROUND_MODEL` and cannot be changed from the UI.
 
-Background heartbeat and cron prompts use `CONFIG_BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
-
-Model refs use this form:
-
-```text
-provider/model-id
-```
-
-Examples:
+Model refs use `provider/model-id` form, for example:
 
 ```text
 openai-codex/gpt-5.5
@@ -193,126 +101,101 @@ openrouter/openai/gpt-5.4-mini
 openrouter/moonshotai/kimi-k2.6
 ```
 
-For `openai-codex/...`, authenticate through Pi with `/login openai-codex`, or set `OPENAI_CODEX_API_KEY` as a runtime override.
+For `openai-codex/...`, authenticate through Pi with `/login openai-codex`, or set `OPENAI_CODEX_API_KEY`.
 
-## Optional integrations
-
-Add any of these to `.env` to enable extra capabilities:
+### Web server and Web Push
 
 ```bash
-# voice/audio transcription and Telegram voice-note replies
-ELEVENLABS_API_KEY=your-elevenlabs-key
+# Web UI server (defaults)
+WEB_UI_HOST=127.0.0.1
+WEB_UI_PORT=8787
 
-# Tavily web search extension
-TAVILY_API_KEY_1=tvly-your-key
-# TAVILY_API_KEY_2=another-key-if-you-want
+# Web Push (PWA) — opt-in. Generate keys: npx web-push generate-vapid-keys
+WEB_PUSH_ENABLED=true
+WEB_PUSH_VAPID_PUBLIC=...
+WEB_PUSH_VAPID_PRIVATE=...
+WEB_PUSH_SUBJECT=mailto:you@example.com
 
-# image generation skill
-KIE_API_KEY=your-kie-api-key
-
-# optional OpenAI Codex runtime override
-OPENAI_CODEX_API_KEY=your-codex-bearer-token
+# Dev-server HTTPS (secure origin for mic + Web Push on real devices).
+# Issue a cert with `tailscale cert <host>` into certs/<host>.{crt,key}.
+WEB_TLS_HOST=your-machine.your-tailnet.ts.net
 ```
 
-Useful non-secret settings in `src/config.ts` include:
+Web Push and microphone capture require a **secure origin** (HTTPS/WSS) in the browser. Set `WEB_TLS_HOST` and drop a Tailscale cert in `certs/<host>.{crt,key}`; `npm run web:dev` then serves HTTPS on 5173, reachable over your tailnet.
 
-- `CHAT_MODEL`, `CONFIG_BACKGROUND_MODEL`, and `CONFIG_ALLOWED_MODELS`
-- `CONFIG_ELEVENLABS_TTS_VOICE_ID`, `CONFIG_ELEVENLABS_TTS_MODEL`, and `CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT`
-- `PI_CHANNEL_IDLE_TIMEOUT_MINUTES` and `PI_CHANNEL_MAX_QUEUE_PER_CHAT`
-- `PI_CHANNEL_SEND_TOOL_CALLS`, `PI_CHANNEL_TOOL_CALL_BATCH_MS`, and `PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS`
-- `PI_CHANNEL_SEND_LOCAL_IMAGES`, `PI_CHANNEL_IMAGE_UPLOAD_DIRS`, `PI_CHANNEL_SEND_LOCAL_DOCUMENTS`, `PI_CHANNEL_DOCUMENT_UPLOAD_DIRS`, and `PI_CHANNEL_DOCUMENT_UPLOAD_EXTS`
-- `CONFIG_HEARTBEAT_ENABLED` and `PI_HEARTBEAT_INTERVAL_SECONDS`
+### Optional integrations
 
-## Telegram commands
+```bash
+ELEVENLABS_API_KEY=your-elevenlabs-key   # speech-to-text + voice-note replies
+GOOGLE_GENAI_API_KEY=your-gemini-key     # speech features (GEMINI_API_KEY also accepted)
+TAVILY_API_KEY_1=tvly-your-key           # web search
+KIE_API_KEY=your-kie-api-key             # image generation skill
+OPENAI_CODEX_API_KEY=your-codex-token    # optional Codex runtime override
+```
 
-Inside Telegram:
+## Commands
+
+Type these in the composer:
 
 | Command | What it does |
 | --- | --- |
-| `/start` | Say hi |
 | `/help` | Show commands |
 | `/status` | Show the current chat session status |
-| `/models` | Choose an allowed chat model |
+| `/models` | List allowed chat models (switch via the model picker) |
 | `/openaiusage` | Show OpenAI Codex usage windows and reset times |
-| `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
+| `/elevenlabsusage` | Show ElevenLabs character/credit usage |
 | `/abort` | Stop the current response and clear the queue |
 | `/new` | Reset the Pi conversation for this chat |
 | `/restart` | Restart the bot process |
 
-The chat runtime also exposes a constrained `restart_bot` Pi tool. It is intended only for explicit natural-language requests such as “restart yourself” and uses the same graceful shutdown path as `/restart`, letting pm2 bring the process back up.
+The chat runtime also exposes a constrained `restart_bot` Pi tool for explicit natural-language requests such as "restart yourself", using the same graceful shutdown path as `/restart`.
 
 ## Deployment
 
-This bot uses Telegram long polling, so it does **not** need a public HTTPS URL or webhook. Deploy it as one long-running Node.js process on a VPS, home server, or any process host that allows outbound HTTPS.
-
-Basic VPS deployment:
+Deploy as one long-running Node.js process, reachable over your Tailscale tailnet:
 
 ```bash
 git clone <your-repo-url> pi-bot
 cd pi-bot
 npm ci
-cp .env.example .env
-# edit .env with your Telegram chat/token and provider keys
-npm start
+cp .env.example .env   # set provider keys (and VAPID keys if using push)
+npm start              # builds web/dist + pm2 start
 ```
 
 Production is managed through npm scripts that wrap `pm2` and `ecosystem.config.cjs`:
 
 ```bash
-npm start   # pm2 start ecosystem.config.cjs --update-env && pm2 save
+npm start   # npm run build && pm2 start ecosystem.config.cjs --update-env && pm2 save
 npm stop    # pm2 delete pi-bot || true && pm2 save
 ```
 
-Useful pm2 commands:
-
-```bash
-npx pm2 logs pi-bot
-npx pm2 restart pi-bot --update-env
-```
-
-On a new server, enable pm2 startup once so the bot comes back after reboot:
-
-```bash
-npx pm2 startup
-```
-
-Keep exactly one `pm2` instance running per Telegram bot token. Multiple pollers on the same token can steal updates from each other.
+For a secure origin (required for Web Push and microphone access), serve HTTPS over your tailnet: issue a cert with `tailscale cert <host>` into `certs/<host>.{crt,key}`, set `WEB_TLS_HOST`, and run the dev server (`npm run web:dev`) on 5173 — or terminate TLS with `tailscale serve` in front of the production server on 8787.
 
 Operational notes:
 
-- Use Node.js 22+ or the same Node version you use locally.
-- Keep `.env` on the server only; do not commit bot/API keys.
-- Persistent app state lives under `files/`.
-- Back up `files/` if you care about memory, heartbeat state, or scheduled tasks.
-- Telegram downloads and generated temp files are stored under your system temp directory.
-- After changing extensions, skills, prompts, `src/config.ts`, or environment variables, restart with `npx pm2 restart pi-bot --update-env` or `npm stop && npm start`.
+- Use Node.js 22+ (Node can run the `.ts` entrypoint directly).
+- Keep `.env` on the server only; do not commit keys.
+- `npm run build` is **required** before production serving; the server fails fast with a clear message if `web/dist` is missing.
+- Persistent app state lives under `files/`. Back it up if you care about memory, heartbeat state, scheduled tasks, replay history, or stored assets.
+- After changing extensions, skills, prompts, `src/config.ts`, or environment variables, restart. After changing `web/`, rebuild.
 
-## Memory files
-
-Important persistent paths:
+## Persistent paths
 
 ```text
-files/memory.md                  Long-term memory
-files/memory/YYYY-MM-DD.md       Daily/session notes
-files/heartbeat.md               Standing heartbeat instructions
-files/heartbeat-state.md         Durable heartbeat state
-files/cron-jobs.json             Scheduled tasks
-files/allowed-chats.json         Allowed Telegram chats/groups
-.active_model                    Active chat model
+files/memory.md                      Long-term memory
+files/memory/YYYY-MM-DD.md           Daily/session notes
+files/heartbeat.md                   Standing heartbeat instructions
+files/heartbeat-state.md             Durable heartbeat state
+files/cron-jobs.json                 Scheduled tasks
+files/web-history/<chatId>.jsonl     Replay buffer (durable records)
+files/web-assets/                    Stored uploads + generated files (manifest.json)
+files/web-push-subscriptions.json    Web Push subscriptions
+.active_model                        Active chat model
 ```
 
 ## Safety notes
 
-- The bot is intentionally restricted to enabled entries in `files/allowed-chats.json`.
+- The server binds `127.0.0.1` and has no app-level auth — restrict access at the network/proxy layer.
 - Do not commit `.env` or real API keys.
-- Bots cannot participate in Telegram Secret Chats.
-- True disappearing messages are Telegram chat-level behavior; bot-simulated disappearing messages would require sending and later deleting a normal bot message.
-- Long polling means only one running process should use a given Telegram bot token.
-
-## Why Telegram?
-
-Because the best assistant is the one you can reach immediately.
-
-Telegram gives you voice notes, screenshots, quick files, mobile access, and a familiar chat interface. `pi-bot` adds local tools, code execution, memory, scheduling, and agent skills behind that interface.
-
-That makes it less like a chatbot and more like a personal operating layer for your work.
+- Uploaded and generated files are referenced by opaque asset ids, never filesystem paths, over the wire.
+- Tool args and results are capped and secret-masked before they are streamed or persisted.

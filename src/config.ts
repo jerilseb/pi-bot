@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { configNumber, normalizeModelRef, readActiveModel } from './util.ts';
@@ -46,13 +45,18 @@ const CONFIG_ELEVENLABS_TTS_VOICE_ID = 'cjVigY5qzO86Huf0OWal';
 const CONFIG_ELEVENLABS_TTS_MODEL = 'eleven_v3';
 const CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT = 'opus_48000_32';
 
-// Queueing, tool-call display, and TTS limits
+// Queueing and TTS limits
 const PI_CHANNEL_IDLE_TIMEOUT_MINUTES = 120;
 const PI_CHANNEL_MAX_QUEUE_PER_CHAT = 5;
 const PI_CHANNEL_MAX_TTS_CHARS = 2500;
-const PI_CHANNEL_SEND_TOOL_CALLS = true;
-const PI_CHANNEL_TOOL_CALL_BATCH_MS = 5000;
-const PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS = 10;
+
+// Web UI server
+const CONFIG_WEB_UI_PORT = 8787;
+const CONFIG_WEB_UI_HOST = '127.0.0.1';
+const CONFIG_WEB_HISTORY_MAX = 500;
+const CONFIG_WEB_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const CONFIG_WEB_UPLOAD_ABANDONED_TTL_MINUTES = 30;
+const CONFIG_WEB_TOOL_UPDATE_THROTTLE_MS = 250;
 
 // Generated local file uploads
 const PI_CHANNEL_SEND_LOCAL_IMAGES = true;
@@ -111,20 +115,35 @@ export const MEMORY_PATH = path.join(FILES_DIR, 'memory.md');
 export const DAILY_MEMORY_DIR = path.join(FILES_DIR, 'memory');
 export const CRON_JOBS_PATH = path.join(FILES_DIR, 'cron-jobs.json');
 export const POST_RESTART_TASKS_PATH = path.join(FILES_DIR, 'post-restart-tasks.json');
-export const ALLOWED_CHATS_PATH = path.join(FILES_DIR, 'allowed-chats.json');
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, 'heartbeat.md');
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');
+
+// Web UI persisted state
+export const WEB_ASSETS_DIR = path.join(FILES_DIR, 'web-assets');
+export const WEB_ASSETS_MANIFEST_PATH = path.join(WEB_ASSETS_DIR, 'manifest.json');
+export const WEB_HISTORY_DIR = path.join(FILES_DIR, 'web-history');
+export const WEB_HISTORY_STATE_PATH = path.join(WEB_HISTORY_DIR, 'state.json');
+export const WEB_PUSH_SUBSCRIPTIONS_PATH = path.join(FILES_DIR, 'web-push-subscriptions.json');
+
+/** Frontend production build output served by src/web/server.ts. */
+export const WEB_DIST_DIR = path.join(PROJECT_ROOT, 'web', 'dist');
 
 // ---------------------------------------------------------------------------
 // Environment and secrets
 // ---------------------------------------------------------------------------
 
-export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? '';
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? '';
 export const GOOGLE_GENAI_API_KEY =
   process.env.GOOGLE_GENAI_API_KEY ?? process.env.GEMINI_API_KEY ?? '';
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+
+// Web Push (VAPID). Disabled by default; enable only with keys present.
+export const WEB_PUSH_ENABLED =
+  (process.env.WEB_PUSH_ENABLED ?? '').trim().toLowerCase() === 'true';
+export const WEB_PUSH_VAPID_PUBLIC = process.env.WEB_PUSH_VAPID_PUBLIC ?? '';
+export const WEB_PUSH_VAPID_PRIVATE = process.env.WEB_PUSH_VAPID_PRIVATE ?? '';
+export const WEB_PUSH_SUBJECT = process.env.WEB_PUSH_SUBJECT ?? 'mailto:admin@example.com';
 
 // ---------------------------------------------------------------------------
 // Derived model config
@@ -139,31 +158,34 @@ export const MODEL =
 export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
 
 // ---------------------------------------------------------------------------
-// Telegram API and size limits
+// Web UI server and asset/upload limits
 // ---------------------------------------------------------------------------
 
-export const TELEGRAM_API = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
-export const TELEGRAM_FILE_API = BOT_TOKEN ? `https://api.telegram.org/file/bot${BOT_TOKEN}` : '';
-// Client-side fetch deadlines so a silently dead connection cannot hang a call.
-// The poll timeout must exceed the 30s server-side getUpdates hold.
-export const TELEGRAM_API_TIMEOUT_MS = 30_000;
-export const TELEGRAM_POLL_TIMEOUT_MS = 40_000;
-export const TELEGRAM_MEDIA_TIMEOUT_MS = 120_000;
-export const TELEGRAM_MAX_MESSAGE = 4096;
-export const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
-export const TELEGRAM_PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;
-export const TELEGRAM_DOCUMENT_UPLOAD_LIMIT = 50 * 1024 * 1024;
-export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
+/** The single default web conversation id. The registry is keyed by chatId so
+ * named conversations can be added later without rework. */
+export const WEB_CHAT_ID = 'web';
+
+export const WEB_UI_PORT = configNumber(Number(process.env.WEB_UI_PORT) || CONFIG_WEB_UI_PORT, 8787, 1);
+export const WEB_UI_HOST = (process.env.WEB_UI_HOST ?? CONFIG_WEB_UI_HOST).trim() || '127.0.0.1';
+export const WEB_HISTORY_MAX = configNumber(CONFIG_WEB_HISTORY_MAX, 500, 1);
+export const WEB_UPLOAD_MAX_BYTES = configNumber(CONFIG_WEB_UPLOAD_MAX_BYTES, 50 * 1024 * 1024, 1024);
+export const WEB_UPLOAD_ABANDONED_TTL_MS =
+  configNumber(CONFIG_WEB_UPLOAD_ABANDONED_TTL_MINUTES, 30, 1) * 60_000;
+export const WEB_TOOL_UPDATE_THROTTLE_MS = configNumber(CONFIG_WEB_TOOL_UPDATE_THROTTLE_MS, 250, 0);
+/** Max bytes of tool args/results streamed or persisted (the rest is truncated). */
+export const TOOL_DATA_CAP_BYTES = 8 * 1024;
+
+// Generated-file upload size caps for the send_image / send_document / send_voice_note tools.
+export const IMAGE_UPLOAD_LIMIT = 10 * 1024 * 1024;
+export const DOCUMENT_UPLOAD_LIMIT = 50 * 1024 * 1024;
+export const VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
-// Queueing and response behavior
+// Queueing behavior
 // ---------------------------------------------------------------------------
 
 export const IDLE_TIMEOUT_MS = configNumber(PI_CHANNEL_IDLE_TIMEOUT_MINUTES, 30, 1) * 60_000;
 export const MAX_QUEUE_PER_CHAT = configNumber(PI_CHANNEL_MAX_QUEUE_PER_CHAT, 5, 1);
-export const SEND_TOOL_CALLS = PI_CHANNEL_SEND_TOOL_CALLS;
-export const TOOL_CALL_BATCH_MS = configNumber(PI_CHANNEL_TOOL_CALL_BATCH_MS, 1500, 0);
-export const TOOL_CALL_BATCH_MAX_ITEMS = configNumber(PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS, 8, 1);
 
 // ---------------------------------------------------------------------------
 // Voice and transcription
@@ -252,89 +274,3 @@ export const HEARTBEAT_INTERVAL_MS = configNumber(PI_HEARTBEAT_INTERVAL_SECONDS,
 export const HEARTBEAT_NOOP = '__HEARTBEAT_NOOP__';
 export const CRON_NOOP = '__CRON_NOOP__';
 export const BACKGROUND_BASH_NOOP = '__BACKGROUND_BASH_NOOP__';
-
-export interface AllowedTelegramChat {
-  id: string;
-  name: string;
-  enabled: boolean;
-  type?: string;
-}
-
-export function ensureAllowedChatsFile(): void {
-  if (fs.existsSync(ALLOWED_CHATS_PATH)) return;
-  fs.mkdirSync(FILES_DIR, { recursive: true });
-  fs.writeFileSync(ALLOWED_CHATS_PATH, '[]\n', 'utf8');
-}
-
-export function readAllowedTelegramChats(): AllowedTelegramChat[] {
-  ensureAllowedChatsFile();
-  const content = fs.readFileSync(ALLOWED_CHATS_PATH, 'utf8').trim();
-  if (!content) return [];
-
-  const parsed = JSON.parse(content) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error(`${ALLOWED_CHATS_PATH} must contain a JSON array of allowed chats`);
-  }
-
-  const seen = new Set<string>();
-  const chats: AllowedTelegramChat[] = [];
-  for (let index = 0; index < parsed.length; index++) {
-    const chat = parseAllowedTelegramChat(parsed[index], index);
-    if (seen.has(chat.id)) continue;
-    seen.add(chat.id);
-    chats.push(chat);
-  }
-  return chats;
-}
-
-export function getAllowedTelegramChatIds(): string[] {
-  return readAllowedTelegramChats()
-    .filter((chat) => chat.enabled)
-    .map((chat) => chat.id);
-}
-
-export function getPrivateTelegramChatIds(): string[] {
-  return readAllowedTelegramChats()
-    .filter((chat) => chat.enabled && chat.type === 'private')
-    .map((chat) => chat.id);
-}
-
-export function getPrimaryTelegramChatId(): string {
-  return getAllowedTelegramChatIds()[0] ?? '';
-}
-
-export function isAllowedTelegramChat(chatId: string): boolean {
-  return getAllowedTelegramChatIds().includes(chatId.trim());
-}
-
-function parseAllowedTelegramChat(entry: unknown, index: number): AllowedTelegramChat {
-  if (!isRecord(entry)) {
-    throw new Error(`${ALLOWED_CHATS_PATH}[${index}] must be an object`);
-  }
-
-  const id = parseAllowedTelegramChatId(entry.id, index);
-  const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : id;
-  const enabled = typeof entry.enabled === 'boolean' ? entry.enabled : true;
-  const type = typeof entry.type === 'string' && entry.type.trim() ? entry.type.trim() : undefined;
-
-  return {
-    id,
-    name,
-    enabled,
-    ...(type ? { type } : {}),
-  };
-}
-
-function parseAllowedTelegramChatId(value: unknown, index: number): string {
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    throw new Error(`${ALLOWED_CHATS_PATH}[${index}].id must be a string or number`);
-  }
-
-  const id = String(value).trim();
-  if (!id) throw new Error(`${ALLOWED_CHATS_PATH}[${index}].id must not be empty`);
-  return id;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

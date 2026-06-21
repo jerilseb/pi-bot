@@ -41,7 +41,7 @@ import { errorMessage, formatModelRef, parseModelRef } from './util.ts';
  *   sub-agent needs via task/context.
  * - Sub-agent sessions load only the protected-env guard plus web_search and
  *   web_fetch extensions, and only explicitly whitelisted skills, so they have
- *   no Telegram-facing tools and no subagent_* tools (no recursion).
+ *   no user-facing tools and no subagent_* tools (no recursion).
  *
  * The registry lives at module level in src/ (imported once by Node), so it is
  * shared across all chats for the lifetime of the bot process. Sub-agents do
@@ -96,9 +96,9 @@ export function setSubagentReportHandler(handler: SubagentReportHandler): void {
 }
 
 const SUBAGENT_SYSTEM_PROMPT = [
-  'You are a background sub-agent of a Telegram assistant. You run non-interactively: no user is watching and nobody can answer questions.',
+  'You are a background sub-agent of a assistant. You run non-interactively: no user is watching and nobody can answer questions.',
   'Complete the assigned task using your tools, then end with a final message that fully reports the outcome. That final message is the only thing returned to the parent agent.',
-  'Work only from the task and context you were given; you have no access to the chat history, the Telegram user, or the assistant memory.',
+  'Work only from the task and context you were given; you have no access to the chat history, the user, or the assistant memory.',
   "Do not modify the bot's persistent state under files/ unless the task explicitly asks for it.",
   `Keep the final report focused and under ${SUBAGENT_MAX_RESULT_CHARS} characters.`,
 ].join('\n');
@@ -141,7 +141,7 @@ const CancelParams = Type.Object({
 const ListParams = Type.Object({
   all_chats: Type.Optional(
     Type.Boolean({
-      description: 'List sub-agents started from all Telegram chats, not just this one.',
+      description: 'List sub-agents started from all chats, not just this one.',
     }),
   ),
 });
@@ -161,7 +161,7 @@ export function subagentToolsExtension(
       promptGuidelines: [
         'Use subagent_start for long, self-contained tasks you can hand off (research, multi-file code work, big refactors); do quick work directly in your own turn.',
         'Sub-agents start with a clean session: no chat history and no memory. Put everything they need into task and context, including expected output format.',
-        'Sub-agents cannot message the Telegram user, spawn further sub-agents, or ask questions; their final message is reported back to you.',
+        'Sub-agents cannot message the user, spawn further sub-agents, or ask questions; their final message is reported back to you.',
         'After backgrounding a sub-agent, keep its ID and poll with subagent_read if you need progress; a [subagent-report] message arrives automatically when it finishes.',
         'Cancel sub-agents that are no longer needed with subagent_cancel.',
       ],
@@ -420,7 +420,7 @@ async function createSubagentSession(
 ): Promise<AgentSession> {
   // Only explicitly approved extensions and skills are loaded. Sub-agents get
   // coding, web research, and whitelisted skill guidance, but cannot reach
-  // Telegram, bot lifecycle tools, or subagent_* (no recursion), and cannot
+  // Web UI, bot lifecycle tools, or subagent_* (no recursion), and cannot
   // inspect protected .env files.
   const resourceLoader = new DefaultResourceLoader({
     cwd: runtime.cwd,

@@ -10,7 +10,7 @@ const StartNewSessionParams = Type.Object({
   ),
 });
 
-export function telegramNewSessionToolExtension(
+export function newSessionToolExtension(
   requestNewSession: (task?: string) => Promise<string>,
 ): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI) => {
@@ -18,9 +18,9 @@ export function telegramNewSessionToolExtension(
       name: 'start_new_session',
       label: 'Start New Session',
       description:
-        'Start a fresh Pi conversation session for the Telegram assistant without requiring the user to send /new. Optionally provide a self-contained task to run automatically in the fresh session after the current response finishes.',
+        'Start a fresh Pi conversation session for the assistant without requiring the user to send /new. Optionally provide a self-contained task to run automatically in the fresh session after the current response finishes.',
       promptSnippet:
-        'Start a fresh Telegram assistant Pi session, optionally with an initial task for the new session.',
+        'Start a fresh assistant Pi session, optionally with an initial task for the new session.',
       promptGuidelines: [
         'Use start_new_session only when the user explicitly asks you to start a new session, reset your conversation, or clear the current Pi conversation.',
         'If the user asks to start a new session and do something, provide task with the exact work the fresh session should perform.',

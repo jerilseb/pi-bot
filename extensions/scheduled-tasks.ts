@@ -71,8 +71,8 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     name: 'create_schedule_task',
     label: 'Create Schedule Task',
     description:
-      "Create a scheduled task for the Telegram assistant. Use for reminders, recurring checks, or future/proactive work. For kind='once', provide run_at. For kind='interval', provide interval_minutes. For kind='cron', provide a five-field cron schedule and preferably timezone.",
-    promptSnippet: 'Schedule one-time, interval, or cron-like Telegram assistant tasks.',
+      "Create a scheduled task for the assistant. Use for reminders, recurring checks, or future/proactive work. For kind='once', provide run_at. For kind='interval', provide interval_minutes. For kind='cron', provide a five-field cron schedule and preferably timezone.",
+    promptSnippet: 'Schedule one-time, interval, or cron-like assistant tasks.',
     promptGuidelines: [
       'Use create_schedule_task when the user asks you to do something later, at a specific time, or repeatedly.',
       'If the user gives a relative time like tomorrow or next week, get the current time with bash date before scheduling.',
@@ -91,8 +91,8 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     name: 'list_scheduled_tasks',
     label: 'List Scheduled Tasks',
     description:
-      'List scheduled one-time, interval, and cron-like tasks for the Telegram assistant.',
-    promptSnippet: 'List scheduled Telegram assistant tasks.',
+      'List scheduled one-time, interval, and cron-like tasks for the assistant.',
+    promptSnippet: 'List scheduled assistant tasks.',
     parameters: ListScheduledTasksParams,
     async execute() {
       const jobs = readCronJobs();
@@ -104,7 +104,7 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     name: 'cancel_scheduled_task',
     label: 'Cancel Scheduled Task',
     description: 'Disable a scheduled task by id.',
-    promptSnippet: 'Cancel scheduled Telegram assistant tasks.',
+    promptSnippet: 'Cancel scheduled assistant tasks.',
     parameters: CancelScheduledTaskParams,
     async execute(_toolCallId, params: CancelScheduledTaskParamsType) {
       const job = cancelCronJob(params.id);
@@ -117,7 +117,7 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     label: 'Update Scheduled Task',
     description:
       'Update a scheduled task. Provide only fields that should change. Changing schedule fields recomputes the next run time.',
-    promptSnippet: 'Update scheduled Telegram assistant tasks.',
+    promptSnippet: 'Update scheduled assistant tasks.',
     parameters: UpdateScheduledTaskParams,
     async execute(_toolCallId, params: UpdateScheduledTaskParamsType) {
       const job = updateCronJob(params.id, {

@@ -1,7 +1,9 @@
 import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP } from './config.ts';
-import { sendTelegramMessage } from './telegram.ts';
 import type { PiPromptResult } from './types.ts';
+import * as gateway from './web/gateway.ts';
 
+/** Delivers Pi's final response to the web UI as a durable assistant_message
+ * record (buffered for replay + fires Web Push when no client is visible). */
 export async function sendPiResponse(
   chatId: string,
   response: PiPromptResult,
@@ -12,7 +14,7 @@ export async function sendPiResponse(
     return;
   }
 
-  await sendTelegramMessage(chatId, response.text);
+  gateway.emit(chatId, { type: 'assistant_message', payload: { text: response.text } });
 }
 
 function isNoopResponse(text: string): boolean {

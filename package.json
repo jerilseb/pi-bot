@@ -5,12 +5,19 @@
   "license": "ISC",
   "author": "",
   "type": "module",
+  "workspaces": [
+    "web"
+  ],
   "scripts": {
-    "dev": "node main.ts",
-    "start": "pm2 start ecosystem.config.cjs --update-env && pm2 save",
+    "dev": "concurrently -k -n api,web -c blue,green \"node main.ts\" \"npm:web:dev\"",
+    "dev:api": "node main.ts",
+    "web:dev": "npm --workspace web run dev",
+    "web:build": "npm --workspace web run build",
+    "build": "npm run web:build",
+    "start": "npm run build && pm2 start ecosystem.config.cjs --update-env && pm2 save",
     "stop": "pm2 delete pi-bot || true && pm2 save",
     "format": "biome format --write .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm --workspace web run typecheck",
     "smoke": "node scripts/smoke.ts",
     "verify": "npm run typecheck && npm run smoke"
   },
@@ -19,6 +26,7 @@
     "@earendil-works/pi-ai": "^0.79.0",
     "@earendil-works/pi-coding-agent": "^0.79.0",
     "@earendil-works/pi-tui": "^0.79.0",
+    "@fastify/busboy": "^3.2.0",
     "@mozilla/readability": "^0.6.0",
     "cheerio": "^1.1.2",
     "cron-parser": "^5.5.0",
@@ -29,10 +37,15 @@
     "puppeteer-core": "^25.1.0",
     "turndown": "^7.2.4",
     "typebox": "^1.1.38",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "web-push": "^3.6.7",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.0",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.1.0"
   }
 }

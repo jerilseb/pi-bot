@@ -1,4 +1,4 @@
-import { CRON_JOBS_PATH, CRON_NOOP, getPrimaryTelegramChatId } from './config.ts';
+import { CRON_JOBS_PATH, CRON_NOOP, WEB_CHAT_ID } from './config.ts';
 import {
   computeNextRunAt,
   deferCronJob,
@@ -77,8 +77,7 @@ export function createCronController(options: {
       if (!job.enabled || !job.nextRunAt) continue;
       if (new Date(job.nextRunAt).getTime() > now.getTime()) continue;
 
-      const chatId = getPrimaryTelegramChatId();
-      if (!chatId) continue;
+      const chatId = WEB_CHAT_ID;
 
       if (options.isChatBusy(chatId)) {
         console.log(`[${chatId}] cron ${job.id} deferred; chat is busy`);
@@ -152,7 +151,7 @@ function refreshCronJobs(fromDate: Date = new Date()): CronJob[] {
 
 function buildCronPrompt(job: CronJob): string {
   return [
-    'This is a scheduled task run for the Telegram assistant.',
+    'This is a scheduled task run for the assistant.',
     `Job ID: ${job.id}`,
     ...(job.title ? [`Title: ${job.title}`] : []),
     `Schedule: ${formatCronJob(job)}`,
@@ -164,7 +163,7 @@ function buildCronPrompt(job: CronJob): string {
     job.prompt,
     '</scheduled_task_instructions>',
     '',
-    'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the scheduled instructions.',
+    'Only notify the user when there is something important, actionable, or explicitly requested by the scheduled instructions.',
     `If there is nothing user-visible to report, respond exactly: ${CRON_NOOP}`,
   ].join('\n');
 }

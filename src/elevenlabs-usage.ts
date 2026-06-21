@@ -1,4 +1,4 @@
-import { telegramCode as code, titleCase, usageBar } from './telegram-format.ts';
+import { code, titleCase, usageBar } from './format.ts';
 
 const ELEVENLABS_SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
 const FETCH_TIMEOUT_MS = 30_000;
@@ -85,7 +85,7 @@ function formatMoney(value: MoneyAmount | undefined): string {
   return currency ? `${value.amount} ${currency}` : value.amount;
 }
 
-export function buildElevenLabsUsageTelegramHtml(usage: ElevenLabsSubscription): string {
+export function buildElevenLabsUsageMarkdown(usage: ElevenLabsSubscription): string {
   const used = usage.character_count;
   const limit = usage.character_limit;
   const remaining = used === undefined || limit === undefined ? undefined : limit - used;
@@ -93,26 +93,26 @@ export function buildElevenLabsUsageTelegramHtml(usage: ElevenLabsSubscription):
     used === undefined || limit === undefined || limit <= 0 ? undefined : (used / limit) * 100;
 
   return [
-    '<b>ElevenLabs Usage</b>',
+    '**ElevenLabs Usage**',
     '',
-    '<b>Credits / Characters</b>',
-    `• Used: ${code(formatNumber(used))} ${code(usageBar(usedPercent))}`,
-    `• Limit: ${code(formatNumber(limit))}`,
-    `• Remaining: ${code(formatNumber(remaining))}`,
-    `• Used %: ${code(formatPercent(usedPercent))}`,
-    `• Reset at: ${code(formatResetAt(usage.next_character_count_reset_unix))}`,
+    '**Credits / Characters**',
+    `- Used: ${code(formatNumber(used))} ${code(usageBar(usedPercent))}`,
+    `- Limit: ${code(formatNumber(limit))}`,
+    `- Remaining: ${code(formatNumber(remaining))}`,
+    `- Used %: ${code(formatPercent(usedPercent))}`,
+    `- Reset at: ${code(formatResetAt(usage.next_character_count_reset_unix))}`,
     '',
-    '<b>Subscription</b>',
-    `• Tier: ${code(titleCase(usage.tier))}`,
-    `• Status: ${code(titleCase(usage.status))}`,
-    `• Billing period: ${code(titleCase(usage.billing_period))}`,
-    `• Refresh period: ${code(titleCase(usage.character_refresh_period))}`,
-    `• Overage cap: ${code(formatMaxCreditExtension(usage.max_credit_limit_extension))}`,
-    `• Current overage: ${code(formatMoney(usage.current_overage))}`,
-    `• Open invoices: ${code(usage.has_open_invoices ? 'Yes' : 'No')}`,
+    '**Subscription**',
+    `- Tier: ${code(titleCase(usage.tier))}`,
+    `- Status: ${code(titleCase(usage.status))}`,
+    `- Billing period: ${code(titleCase(usage.billing_period))}`,
+    `- Refresh period: ${code(titleCase(usage.character_refresh_period))}`,
+    `- Overage cap: ${code(formatMaxCreditExtension(usage.max_credit_limit_extension))}`,
+    `- Current overage: ${code(formatMoney(usage.current_overage))}`,
+    `- Open invoices: ${code(usage.has_open_invoices ? 'Yes' : 'No')}`,
     '',
-    '<b>Voices</b>',
-    `• Voice slots: ${code(`${formatNumber(usage.voice_slots_used)} / ${formatNumber(usage.voice_limit)}`)}`,
-    `• Professional voices: ${code(`${formatNumber(usage.professional_voice_slots_used)} / ${formatNumber(usage.professional_voice_limit)}`)}`,
+    '**Voices**',
+    `- Voice slots: ${code(`${formatNumber(usage.voice_slots_used)} / ${formatNumber(usage.voice_limit)}`)}`,
+    `- Professional voices: ${code(`${formatNumber(usage.professional_voice_slots_used)} / ${formatNumber(usage.professional_voice_limit)}`)}`,
   ].join('\n');
 }

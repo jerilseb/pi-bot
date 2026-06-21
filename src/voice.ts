@@ -1,15 +1,16 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { MAX_TTS_CHARS, TELEGRAM_MEDIA_TIMEOUT_MS, TELEGRAM_VOICE_UPLOAD_LIMIT } from './config.ts';
+import { MAX_TTS_CHARS, VOICE_UPLOAD_LIMIT } from './config.ts';
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
-import { telegram } from './telegram.ts';
+import { register as registerAsset } from './web/assets.ts';
+import * as gateway from './web/gateway.ts';
 
 const EFFECTIVE_TTS_CHAR_LIMIT = MAX_TTS_CHARS;
 
 const SendVoiceNoteParams = Type.Object({
   text: Type.String({
     description:
-      'Text to synthesize and send as a Telegram voice note. Keep it concise and conversational.',
+      'Text to synthesize and send as a voice note. Keep it concise and conversational.',
   }),
 });
 
@@ -17,14 +18,14 @@ export function voiceStatusText(): string {
   return textToSpeechStatusText();
 }
 
-export function telegramVoiceNoteExtension(chatId: string): (pi: ExtensionAPI) => void {
+export function webVoiceNoteExtension(chatId: string): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
       name: 'send_voice_note',
       label: 'Send Voice Note',
       description:
-        'Send the Telegram user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.',
-      promptSnippet: 'Send a Telegram voice note to the user using the configured TTS provider',
+        'Send the user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.',
+      promptSnippet: 'Send a voice note to the user using the configured TTS provider',
       promptGuidelines: [
         'Use send_voice_note when the user asks for a voice note, audio reply, spoken summary, or says to reply by voice.',
         'You may use it proactively for short personal or time-sensitive messages where voice is clearly helpful.',
@@ -34,7 +35,7 @@ export function telegramVoiceNoteExtension(chatId: string): (pi: ExtensionAPI) =
       parameters: SendVoiceNoteParams,
 
       async execute(_toolCallId, params) {
-        const result = await sendTelegramVoiceNote(chatId, params.text);
+        const result = await sendVoiceNote(chatId, params.text);
         return {
           content: [
             {
@@ -49,23 +50,31 @@ export function telegramVoiceNoteExtension(chatId: string): (pi: ExtensionAPI) =
   };
 }
 
-export async function sendTelegramVoiceNote(chatId: string, text: string): Promise<TtsAudioResult> {
+export async function sendVoiceNote(chatId: string, text: string): Promise<TtsAudioResult> {
   const speechText = prepareTtsText(text);
   if (!speechText) {
     throw new Error('Voice note text is empty after cleanup.');
   }
 
   const result = await synthesizeTtsAudio(speechText);
-  if (result.audio.byteLength > TELEGRAM_VOICE_UPLOAD_LIMIT) {
+  if (result.audio.byteLength > VOICE_UPLOAD_LIMIT) {
     throw new Error(
       `Generated voice note is too large: ${(result.audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
     );
   }
 
-  const form = new FormData();
-  form.append('chat_id', chatId);
-  form.append('voice', new Blob([result.audio], { type: 'audio/ogg' }), 'pi-reply.ogg');
-  await telegram('sendVoice', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
+  const mimeType = 'audio/ogg';
+  const assetId = registerAsset({
+    source: Buffer.from(result.audio),
+    mimeType,
+    kind: 'voice',
+    name: 'pi-reply.ogg',
+    origin: 'generated',
+  });
+  gateway.emit(chatId, {
+    type: 'voice',
+    payload: { assetId, url: `/api/files/${assetId}`, mimeType },
+  });
   return result;
 }
 
