@@ -128,6 +128,9 @@ html.recording-gesture * {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   padding: 16px 14px 24px;
+}
+.timeline-content {
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 10px;

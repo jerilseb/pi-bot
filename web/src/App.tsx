@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import { MenuCard, ThinkingBlock, ToolCard } from './components.tsx';
 import { Markdown } from './Markdown.tsx';
 import { enablePush, registerServiceWorker } from './push.ts';
@@ -14,7 +14,10 @@ interface PendingUpload {
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const socketRef = useRef<ChatSocket | null>(null);
+  const timelineRef = useRef<HTMLElement | null>(null);
+  const timelineContentRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   useEffect(() => {
     const socket = new ChatSocket(
@@ -36,15 +39,61 @@ export default function App() {
     };
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    timeline.scrollTo({ top: timeline.scrollHeight, behavior: 'auto' });
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.entries]);
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+
+    const updateAutoScroll = () => {
+      const distanceFromBottom = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight;
+      shouldAutoScrollRef.current = distanceFromBottom < 120;
+    };
+
+    timeline.addEventListener('scroll', updateAutoScroll, { passive: true });
+    updateAutoScroll();
+    return () => timeline.removeEventListener('scroll', updateAutoScroll);
+  }, []);
+
+  useEffect(() => {
+    const content = timelineContentRef.current;
+    if (!content) return;
+
+    const observer = new ResizeObserver(() => {
+      if (!shouldAutoScrollRef.current) return;
+      requestAnimationFrame(scrollToBottom);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
+  useLayoutEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+
+    scrollToBottom();
+    const firstFrame = requestAnimationFrame(() => {
+      scrollToBottom();
+      requestAnimationFrame(scrollToBottom);
+    });
+    const timeout = window.setTimeout(scrollToBottom, 120);
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      window.clearTimeout(timeout);
+    };
+  }, [state.entries, state.running, scrollToBottom]);
 
   const send = useCallback((text: string, uploadIds: string[]) => {
+    shouldAutoScrollRef.current = true;
     socketRef.current?.send({ type: 'prompt', text, ...(uploadIds.length ? { uploadIds } : {}) });
   }, []);
 
   const onMenuSelect = useCallback((menuId: string, optionIndex: number | null) => {
+    shouldAutoScrollRef.current = true;
     socketRef.current?.send(
       optionIndex === null
         ? { type: 'menu_select', menuId, cancel: true }
@@ -66,12 +115,14 @@ export default function App() {
         onSetModel={(m) => socketRef.current?.send({ type: 'set_model', model: m })}
         onNew={() => socketRef.current?.send({ type: 'new' })}
       />
-      <main className="timeline">
-        {state.entries.map((entry) => (
-          <EntryView key={entry.id} entry={entry} onMenuSelect={onMenuSelect} />
-        ))}
-        {state.running && <div className="run-indicator">working…</div>}
-        <div ref={bottomRef} />
+      <main className="timeline" ref={timelineRef}>
+        <div className="timeline-content" ref={timelineContentRef}>
+          {state.entries.map((entry) => (
+            <EntryView key={entry.id} entry={entry} onMenuSelect={onMenuSelect} />
+          ))}
+          {state.running && <div className="run-indicator">working…</div>}
+          <div ref={bottomRef} />
+        </div>
       </main>
       <Composer
         running={state.running}
