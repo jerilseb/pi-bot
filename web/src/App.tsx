@@ -11,6 +11,16 @@ interface PendingUpload {
   kind: string;
 }
 
+const SLASH_COMMANDS = [
+  { command: '/help', description: 'Show available commands' },
+  { command: '/status', description: 'Show chat/session status' },
+  { command: '/openaiusage', description: 'Show OpenAI Codex usage' },
+  { command: '/elevenlabsusage', description: 'Show ElevenLabs usage' },
+  { command: '/abort', description: 'Abort the current response' },
+  { command: '/new', description: 'Start a fresh conversation' },
+  { command: '/restart', description: 'Restart the bot via PM2' },
+] as const;
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const socketRef = useRef<ChatSocket | null>(null);
@@ -303,6 +313,7 @@ function Composer({
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
   // Telegram-style swipe-left-to-cancel: track how far left the thumb has slid
   // (slideX, ≤ 0) and whether it's past the cancel threshold (cancelArmed).
   const [slideX, setSlideX] = useState(0);
@@ -322,6 +333,14 @@ function Composer({
   const DISCARD_THRESHOLD = 90;
 
   const hasContent = text.trim().length > 0 || uploads.length > 0;
+  const slashQuery = /^\/\S*$/.test(text) ? text.toLowerCase() : null;
+  const slashMatches = slashQuery
+    ? SLASH_COMMANDS.filter(
+        ({ command, description }) =>
+          command.startsWith(slashQuery) || description.toLowerCase().includes(slashQuery.slice(1)),
+      )
+    : [];
+  const showSlashCommands = slashMatches.length > 0 && !recording && !transcribing;
 
   const setRecordingGestureActive = useCallback((active: boolean) => {
     document.documentElement.classList.toggle('recording-gesture', active);
@@ -349,6 +368,18 @@ function Composer({
   useEffect(() => {
     return () => setRecordingGestureActive(false);
   }, [setRecordingGestureActive]);
+
+  useEffect(() => {
+    setSelectedSlashIndex(0);
+  }, [slashQuery]);
+
+  const selectSlashCommand = useCallback((command: string) => {
+    setText(command);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      resizeTextarea();
+    });
+  }, [resizeTextarea]);
 
   const submit = async () => {
     if (!text.trim() && uploads.length === 0) return;
@@ -532,6 +563,29 @@ function Composer({
           onChange={(e) => setText(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={(e) => {
+            if (showSlashCommands) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedSlashIndex((i) => (i + 1) % slashMatches.length);
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+                return;
+              }
+              if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                e.preventDefault();
+                selectSlashCommand(slashMatches[selectedSlashIndex]?.command ?? slashMatches[0].command);
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setText('');
+                return;
+              }
+            }
+
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               void submit();
@@ -539,6 +593,24 @@ function Composer({
           }}
           rows={1}
         />
+        {showSlashCommands && (
+          <div className="slash-menu" role="listbox" aria-label="Slash commands">
+            {slashMatches.map((item, index) => (
+              <button
+                key={item.command}
+                type="button"
+                className={index === selectedSlashIndex ? 'selected' : ''}
+                role="option"
+                aria-selected={index === selectedSlashIndex}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selectSlashCommand(item.command)}
+              >
+                <span className="slash-command">{item.command}</span>
+                <span className="slash-description">{item.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {running ? (
           <button
             type="button"

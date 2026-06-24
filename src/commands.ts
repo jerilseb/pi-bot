@@ -1,6 +1,6 @@
 import type { SessionStats } from '@earendil-works/pi-coding-agent';
 import type { ChatRegistry, ChatState } from './chat-session.ts';
-import { ALLOWED_MODELS, ELEVENLABS_API_KEY, HEARTBEAT_ENABLED } from './config.ts';
+import { ELEVENLABS_API_KEY, HEARTBEAT_ENABLED } from './config.ts';
 import { cronStatusText } from './cron.ts';
 import { buildElevenLabsUsageMarkdown, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
 import {
@@ -32,7 +32,6 @@ const TOKEN_NUMBER_FORMAT = new Intl.NumberFormat('en-US', {
 const HELP_TEXT = [
   '**Commands**',
   '- /status — show this chat session status',
-  '- /models — list allowed chat models (switch via the model picker)',
   '- /openaiusage — show OpenAI Codex usage windows and reset times',
   '- /elevenlabsusage — show ElevenLabs credit/character usage',
   '- /abort — abort the current Pi response',
@@ -104,19 +103,6 @@ const COMMANDS: Record<string, CommandHandler> = {
         `- Voice note tool: ${voiceStatusText()}`,
         `- Heartbeat: ${HEARTBEAT_ENABLED ? 'enabled' : 'off'}`,
         `- ${cronStatusText()}`,
-      ].join('\n'),
-    );
-  },
-
-  '/models': async ({ chat }) => {
-    gateway.notice(
-      chat.chatId,
-      [
-        `Current chat model: ${code(chat.pi.modelName)}`,
-        'Allowed models:',
-        ...ALLOWED_MODELS.map((model) => `- ${code(model)}`),
-        '',
-        'Use the model picker in the web UI to switch (only when idle).',
       ].join('\n'),
     );
   },
@@ -222,10 +208,6 @@ const COMMANDS: Record<string, CommandHandler> = {
     await restart();
   },
 };
-
-function code(value: string): string {
-  return `\`${value}\``;
-}
 
 /** Dispatches a leading-slash command. Returns false when none matches. */
 export async function handleCommand(ctx: CommandContext, text: string): Promise<boolean> {

@@ -155,6 +155,9 @@ html.recording-gesture * {
   border: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
+.msg-assistant .bubble {
+  max-width: 92%;
+}
 .msg-user .bubble {
   background: var(--user);
 }
@@ -246,8 +249,8 @@ html.recording-gesture * {
 }
 
 .tool-card {
-  width: 80%;
-  max-width: 80%;
+  width: 92%;
+  max-width: 92%;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -448,6 +451,49 @@ html.recording-gesture * {
 .icon-btn.recording {
   border-color: var(--error) !important;
   color: var(--error) !important;
+}
+.slash-menu {
+  position: absolute;
+  left: 46px;
+  right: 46px;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  max-height: min(320px, 45dvh);
+  overflow-y: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+  padding: 6px;
+}
+.slash-menu button {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+}
+.slash-menu button.selected,
+.slash-menu button:hover {
+  background: rgba(79, 140, 255, 0.16);
+}
+.slash-command {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+.slash-description {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .composer textarea {
   flex: 1;
