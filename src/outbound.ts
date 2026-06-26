@@ -15,6 +15,13 @@ export async function sendPiResponse(
   await sendTelegramMessage(chatId, response.text);
 }
 
+// Match on the bare sentinel name (wrapping underscores stripped) so a model that
+// drops the __ wrapper — e.g. emits "HEARTBEAT_NOOP" instead of "__HEARTBEAT_NOOP__"
+// — still counts as a noop. The bare form also matches the wrapped form.
+const NOOP_MARKERS = [HEARTBEAT_NOOP, CRON_NOOP, BACKGROUND_BASH_NOOP].map((sentinel) =>
+  sentinel.replace(/^_+|_+$/g, ''),
+);
+
 function isNoopResponse(text: string): boolean {
   const normalized = text
     .trim()
@@ -22,12 +29,5 @@ function isNoopResponse(text: string): boolean {
     .replace(/\s*```$/i, '')
     .trim();
 
-  return (
-    normalized.includes(HEARTBEAT_NOOP) ||
-    normalized.includes(CRON_NOOP) ||
-    normalized.includes(BACKGROUND_BASH_NOOP) ||
-    normalized.includes('HEARTBEAT_NOOP') ||
-    normalized.includes('CRON_NOOP') ||
-    normalized.includes('BACKGROUND_BASH_NOOP')
-  );
+  return NOOP_MARKERS.some((marker) => normalized.includes(marker));
 }
