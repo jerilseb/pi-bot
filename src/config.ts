@@ -2,97 +2,15 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { configNumber, normalizeModelRef, readActiveModel } from './util.ts';
+import { normalizeModelRef, readActiveModel } from './util.ts';
 
 /**
  * Application configuration.
  *
- * Keep secrets and deployment-specific values in .env. Source-controlled values
- * below are safe defaults/toggles for this bot.
+ * Keep secrets and deployment-specific values in .env. The non-secret,
+ * source-controlled settings below are grouped by topic; edit them in place to
+ * tune the bot.
  */
-
-// ---------------------------------------------------------------------------
-// User-editable non-secret settings
-// ---------------------------------------------------------------------------
-
-// Models
-export const CHAT_MODEL = 'openai-codex/gpt-5.4-mini';
-const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.4-mini';
-const CONFIG_ALLOWED_MODELS = [
-  'openai-codex/gpt-5.4-mini',
-  'openai-codex/gpt-5.5',
-  'openrouter/moonshotai/kimi-k2.6',
-] as const;
-
-// Speech features
-export type SpeechProvider = 'google-genai' | 'elevenlabs';
-const CONFIG_SPEECH_TO_TEXT_PROVIDER: SpeechProvider = 'elevenlabs';
-const CONFIG_TEXT_TO_SPEECH_PROVIDER: SpeechProvider = 'google-genai';
-
-// Google GenAI speech features
-const GOOGLE_GENAI_TRANSCRIPTION_MODEL = 'gemini-3.5-flash';
-const GOOGLE_GENAI_TRANSCRIPTION_PROMPT =
-  'Transcribe this audio accurately. Return only the transcript text.';
-const GOOGLE_GENAI_TTS_MODEL = 'gemini-3.1-flash-tts-preview';
-const GOOGLE_GENAI_TTS_VOICE_NAME = 'Kore';
-
-// ElevenLabs speech features
-const ELEVENLABS_TRANSCRIPTION_MODEL = 'scribe_v2';
-const ELEVENLABS_TRANSCRIPTION_LANGUAGE = 'en';
-const ELEVENLABS_TRANSCRIPTION_FETCH_ATTEMPTS = 3;
-const ELEVENLABS_TRANSCRIPTION_FETCH_TIMEOUT_MS = 60_000;
-const ELEVENLABS_TRANSCRIPTION_RETRY_BASE_DELAY_MS = 1_000;
-const CONFIG_ELEVENLABS_TTS_VOICE_ID = 'cjVigY5qzO86Huf0OWal';
-const CONFIG_ELEVENLABS_TTS_MODEL = 'eleven_v3';
-const CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT = 'opus_48000_32';
-
-// Queueing, tool-call display, and TTS limits
-const PI_CHANNEL_IDLE_TIMEOUT_MINUTES = 120;
-const PI_CHANNEL_MAX_QUEUE_PER_CHAT = 5;
-const PI_CHANNEL_MAX_TTS_CHARS = 2500;
-const PI_CHANNEL_SEND_TOOL_CALLS = true;
-const PI_CHANNEL_TOOL_CALL_BATCH_MS = 5000;
-const PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS = 10;
-
-// Generated local file uploads
-const PI_CHANNEL_SEND_LOCAL_IMAGES = true;
-const PI_CHANNEL_IMAGE_UPLOAD_DIRS = [path.join(os.tmpdir(), 'create-image')] as const;
-const PI_CHANNEL_SEND_LOCAL_DOCUMENTS = true;
-const PI_CHANNEL_DOCUMENT_UPLOAD_DIRS = [
-  path.join(os.tmpdir(), 'pi-channel'),
-  process.cwd(),
-] as const;
-const PI_CHANNEL_DOCUMENT_UPLOAD_EXTS = [
-  'pdf',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-  'txt',
-  'md',
-  'csv',
-  'json',
-] as const;
-
-// Scheduled background prompts
-const CONFIG_HEARTBEAT_ENABLED = true;
-const PI_HEARTBEAT_INTERVAL_SECONDS = 3600;
-
-// Sub-agents spawned by the main agent
-const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.4-mini';
-const PI_SUBAGENT_MAX_RUNNING = 3;
-const PI_SUBAGENT_DEFAULT_YIELD_MS = 5_000;
-const PI_SUBAGENT_MAX_YIELD_MS = 30_000;
-const PI_SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 10 * 60_000;
-const PI_SUBAGENT_MAX_RUNTIME_CAP_MS = 60 * 60_000;
-const PI_SUBAGENT_MAX_RESULT_CHARS = 6_000;
-const PI_SUBAGENT_COMPLETED_TTL_MS = 30 * 60_000;
-const CONFIG_SUBAGENT_SKILLS = ['pdf'] as const;
-
-// Local Pi extension discovery
-const CONFIG_EXTENSION_ENTRYPOINT_EXTS = ['.ts', '.js', '.mjs', '.cjs'] as const;
 
 // ---------------------------------------------------------------------------
 // Runtime paths
@@ -127,16 +45,26 @@ export const GOOGLE_GENAI_API_KEY =
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 // ---------------------------------------------------------------------------
-// Derived model config
+// Models
 // ---------------------------------------------------------------------------
 
+export const CHAT_MODEL = 'openai-codex/gpt-5.4-mini';
+const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.4-mini';
+const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.4-mini';
+const CONFIG_ALLOWED_MODELS = [
+  'openai-codex/gpt-5.4-mini',
+  'openai-codex/gpt-5.5',
+  'openrouter/moonshotai/kimi-k2.6',
+] as const;
+
 export const DEFAULT_MODEL = normalizeModelRef(CHAT_MODEL);
+export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
+export const SUBAGENT_MODEL = normalizeModelRef(CONFIG_SUBAGENT_MODEL);
 export const ALLOWED_MODELS = CONFIG_ALLOWED_MODELS.map((model) => normalizeModelRef(model)).filter(
   Boolean,
 );
 export const MODEL =
   readActiveModel(ACTIVE_MODEL_PATH, ALLOWED_MODELS, DEFAULT_MODEL) ?? DEFAULT_MODEL;
-export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
 
 // ---------------------------------------------------------------------------
 // Telegram API and size limits
@@ -159,95 +87,84 @@ export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 // Queueing and response behavior
 // ---------------------------------------------------------------------------
 
-export const IDLE_TIMEOUT_MS = configNumber(PI_CHANNEL_IDLE_TIMEOUT_MINUTES, 30, 1) * 60_000;
-export const MAX_QUEUE_PER_CHAT = configNumber(PI_CHANNEL_MAX_QUEUE_PER_CHAT, 5, 1);
-export const SEND_TOOL_CALLS = PI_CHANNEL_SEND_TOOL_CALLS;
-export const TOOL_CALL_BATCH_MS = configNumber(PI_CHANNEL_TOOL_CALL_BATCH_MS, 1500, 0);
-export const TOOL_CALL_BATCH_MAX_ITEMS = configNumber(PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS, 8, 1);
+const IDLE_TIMEOUT_MINUTES = 120;
+export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60_000;
+export const MAX_QUEUE_PER_CHAT = 5;
+export const SEND_TOOL_CALLS = true;
+export const TOOL_CALL_BATCH_MS = 5000;
+export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
 
 // ---------------------------------------------------------------------------
 // Voice and transcription
 // ---------------------------------------------------------------------------
 
-export const SPEECH_TO_TEXT_PROVIDER = CONFIG_SPEECH_TO_TEXT_PROVIDER;
-export const TEXT_TO_SPEECH_PROVIDER = CONFIG_TEXT_TO_SPEECH_PROVIDER;
-export const GOOGLE_GENAI_STT_MODEL = GOOGLE_GENAI_TRANSCRIPTION_MODEL.trim();
-export const GOOGLE_GENAI_STT_PROMPT = GOOGLE_GENAI_TRANSCRIPTION_PROMPT.trim();
-export const GOOGLE_GENAI_TTS_MODEL_NAME = GOOGLE_GENAI_TTS_MODEL.trim();
-export const GOOGLE_GENAI_TTS_VOICE = GOOGLE_GENAI_TTS_VOICE_NAME.trim();
-export const ELEVENLABS_MODEL = ELEVENLABS_TRANSCRIPTION_MODEL;
-export const ELEVENLABS_LANGUAGE = ELEVENLABS_TRANSCRIPTION_LANGUAGE;
-export const TRANSCRIPTION_FETCH_ATTEMPTS = configNumber(
-  ELEVENLABS_TRANSCRIPTION_FETCH_ATTEMPTS,
-  3,
-  1,
-);
-export const TRANSCRIPTION_FETCH_TIMEOUT_MS = configNumber(
-  ELEVENLABS_TRANSCRIPTION_FETCH_TIMEOUT_MS,
-  60_000,
-  1_000,
-);
-export const TRANSCRIPTION_RETRY_BASE_DELAY_MS = configNumber(
-  ELEVENLABS_TRANSCRIPTION_RETRY_BASE_DELAY_MS,
-  1_000,
-  100,
-);
-export const ELEVENLABS_TTS_VOICE_ID = CONFIG_ELEVENLABS_TTS_VOICE_ID.trim();
-export const ELEVENLABS_TTS_MODEL = CONFIG_ELEVENLABS_TTS_MODEL.trim();
-export const ELEVENLABS_TTS_OUTPUT_FORMAT = CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT.trim();
-export const MAX_TTS_CHARS = configNumber(PI_CHANNEL_MAX_TTS_CHARS, 2500, 100);
+export type SpeechProvider = 'google-genai' | 'elevenlabs';
+export const SPEECH_TO_TEXT_PROVIDER: SpeechProvider = 'elevenlabs';
+export const TEXT_TO_SPEECH_PROVIDER: SpeechProvider = 'google-genai';
+
+// Google GenAI
+export const GOOGLE_GENAI_STT_MODEL = 'gemini-3.5-flash';
+export const GOOGLE_GENAI_STT_PROMPT =
+  'Transcribe this audio accurately. Return only the transcript text.';
+export const GOOGLE_GENAI_TTS_MODEL_NAME = 'gemini-3.1-flash-tts-preview';
+export const GOOGLE_GENAI_TTS_VOICE = 'Kore';
+
+// ElevenLabs
+export const ELEVENLABS_MODEL = 'scribe_v2';
+export const ELEVENLABS_LANGUAGE = 'en';
+export const TRANSCRIPTION_FETCH_ATTEMPTS = 3;
+export const TRANSCRIPTION_FETCH_TIMEOUT_MS = 60_000;
+export const TRANSCRIPTION_RETRY_BASE_DELAY_MS = 1_000;
+export const ELEVENLABS_TTS_VOICE_ID = 'cjVigY5qzO86Huf0OWal';
+export const ELEVENLABS_TTS_MODEL = 'eleven_v3';
+export const ELEVENLABS_TTS_OUTPUT_FORMAT = 'opus_48000_32';
+export const MAX_TTS_CHARS = 2500;
 export const TRANSCRIPTION_MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Generated local upload behavior
 // ---------------------------------------------------------------------------
 
-export const SEND_LOCAL_IMAGES = PI_CHANNEL_SEND_LOCAL_IMAGES;
-export const LOCAL_IMAGE_UPLOAD_DIRS = PI_CHANNEL_IMAGE_UPLOAD_DIRS.map((s) => s.trim()).filter(
-  Boolean,
-);
+export const SEND_LOCAL_IMAGES = true;
+export const LOCAL_IMAGE_UPLOAD_DIRS = [path.join(os.tmpdir(), 'create-image')];
 
-export const SEND_LOCAL_DOCUMENTS = PI_CHANNEL_SEND_LOCAL_DOCUMENTS;
-export const LOCAL_DOCUMENT_UPLOAD_DIRS = PI_CHANNEL_DOCUMENT_UPLOAD_DIRS.map((s) =>
-  s.trim(),
-).filter(Boolean);
-export const DOCUMENT_UPLOAD_EXTS = PI_CHANNEL_DOCUMENT_UPLOAD_EXTS.map((s) =>
-  s.trim().toLowerCase().replace(/^\./, ''),
-).filter(Boolean);
+export const SEND_LOCAL_DOCUMENTS = true;
+export const LOCAL_DOCUMENT_UPLOAD_DIRS = [path.join(os.tmpdir(), 'pi-channel'), process.cwd()];
+export const DOCUMENT_UPLOAD_EXTS = [
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'txt',
+  'md',
+  'csv',
+  'json',
+];
 
 // ---------------------------------------------------------------------------
 // Sub-agent config
 // ---------------------------------------------------------------------------
 
-export const SUBAGENT_MODEL = normalizeModelRef(CONFIG_SUBAGENT_MODEL);
-export const SUBAGENT_MAX_RUNNING = configNumber(PI_SUBAGENT_MAX_RUNNING, 3, 1);
-export const SUBAGENT_DEFAULT_YIELD_MS = configNumber(PI_SUBAGENT_DEFAULT_YIELD_MS, 5_000, 0);
-export const SUBAGENT_MAX_YIELD_MS = configNumber(PI_SUBAGENT_MAX_YIELD_MS, 30_000, 0);
-export const SUBAGENT_DEFAULT_MAX_RUNTIME_MS = configNumber(
-  PI_SUBAGENT_DEFAULT_MAX_RUNTIME_MS,
-  10 * 60_000,
-  1_000,
-);
-export const SUBAGENT_MAX_RUNTIME_CAP_MS = configNumber(
-  PI_SUBAGENT_MAX_RUNTIME_CAP_MS,
-  60 * 60_000,
-  1_000,
-);
-export const SUBAGENT_MAX_RESULT_CHARS = configNumber(PI_SUBAGENT_MAX_RESULT_CHARS, 6_000, 500);
-export const SUBAGENT_COMPLETED_TTL_MS = configNumber(
-  PI_SUBAGENT_COMPLETED_TTL_MS,
-  30 * 60_000,
-  60_000,
-);
-export const SUBAGENT_SKILLS = CONFIG_SUBAGENT_SKILLS.map((skill) => skill.trim()).filter(Boolean);
+export const SUBAGENT_MAX_RUNNING = 3;
+export const SUBAGENT_DEFAULT_YIELD_MS = 5_000;
+export const SUBAGENT_MAX_YIELD_MS = 30_000;
+export const SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 10 * 60_000;
+export const SUBAGENT_MAX_RUNTIME_CAP_MS = 60 * 60_000;
+export const SUBAGENT_MAX_RESULT_CHARS = 6_000;
+export const SUBAGENT_COMPLETED_TTL_MS = 30 * 60_000;
+export const SUBAGENT_SKILLS = ['pdf'];
 
 // ---------------------------------------------------------------------------
 // Pi resources and scheduled prompt config
 // ---------------------------------------------------------------------------
 
-export const EXTENSION_ENTRYPOINT_EXTS = new Set<string>(CONFIG_EXTENSION_ENTRYPOINT_EXTS);
-export const HEARTBEAT_ENABLED = CONFIG_HEARTBEAT_ENABLED;
-export const HEARTBEAT_INTERVAL_MS = configNumber(PI_HEARTBEAT_INTERVAL_SECONDS, 60, 1) * 1000;
+export const EXTENSION_ENTRYPOINT_EXTS = new Set<string>(['.ts', '.js', '.mjs', '.cjs']);
+export const HEARTBEAT_ENABLED = true;
+const HEARTBEAT_INTERVAL_SECONDS = 3600;
+export const HEARTBEAT_INTERVAL_MS = HEARTBEAT_INTERVAL_SECONDS * 1000;
 
 export const HEARTBEAT_NOOP = '__HEARTBEAT_NOOP__';
 export const CRON_NOOP = '__CRON_NOOP__';

@@ -14,12 +14,6 @@ export function isBackgroundSource(source: IncomingPrompt['source']): boolean {
   return source === 'heartbeat' || source === 'cron';
 }
 
-export function configNumber(value: number, defaultValue: number, minimum: number): number {
-  const parsed = Number(value ?? defaultValue);
-  if (!Number.isFinite(parsed)) return defaultValue;
-  return Math.max(minimum, parsed);
-}
-
 export function parseModelRef(value: string): ModelRef {
   const normalized = normalizeModelRef(value);
   const slash = normalized.indexOf('/');
