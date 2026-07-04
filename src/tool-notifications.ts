@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { DAILY_MEMORY_DIR, MEMORY_PATH } from './config.ts';
@@ -92,7 +93,16 @@ function formatToolArgumentValue(value: unknown): string {
   }
 
   const compacted = text.replace(/\s+/g, ' ').trim();
-  return compacted || text;
+  return abbreviateHomePath(compacted || text);
+}
+
+function abbreviateHomePath(value: string): string {
+  const homeDir = os.homedir();
+  if (!homeDir) return value;
+
+  const normalizedHomeDir = path.normalize(homeDir);
+  const escapedHomeDir = normalizedHomeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(new RegExp(`${escapedHomeDir}(?=$|/)`, 'g'), '~');
 }
 
 function truncateToolArgument(value: string, maxChars: number): string {
