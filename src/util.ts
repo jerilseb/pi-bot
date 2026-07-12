@@ -1,4 +1,3 @@
-import * as fs from 'node:fs';
 import type { IncomingPrompt } from './types.ts';
 
 export interface ModelRef {
@@ -41,31 +40,3 @@ export function formatModelRef(ref: ModelRef): string {
   return `${ref.provider}/${ref.model}`;
 }
 
-export function readActiveModelRaw(filePath: string): string | null {
-  if (!fs.existsSync(filePath)) return null;
-  return fs.readFileSync(filePath, 'utf8').trim() || null;
-}
-
-export function readActiveModel(
-  filePath: string,
-  allowedModels: string[],
-  defaultModel: string,
-): string | null {
-  const raw = readActiveModelRaw(filePath);
-  if (!raw) return null;
-
-  const candidates = [normalizeModelRef(raw), normalizeModelRef(raw, 'openrouter')]
-    .filter(Boolean)
-    .filter((model, index, models) => models.indexOf(model) === index);
-
-  return (
-    candidates.find((model) => allowedModels.includes(model)) ??
-    candidates.find((model) => model === defaultModel) ??
-    candidates[0] ??
-    null
-  );
-}
-
-export function writeModelState(filePath: string, model: string): void {
-  fs.writeFileSync(filePath, `${normalizeModelRef(model)}\n`, 'utf8');
-}

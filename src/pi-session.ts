@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
@@ -14,6 +15,7 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import {
+  FILES_DIR,
   OPENAI_CODEX_API_KEY,
   OPENROUTER_API_KEY,
   SEND_LOCAL_DOCUMENTS,
@@ -49,7 +51,6 @@ export interface PiRuntime {
   systemPromptOverride: () => string;
   extensionFactories: Array<(pi: ExtensionAPI) => void>;
   requestRestart?: () => Promise<void>;
-  writeModelState: (model: string) => void;
 }
 
 export function createPiRuntime(options: {
@@ -61,7 +62,6 @@ export function createPiRuntime(options: {
   systemPromptOverride: () => string;
   extensionFactories?: Array<(pi: ExtensionAPI) => void>;
   requestRestart?: () => Promise<void>;
-  writeModelState: (model: string) => void;
 }): PiRuntime {
   const authStorage = AuthStorage.create();
   if (OPENROUTER_API_KEY) {
@@ -75,7 +75,9 @@ export function createPiRuntime(options: {
   const selectedModelRef = parseModelRef(options.model);
   const model = resolveModel(modelRegistry, selectedModelRef);
   ensureConfiguredAuth(modelRegistry, model, selectedModelRef);
-  const settingsManager = SettingsManager.create(options.cwd, getAgentDir());
+  // Keep Telegram model/reasoning preferences isolated from ~/.pi/agent/settings.json.
+  // AuthStorage still uses Pi's normal agent directory, so provider logins remain shared.
+  const settingsManager = SettingsManager.create(options.cwd, FILES_DIR);
 
   return {
     modelName: formatModelRef(selectedModelRef),
@@ -91,7 +93,6 @@ export function createPiRuntime(options: {
     systemPromptOverride: options.systemPromptOverride,
     extensionFactories: options.extensionFactories ?? [],
     ...(options.requestRestart ? { requestRestart: options.requestRestart } : {}),
-    writeModelState: options.writeModelState,
   };
 }
 
@@ -138,22 +139,40 @@ export class SdkPiSession {
     return formatModelRef(this.selectedModelRef);
   }
 
+  async getThinkingState(): Promise<{
+    level: ThinkingLevel;
+    availableLevels: ThinkingLevel[];
+  }> {
+    const session = await this.start();
+    return {
+      level: session.thinkingLevel,
+      availableLevels: session.getAvailableThinkingLevels(),
+    };
+  }
+
+  async setThinkingLevel(level: ThinkingLevel): Promise<ThinkingLevel> {
+    const session = await this.start();
+    if (session.isStreaming) {
+      throw new Error('Cannot switch reasoning level while Pi is responding');
+    }
+    session.setThinkingLevel(level);
+    return session.thinkingLevel;
+  }
+
   async setModel(modelName: string): Promise<void> {
     const modelRef = parseModelRef(modelName);
     this.runtime.modelRegistry.refresh();
     const model = resolveModel(this.runtime.modelRegistry, modelRef);
     ensureConfiguredAuth(this.runtime.modelRegistry, model, modelRef);
 
-    if (this.session?.isStreaming) {
+    const session = await this.start();
+    if (session.isStreaming) {
       throw new Error('Cannot switch models while Pi is responding');
     }
 
-    if (this.session) {
-      await this.session.setModel(model);
-    }
+    await session.setModel(model);
 
     const formatted = formatModelRef(modelRef);
-    this.runtime.writeModelState(formatted);
     this.runtime.modelName = formatted;
     this.runtime.model = model;
     this.selectedModelRef = modelRef;

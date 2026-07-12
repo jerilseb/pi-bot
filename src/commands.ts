@@ -4,6 +4,7 @@ import { ELEVENLABS_API_KEY, HEARTBEAT_ENABLED, SEND_TOOL_CALLS } from './config
 import { cronStatusText } from './cron.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
 import { buildModelInlineKeyboard } from './model-menu.ts';
+import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
 import {
   buildOpenAIUsageTelegramHtml,
   fetchOpenAIUsage,
@@ -35,6 +36,7 @@ const HELP_TEXT = [
   '/status — show this chat session status',
   '/request_access — request access for a new group',
   '/models — choose an allowed chat model',
+  '/reasoning — choose the chat reasoning level',
   '/openaiusage — show OpenAI Codex usage windows and reset times',
   '/elevenlabsusage — show ElevenLabs credit/character usage',
   '/abort — abort the current Pi response',
@@ -91,6 +93,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   '/status': async ({ chat, backgroundRegistry, getBackgroundModelName }) => {
     const uptimeSeconds = Math.floor((Date.now() - chat.startedAt) / 1000);
     const background = backgroundRegistry.getExisting(chat.chatId);
+    const thinking = await chat.pi.getThinkingState();
     await sendTelegramMessage(
       chat.chatId,
       [
@@ -100,6 +103,7 @@ const COMMANDS: Record<string, CommandHandler> = {
         `- Chat queue: ${chat.queue.length}`,
         `- Chat uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
         `- Chat model: ${chat.pi.modelName}`,
+        `- Chat reasoning: ${thinking.level}`,
         `- Session tokens: ${formatSessionTokens(chat.pi.getSessionStats())}`,
         `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
         `- Background queue: ${background?.queue.length ?? 0}`,
@@ -126,6 +130,27 @@ const COMMANDS: Record<string, CommandHandler> = {
       chat.chatId,
       [`Current chat model: ${chat.pi.modelName}`, 'Choose a chat model:'].join('\n'),
       buildModelInlineKeyboard(),
+    );
+  },
+
+  '/reasoning': async ({ chat, registry }) => {
+    if (registry.isBusy(chat.chatId)) {
+      await sendTelegramMessage(
+        chat.chatId,
+        '⚠️ Wait for the current chat response and queue to finish before switching reasoning.',
+      );
+      return;
+    }
+
+    const thinking = await chat.pi.getThinkingState();
+    await sendTelegramInlineKeyboard(
+      chat.chatId,
+      [
+        `Current chat model: ${chat.pi.modelName}`,
+        `Current reasoning: ${thinking.level}`,
+        'Choose a reasoning level:',
+      ].join('\n'),
+      buildReasoningInlineKeyboard(thinking.availableLevels),
     );
   },
 

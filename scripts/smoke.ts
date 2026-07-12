@@ -3,8 +3,8 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-	ACTIVE_MODEL_PATH,
 	ALLOWED_CHATS_PATH,
+	BOT_SETTINGS_PATH,
 	ALLOWED_MODELS,
 	BACKGROUND_MODEL,
 	BOT_TOKEN,
@@ -28,7 +28,6 @@ import {
 	memorySystemPromptExtension,
 	readSystemPrompt,
 } from "../src/system-prompt.ts";
-import { writeModelState } from "../src/util.ts";
 
 const INDEX_ENTRYPOINTS = ["index.ts", "index.js", "index.mjs", "index.cjs"] as const;
 
@@ -60,7 +59,7 @@ function validateEnvironment(): void {
 	);
 	assert(
 		ALLOWED_MODELS.includes(MODEL),
-		`Active chat model (${MODEL}) must be present in CONFIG_ALLOWED_MODELS. Check ${ACTIVE_MODEL_PATH}.`,
+		`Active chat model (${MODEL}) must be present in CONFIG_ALLOWED_MODELS. Check ${BOT_SETTINGS_PATH}.`,
 	);
 	assert(BACKGROUND_MODEL, "Missing background model.");
 	assert(
@@ -165,14 +164,12 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Pi
 		...common,
 		model: MODEL,
 		sessionPrefix: "smoke-chat",
-		writeModelState: (model) => writeModelState(ACTIVE_MODEL_PATH, model),
 	});
 
 	createPiRuntime({
 		...common,
 		model: BACKGROUND_MODEL,
 		sessionPrefix: "smoke-background",
-		writeModelState: () => undefined,
 	});
 
 	return chatRuntime;

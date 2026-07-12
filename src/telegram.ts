@@ -13,6 +13,7 @@ export async function registerBotCommands(): Promise<void> {
           { command: 'request_access', description: 'Request access for this group' },
           { command: 'status', description: 'Show chat session status' },
           { command: 'models', description: 'Switch chat model' },
+          { command: 'reasoning', description: 'Switch chat reasoning level' },
           { command: 'openaiusage', description: 'Show OpenAI Codex usage' },
           { command: 'elevenlabsusage', description: 'Show ElevenLabs usage' },
           { command: 'abort', description: 'Stop the current Pi response' },

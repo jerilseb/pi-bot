@@ -65,11 +65,12 @@ export async function handleModelCallbackQuery(
 
   try {
     await chat.pi.setModel(modelName);
+    const thinking = await chat.pi.getThinkingState();
     await answerTelegramCallbackQuery(query.id, 'Model switched.');
     await editTelegramMessageText(
       chatId,
       query.message.message_id,
-      `✅ Switched chat model to ${chat.pi.modelName}`,
+      `✅ Switched chat model to ${chat.pi.modelName}\nReasoning: ${thinking.level}`,
     );
   } catch (error) {
     await answerTelegramCallbackQuery(query.id, 'Model switch failed.');

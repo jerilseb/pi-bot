@@ -2,7 +2,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { normalizeModelRef, readActiveModel } from './util.ts';
+import { normalizeModelRef, parseModelRef } from './util.ts';
 
 /**
  * Application configuration.
@@ -17,13 +17,13 @@ import { normalizeModelRef, readActiveModel } from './util.ts';
 // ---------------------------------------------------------------------------
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, '..');
-export const ACTIVE_MODEL_PATH = path.join(PROJECT_ROOT, '.active_model');
 export const SESSIONS_DIR = path.join(PROJECT_ROOT, 'sessions');
 export const TMP_DIR = path.join(os.tmpdir(), 'pi-channel');
 
 export const PROJECT_EXTENSIONS_DIR = path.join(PROJECT_ROOT, 'extensions');
 export const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
 export const FILES_DIR = path.join(PROJECT_ROOT, 'files');
+export const BOT_SETTINGS_PATH = path.join(FILES_DIR, 'settings.json');
 export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, 'system.md');
 export const MEMORY_PATH = path.join(FILES_DIR, 'memory.md');
 export const DAILY_MEMORY_DIR = path.join(FILES_DIR, 'memory');
@@ -64,8 +64,47 @@ export const SUBAGENT_MODEL = normalizeModelRef(CONFIG_SUBAGENT_MODEL);
 export const ALLOWED_MODELS = CONFIG_ALLOWED_MODELS.map((model) => normalizeModelRef(model)).filter(
   Boolean,
 );
-export const MODEL =
-  readActiveModel(ACTIVE_MODEL_PATH, ALLOWED_MODELS, DEFAULT_MODEL) ?? DEFAULT_MODEL;
+
+interface BotSettings {
+  defaultProvider?: unknown;
+  defaultModel?: unknown;
+}
+
+function readBotSettings(): BotSettings {
+  if (!fs.existsSync(BOT_SETTINGS_PATH)) return {};
+  const parsed: unknown = JSON.parse(fs.readFileSync(BOT_SETTINGS_PATH, 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${BOT_SETTINGS_PATH} must contain a JSON object`);
+  }
+  return parsed as BotSettings;
+}
+
+const BOT_SETTINGS = readBotSettings();
+const SETTINGS_MODEL =
+  typeof BOT_SETTINGS.defaultProvider === 'string' && typeof BOT_SETTINGS.defaultModel === 'string'
+    ? normalizeModelRef(`${BOT_SETTINGS.defaultProvider}/${BOT_SETTINGS.defaultModel}`)
+    : '';
+
+export const MODEL = SETTINGS_MODEL || DEFAULT_MODEL;
+
+export function ensureBotSettingsFile(): void {
+  if (fs.existsSync(BOT_SETTINGS_PATH)) return;
+  const model = parseModelRef(MODEL);
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+  fs.writeFileSync(
+    BOT_SETTINGS_PATH,
+    `${JSON.stringify(
+      {
+        defaultProvider: model.provider,
+        defaultModel: model.model,
+        defaultThinkingLevel: 'high',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Telegram API and size limits

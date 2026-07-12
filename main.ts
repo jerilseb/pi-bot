@@ -24,7 +24,6 @@ import {
 import { createChatRegistry, type ChatRegistry, type ChatState } from './src/chat-session.ts';
 import { handleCommand } from './src/commands.ts';
 import {
-  ACTIVE_MODEL_PATH,
   ALLOWED_CHATS_PATH,
   ALLOWED_MODELS,
   BACKGROUND_MODEL,
@@ -41,6 +40,7 @@ import {
   TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
   TOOL_CALL_BATCH_MAX_ITEMS,
+  ensureBotSettingsFile,
   TOOL_CALL_BATCH_MS,
   getAllowedTelegramChatIds,
   getPrivateTelegramChatIds,
@@ -53,6 +53,7 @@ import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.
 import { ingestionEpoch, toIncomingPrompt } from './src/inbound.ts';
 import { handleModelCallbackQuery } from './src/model-menu.ts';
 import { sendPiResponse } from './src/outbound.ts';
+import { handleReasoningCallbackQuery } from './src/reasoning-menu.ts';
 import {
   consumePostRestartTasks,
   ensurePostRestartTasksFile,
@@ -81,11 +82,11 @@ import {
   telegram,
 } from './src/telegram.ts';
 import type { IncomingPrompt, TelegramMessage, TelegramUpdate } from './src/types.ts';
-import { errorMessage, isBackgroundSource, writeModelState } from './src/util.ts';
+import { errorMessage, isBackgroundSource } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
 validateEnvironment();
-writeModelState(ACTIVE_MODEL_PATH, MODEL);
+ensureBotSettingsFile();
 
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
@@ -104,7 +105,6 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
     protectedEnvToolAccessExtension,
   ],
   requestRestart: restart,
-  writeModelState: (model) => writeModelState(ACTIVE_MODEL_PATH, model),
 });
 
 const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
@@ -120,7 +120,6 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
     allowedChatsSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
-  writeModelState: () => undefined,
 });
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -208,7 +207,7 @@ function validateEnvironment(): void {
 
   if (!ALLOWED_MODELS.includes(MODEL)) {
     console.error(
-      `Active chat model (${MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts. Check ${ACTIVE_MODEL_PATH} or CHAT_MODEL in src/config.ts.`,
+      `Active chat model (${MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts. Check files/settings.json or CHAT_MODEL in src/config.ts.`,
     );
     process.exit(1);
   }
@@ -397,6 +396,7 @@ async function pollTelegram(): Promise<void> {
 
         if (update.callback_query) {
           await handleModelCallbackQuery(update.callback_query, chats);
+          await handleReasoningCallbackQuery(update.callback_query, chats);
           await handleTelegramMenuCallbackQuery(update.callback_query, handleIncoming);
           continue;
         }
