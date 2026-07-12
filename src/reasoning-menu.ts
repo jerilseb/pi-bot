@@ -12,12 +12,17 @@ import { errorMessage } from './util.ts';
 
 const REASONING_CALLBACK_PREFIX = 'reasoning:';
 const REASONING_CALLBACK_CANCEL = `${REASONING_CALLBACK_PREFIX}cancel`;
+const HIDDEN_REASONING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal']);
+
+function selectableReasoningLevels(levels: ThinkingLevel[]): ThinkingLevel[] {
+  return levels.filter((level) => !HIDDEN_REASONING_LEVELS.has(level));
+}
 
 export function buildReasoningInlineKeyboard(
   levels: ThinkingLevel[],
 ): InlineKeyboardButton[][] {
   return [
-    ...levels.map((level) => [
+    ...selectableReasoningLevels(levels).map((level) => [
       { text: level, callback_data: `${REASONING_CALLBACK_PREFIX}${level}` },
     ]),
     [{ text: 'Cancel', callback_data: REASONING_CALLBACK_CANCEL }],
@@ -58,7 +63,7 @@ export async function handleReasoningCallbackQuery(
 
   try {
     const state = await chat.pi.getThinkingState();
-    if (!state.availableLevels.includes(requestedLevel)) {
+    if (!selectableReasoningLevels(state.availableLevels).includes(requestedLevel)) {
       await answerTelegramCallbackQuery(query.id, 'Unsupported reasoning level.');
       await editTelegramMessageText(
         chatId,
