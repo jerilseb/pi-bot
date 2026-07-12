@@ -20,6 +20,7 @@ import {
 import { discoverExtensionPaths, discoverSkillPaths } from "../src/discovery.ts";
 import { protectedEnvToolAccessExtension } from "../src/env-guard.ts";
 import { createPiRuntime, type PiRuntime } from "../src/pi-session.ts";
+import { scheduledTasksExtension } from "../src/scheduled-tasks.ts";
 import { subagentToolsExtension } from "../src/subagents.ts";
 import {
 	activeModelSystemPromptExtension,
@@ -189,6 +190,32 @@ function verifySubagentSkillConfig(skillPaths: string[]): void {
 	}
 }
 
+function verifyScheduledTaskTools(): number {
+	const registeredTools = new Set<string>();
+	const fakePi = {
+		registerTool(tool: unknown) {
+			assert(isRecord(tool), "Scheduled-task extension attempted to register a non-object tool.");
+			assert(
+				typeof tool.name === "string" && tool.name.trim(),
+				"Scheduled-task extension registered a tool without a name.",
+			);
+			registeredTools.add(tool.name);
+		},
+	} as unknown as ExtensionAPI;
+
+	scheduledTasksExtension("smoke-chat")(fakePi);
+
+	for (const name of [
+		"create_schedule_task",
+		"list_scheduled_tasks",
+		"cancel_scheduled_task",
+		"update_scheduled_task",
+	]) {
+		assert(registeredTools.has(name), `Scheduled-task extension did not register ${name}.`);
+	}
+	return registeredTools.size;
+}
+
 function verifySubagentTools(runtime: PiRuntime): number {
 	const registeredTools = new Set<string>();
 	const fakePi = {
@@ -224,10 +251,11 @@ async function main(): Promise<void> {
 	verifySubagentSkillConfig(skillPaths);
 	const registeredTools = await importAndRegisterExtensions(extensionPaths);
 	const chatRuntime = createSmokeRuntimes(extensionPaths, skillPaths);
+	const scheduledTaskTools = verifyScheduledTaskTools();
 	const subagentTools = verifySubagentTools(chatRuntime);
 
 	console.log(
-		`Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
+		`Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
 	);
 }
 

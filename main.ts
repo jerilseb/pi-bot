@@ -289,7 +289,18 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 
   chat.queue.push(prompt);
   chat.messageCount++;
-  void processQueue(chat, registry);
+  startQueueProcessing(chat, registry);
+}
+
+function startQueueProcessing(chat: ChatState, registry: ChatRegistry): void {
+  void processQueue(chat, registry).catch((error) => {
+    console.error(`[${chat.chatId}] queue worker failed unexpectedly:`, errorMessage(error));
+    chat.processing = false;
+
+    if (running && chat.queue.length > 0) {
+      setTimeout(() => startQueueProcessing(chat, registry), 1_000);
+    }
+  });
 }
 
 function isAssistantBusy(chatId: string): boolean {
@@ -330,7 +341,14 @@ async function processQueue(chat: ChatState, registry: ChatRegistry): Promise<vo
       const message = errorMessage(error);
       console.error(`[${prompt.chatId}] error:`, message);
       await flushToolNotifications(prompt.chatId);
-      await sendTelegramMessage(prompt.chatId, `❌ ${sanitizeError(message)}`);
+      try {
+        await sendTelegramMessage(prompt.chatId, `❌ ${sanitizeError(message)}`);
+      } catch (notificationError) {
+        console.error(
+          `[${prompt.chatId}] failed to send prompt error notification:`,
+          errorMessage(notificationError),
+        );
+      }
     } finally {
       typing.stop();
       chat.processing = false;

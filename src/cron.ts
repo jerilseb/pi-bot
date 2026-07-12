@@ -1,4 +1,4 @@
-import { CRON_JOBS_PATH, CRON_NOOP, getPrimaryTelegramChatId } from './config.ts';
+import { CRON_JOBS_PATH, CRON_NOOP, isAllowedTelegramChat } from './config.ts';
 import {
   computeNextRunAt,
   deferCronJob,
@@ -77,8 +77,13 @@ export function createCronController(options: {
       if (!job.enabled || !job.nextRunAt) continue;
       if (new Date(job.nextRunAt).getTime() > now.getTime()) continue;
 
-      const chatId = getPrimaryTelegramChatId();
-      if (!chatId) continue;
+      const { chatId } = job;
+      if (!isAllowedTelegramChat(chatId)) {
+        console.warn(`[${chatId}] disabling cron ${job.id}; owning chat is not allowed`);
+        jobs[index] = disableCronJob(job, now);
+        changed = true;
+        continue;
+      }
 
       if (options.isChatBusy(chatId)) {
         console.log(`[${chatId}] cron ${job.id} deferred; chat is busy`);
@@ -148,6 +153,15 @@ function refreshCronJobs(fromDate: Date = new Date()): CronJob[] {
 
   if (changed) writeCronJobs(refreshed, { notify: false });
   return refreshed;
+}
+
+function disableCronJob(job: CronJob, now: Date): CronJob {
+  return {
+    ...job,
+    enabled: false,
+    nextRunAt: null,
+    updatedAt: now.toISOString(),
+  };
 }
 
 function buildCronPrompt(job: CronJob): string {

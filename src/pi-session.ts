@@ -28,6 +28,7 @@ import type { Attachment, PiPromptResult } from './types.ts';
 import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
 import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
 import { telegramRestartToolExtension } from './restart-tool.ts';
+import { scheduledTasksExtension } from './scheduled-tasks.ts';
 import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
 import { subagentToolsExtension } from './subagents.ts';
 import { telegramMenuExtension } from './telegram-menu.ts';
@@ -298,6 +299,7 @@ export class SdkPiSession {
           ? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
           : []),
         telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
+        scheduledTasksExtension(this.chatId),
         subagentToolsExtension(this.chatId, this.runtime),
         telegramMenuExtension(this.chatId),
         telegramVoiceNoteExtension(this.chatId),

@@ -7,8 +7,8 @@ import {
   readCronJobs,
   updateCronJob,
   type CronJobKind,
-} from '../src/cron-store.ts';
-import { textResult } from '../src/tool-result.ts';
+} from './cron-store.ts';
+import { textResult } from './tool-result.ts';
 
 const JobKind = Type.Union([Type.Literal('once'), Type.Literal('interval'), Type.Literal('cron')]);
 
@@ -66,7 +66,11 @@ const UpdateScheduledTaskParams = Type.Object({
 
 type UpdateScheduledTaskParamsType = Static<typeof UpdateScheduledTaskParams>;
 
-export default function scheduledTasksExtension(pi: ExtensionAPI): void {
+export function scheduledTasksExtension(chatId: string): (pi: ExtensionAPI) => void {
+  return (pi: ExtensionAPI) => registerScheduledTaskTools(pi, chatId);
+}
+
+function registerScheduledTaskTools(pi: ExtensionAPI, chatId: string): void {
   pi.registerTool({
     name: 'create_schedule_task',
     label: 'Create Schedule Task',
@@ -81,7 +85,7 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     ],
     parameters: ScheduleTaskParams,
     async execute(_toolCallId, params: ScheduleTaskParamsType) {
-      const input = toCreateInput(params);
+      const input = toCreateInput(chatId, params);
       const job = addCronJob(input);
       return textResult(`Scheduled task created:\n${formatCronJob(job)}`);
     },
@@ -91,23 +95,25 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     name: 'list_scheduled_tasks',
     label: 'List Scheduled Tasks',
     description:
-      'List scheduled one-time, interval, and cron-like tasks for the Telegram assistant.',
+      'List scheduled one-time, interval, and cron-like tasks owned by this Telegram chat.',
     promptSnippet: 'List scheduled Telegram assistant tasks.',
     parameters: ListScheduledTasksParams,
     async execute() {
-      const jobs = readCronJobs();
-      return textResult(jobs.length ? jobs.map(formatCronJob).join('\n') : 'No scheduled tasks.');
+      const jobs = readCronJobs().filter((job) => job.chatId === chatId);
+      return textResult(
+        jobs.length ? jobs.map(formatCronJob).join('\n') : 'No scheduled tasks for this chat.',
+      );
     },
   });
 
   pi.registerTool({
     name: 'cancel_scheduled_task',
     label: 'Cancel Scheduled Task',
-    description: 'Disable a scheduled task by id.',
+    description: 'Disable a scheduled task owned by this Telegram chat by id.',
     promptSnippet: 'Cancel scheduled Telegram assistant tasks.',
     parameters: CancelScheduledTaskParams,
     async execute(_toolCallId, params: CancelScheduledTaskParamsType) {
-      const job = cancelCronJob(params.id);
+      const job = cancelCronJob(chatId, params.id);
       return textResult(`Scheduled task cancelled:\n${formatCronJob(job)}`);
     },
   });
@@ -116,11 +122,11 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
     name: 'update_scheduled_task',
     label: 'Update Scheduled Task',
     description:
-      'Update a scheduled task. Provide only fields that should change. Changing schedule fields recomputes the next run time.',
+      'Update a scheduled task owned by this Telegram chat. Provide only fields that should change. Changing schedule fields recomputes the next run time.',
     promptSnippet: 'Update scheduled Telegram assistant tasks.',
     parameters: UpdateScheduledTaskParams,
     async execute(_toolCallId, params: UpdateScheduledTaskParamsType) {
-      const job = updateCronJob(params.id, {
+      const job = updateCronJob(chatId, params.id, {
         ...(params.enabled === undefined ? {} : { enabled: params.enabled }),
         ...(params.kind ? { kind: params.kind as CronJobKind } : {}),
         ...(params.prompt ? { prompt: params.prompt } : {}),
@@ -135,7 +141,8 @@ export default function scheduledTasksExtension(pi: ExtensionAPI): void {
   });
 }
 
-function toCreateInput(params: ScheduleTaskParamsType): {
+function toCreateInput(chatId: string, params: ScheduleTaskParamsType): {
+  chatId: string;
   kind: CronJobKind;
   prompt: string;
   title?: string;
@@ -155,6 +162,7 @@ function toCreateInput(params: ScheduleTaskParamsType): {
   }
 
   return {
+    chatId,
     kind: params.kind,
     prompt: params.prompt,
     ...(params.title ? { title: params.title } : {}),
