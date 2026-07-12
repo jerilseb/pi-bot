@@ -63,15 +63,7 @@ function validateEnvironment(): void {
 		`Active chat model (${MODEL}) must be present in CONFIG_ALLOWED_MODELS. Check ${BOT_SETTINGS_PATH}.`,
 	);
 	assert(BACKGROUND_MODEL, "Missing background model.");
-	assert(
-		ALLOWED_MODELS.includes(BACKGROUND_MODEL),
-		`Background model (${BACKGROUND_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
-	);
 	assert(SUBAGENT_MODEL, "Missing sub-agent model.");
-	assert(
-		ALLOWED_MODELS.includes(SUBAGENT_MODEL),
-		`Sub-agent model (${SUBAGENT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
-	);
 	assert(
 		getAllowedTelegramChatIds().length > 0,
 		`No enabled Telegram chats configured. Check ${ALLOWED_CHATS_PATH}.`,

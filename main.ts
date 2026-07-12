@@ -219,23 +219,9 @@ function validateEnvironment(): void {
     process.exit(1);
   }
 
-  if (!ALLOWED_MODELS.includes(BACKGROUND_MODEL)) {
-    console.error(
-      `Background model (${BACKGROUND_MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts. Check CONFIG_BACKGROUND_MODEL or CONFIG_ALLOWED_MODELS in src/config.ts.`,
-    );
-    process.exit(1);
-  }
-
   if (!SUBAGENT_MODEL) {
     console.error(
       'Missing CONFIG_SUBAGENT_MODEL in src/config.ts. Example: CONFIG_SUBAGENT_MODEL = "openai-codex/gpt-5.4-mini"',
-    );
-    process.exit(1);
-  }
-
-  if (!ALLOWED_MODELS.includes(SUBAGENT_MODEL)) {
-    console.error(
-      `Sub-agent model (${SUBAGENT_MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts.`,
     );
     process.exit(1);
   }

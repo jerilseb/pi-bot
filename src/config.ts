@@ -48,12 +48,12 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 // Models
 // ---------------------------------------------------------------------------
 
-export const CHAT_MODEL = 'openai-codex/gpt-5.4-mini';
-const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.4-mini';
-const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.4-mini';
+export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
+const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.6-luna';
+const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.6-luna';
 const CONFIG_ALLOWED_MODELS = [
-  'openai-codex/gpt-5.4-mini',
   'openai-codex/gpt-5.5',
+  'openai-codex/gpt-5.6-luna',
   'openai-codex/gpt-5.6-sol',
   'openrouter/moonshotai/kimi-k2.6',
 ] as const;
