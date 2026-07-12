@@ -15,10 +15,10 @@
     "verify": "npm run typecheck && npm run smoke"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.79.0",
-    "@earendil-works/pi-ai": "^0.79.0",
-    "@earendil-works/pi-coding-agent": "^0.79.0",
-    "@earendil-works/pi-tui": "^0.79.0",
+    "@earendil-works/pi-agent-core": "^0.80.6",
+    "@earendil-works/pi-ai": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-tui": "^0.80.6",
     "@mozilla/readability": "^0.6.0",
     "cheerio": "^1.1.2",
     "cron-parser": "^5.5.0",
