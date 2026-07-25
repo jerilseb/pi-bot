@@ -22,7 +22,7 @@ import {
   type SpeechProvider,
 } from './config.ts';
 import type { TranscriptionResult } from './types.ts';
-import { errorMessage } from './util.ts';
+import { errorMessage, sleep } from './util.ts';
 
 const GEMINI_GENERATE_CONTENT_API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GOOGLE_TTS_SAMPLE_RATE = 24_000;
@@ -374,7 +374,7 @@ async function retrySpeechRequest<T>(
 
     lastError = result.error;
     if (!result.retryable || attempt >= TRANSCRIPTION_FETCH_ATTEMPTS) break;
-    await delay(transcriptionRetryDelayMs(attempt));
+    await sleep(transcriptionRetryDelayMs(attempt));
   }
 
   return {
@@ -399,10 +399,6 @@ function isRetryableSpeechStatus(status: number): boolean {
 
 function transcriptionRetryDelayMs(attempt: number): number {
   return TRANSCRIPTION_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function extractGeminiText(data: unknown): string {

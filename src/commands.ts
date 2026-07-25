@@ -14,6 +14,7 @@ import { discardPendingIngestion } from './inbound.ts';
 import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
 import { cancelAllSubagents, runningSubagentCount } from './subagents.ts';
 import { escapeTelegramHtml, sendTelegramInlineKeyboard, sendTelegramMessage } from './telegram.ts';
+import { errorMessage } from './util.ts';
 import { voiceStatusText } from './voice.ts';
 
 export interface CommandContext {
@@ -62,18 +63,18 @@ function formatSessionTokens(stats: SessionStats | null): string {
   ].join(', ');
 }
 
+const TOKEN_UNITS = [
+  { suffix: 'b', value: 1_000_000_000 },
+  { suffix: 'm', value: 1_000_000 },
+] as const;
+/** Smallest abbreviated unit; anything at or above it is abbreviated. */
+const TOKEN_BASE_UNIT = { suffix: 'k', value: 1_000 } as const;
+
 function formatTokenCount(value: number): string {
   const rounded = Math.max(0, Math.round(value));
-  if (rounded < 1000) return String(rounded);
+  if (rounded < TOKEN_BASE_UNIT.value) return String(rounded);
 
-  const units = [
-    { suffix: 'b', value: 1_000_000_000 },
-    { suffix: 'm', value: 1_000_000 },
-    { suffix: 'k', value: 1_000 },
-  ] as const;
-  const unit = units.find((candidate) => rounded >= candidate.value);
-  if (!unit) return String(rounded);
-
+  const unit = TOKEN_UNITS.find((candidate) => rounded >= candidate.value) ?? TOKEN_BASE_UNIT;
   return `${TOKEN_NUMBER_FORMAT.format(rounded / unit.value)}${unit.suffix}`;
 }
 
@@ -160,9 +161,8 @@ const COMMANDS: Record<string, CommandHandler> = {
       const { usage, warnings } = await fetchOpenAIUsage(accessToken);
       await sendTelegramMessage(buildOpenAIUsageTelegramHtml(usage, warnings));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       await sendTelegramMessage(
-        `❌ Failed to fetch OpenAI Codex usage: ${escapeTelegramHtml(message)}`,
+        `❌ Failed to fetch OpenAI Codex usage: ${escapeTelegramHtml(errorMessage(error))}`,
       );
     }
   },
@@ -179,9 +179,8 @@ const COMMANDS: Record<string, CommandHandler> = {
       const usage = await fetchElevenLabsUsage(ELEVENLABS_API_KEY);
       await sendTelegramMessage(buildElevenLabsUsageTelegramHtml(usage));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       await sendTelegramMessage(
-        `❌ Failed to fetch ElevenLabs usage: ${escapeTelegramHtml(message)}`,
+        `❌ Failed to fetch ElevenLabs usage: ${escapeTelegramHtml(errorMessage(error))}`,
       );
     }
   },

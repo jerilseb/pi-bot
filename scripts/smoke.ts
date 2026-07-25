@@ -3,19 +3,14 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
-  ALLOWED_CHAT_ID,
-  BOT_SETTINGS_PATH,
-  ALLOWED_MODELS,
   BACKGROUND_MODEL,
-  BOT_TOKEN,
-  DEFAULT_MODEL,
   MODEL,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   PROJECT_SKILLS_DIR,
-  SUBAGENT_MODEL,
   SUBAGENT_SKILLS,
 } from '../src/config.ts';
+import { collectConfigProblems } from '../src/config-validation.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts';
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
 import { createPiRuntime, type PiRuntime } from '../src/pi-session.ts';
@@ -45,21 +40,12 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-function validateEnvironment(): void {
-  assert(BOT_TOKEN, 'Missing TELEGRAM_BOT_TOKEN.');
-  assert(DEFAULT_MODEL, 'Missing default chat model.');
-  assert(ALLOWED_MODELS.length > 0, 'No allowed chat models configured.');
+function validateConfiguration(): void {
+  const problems = collectConfigProblems();
   assert(
-    ALLOWED_MODELS.includes(DEFAULT_MODEL),
-    `Default chat model (${DEFAULT_MODEL}) must be present in CONFIG_ALLOWED_MODELS.`,
+    problems.length === 0,
+    `Invalid configuration:\n${problems.map((problem) => `- ${problem}`).join('\n')}`,
   );
-  assert(
-    ALLOWED_MODELS.includes(MODEL),
-    `Active chat model (${MODEL}) must be present in CONFIG_ALLOWED_MODELS. Check ${BOT_SETTINGS_PATH}.`,
-  );
-  assert(BACKGROUND_MODEL, 'Missing background model.');
-  assert(SUBAGENT_MODEL, 'Missing sub-agent model.');
-  assert(ALLOWED_CHAT_ID, 'Missing TELEGRAM_ALLOWED_CHAT_ID.');
 }
 
 /**
@@ -239,7 +225,7 @@ function verifySubagentTools(runtime: PiRuntime): number {
 }
 
 async function main(): Promise<void> {
-  validateEnvironment();
+  validateConfiguration();
   ensureMemoryFile();
   assert(readSystemPrompt().trim(), 'System prompt is empty.');
 

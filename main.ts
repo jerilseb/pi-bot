@@ -25,10 +25,7 @@ import { createChatSession, type ChatSession, type ChatState } from './src/chat-
 import { handleCommand } from './src/commands.ts';
 import {
   ALLOWED_CHAT_ID,
-  ALLOWED_MODELS,
   BACKGROUND_MODEL,
-  BOT_TOKEN,
-  DEFAULT_MODEL,
   MAX_QUEUED_PROMPTS,
   MODEL,
   POST_RESTART_TASKS_PATH,
@@ -44,6 +41,7 @@ import {
   TOOL_CALL_BATCH_MS,
   isAllowedTelegramChat,
 } from './src/config.ts';
+import { collectConfigProblems } from './src/config-validation.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
@@ -82,7 +80,7 @@ import type { IncomingPrompt, TelegramMessage, TelegramUpdate } from './src/type
 import { errorMessage, isBackgroundSource, sleep } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
-validateEnvironment();
+validateConfiguration();
 ensureBotSettingsFile();
 
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
@@ -169,58 +167,14 @@ setBackgroundBashReportHandler(async (report) => {
   });
 });
 
-function validateEnvironment(): void {
-  if (!BOT_TOKEN) {
-    console.error('Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc');
-    process.exit(1);
-  }
+function validateConfiguration(): void {
+  const problems = collectConfigProblems();
+  if (problems.length === 0) return;
 
-  if (!DEFAULT_MODEL) {
-    console.error(
-      'Missing CHAT_MODEL in src/config.ts. Example: CHAT_MODEL = "openrouter/openai/gpt-5.4-mini"',
-    );
-    process.exit(1);
+  for (const problem of problems) {
+    console.error(problem);
   }
-
-  if (ALLOWED_MODELS.length === 0) {
-    console.error(
-      'Missing CONFIG_ALLOWED_MODELS in src/config.ts. Example: CONFIG_ALLOWED_MODELS = ["openrouter/openai/gpt-5.4-mini", "openai-codex/gpt-5.5"]',
-    );
-    process.exit(1);
-  }
-
-  if (!ALLOWED_MODELS.includes(DEFAULT_MODEL)) {
-    console.error(
-      `CHAT_MODEL (${DEFAULT_MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts.`,
-    );
-    process.exit(1);
-  }
-
-  if (!ALLOWED_MODELS.includes(MODEL)) {
-    console.error(
-      `Active chat model (${MODEL}) must be included in CONFIG_ALLOWED_MODELS in src/config.ts. Check files/settings.json or CHAT_MODEL in src/config.ts.`,
-    );
-    process.exit(1);
-  }
-
-  if (!BACKGROUND_MODEL) {
-    console.error(
-      'Missing CONFIG_BACKGROUND_MODEL in src/config.ts. Example: CONFIG_BACKGROUND_MODEL = "openai-codex/gpt-5.5"',
-    );
-    process.exit(1);
-  }
-
-  if (!SUBAGENT_MODEL) {
-    console.error(
-      'Missing CONFIG_SUBAGENT_MODEL in src/config.ts. Example: CONFIG_SUBAGENT_MODEL = "openai-codex/gpt-5.4-mini"',
-    );
-    process.exit(1);
-  }
-
-  if (!ALLOWED_CHAT_ID) {
-    console.error('Missing TELEGRAM_ALLOWED_CHAT_ID. Example: TELEGRAM_ALLOWED_CHAT_ID=123456789');
-    process.exit(1);
-  }
+  process.exit(1);
 }
 
 /** Shuts the bot down and exits so PM2 brings the process back up. */

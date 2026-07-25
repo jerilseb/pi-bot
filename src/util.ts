@@ -14,7 +14,7 @@ export function isBackgroundSource(source: IncomingPrompt['source']): boolean {
 }
 
 export function parseModelRef(value: string): ModelRef {
-  const normalized = normalizeModelRef(value);
+  const normalized = value.trim();
   const slash = normalized.indexOf('/');
   if (slash <= 0 || slash === normalized.length - 1) {
     throw new Error(
@@ -25,10 +25,6 @@ export function parseModelRef(value: string): ModelRef {
     provider: normalized.slice(0, slash),
     model: normalized.slice(slash + 1),
   };
-}
-
-export function normalizeModelRef(value: string): string {
-  return value.trim();
 }
 
 export function formatModelRef(ref: ModelRef): string {

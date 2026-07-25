@@ -16,6 +16,7 @@ import {
 import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import TurndownService from 'turndown';
+import { errorMessage } from '../../src/util.ts';
 
 const FetchParams = Type.Object({
   url: Type.String({ description: 'URL to fetch' }),
@@ -103,9 +104,8 @@ export default function (pi: ExtensionAPI) {
           };
         }
 
-        const message = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ type: 'text', text: `Fetch failed: ${message}` }],
+          content: [{ type: 'text', text: `Fetch failed: ${errorMessage(error)}` }],
           details,
           isError: true,
         };

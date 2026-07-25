@@ -74,7 +74,6 @@ interface TelegramMenu {
   options: TelegramMenuOption[];
   allowCancel: boolean;
   expiresAt: number;
-  createdAt: number;
 }
 
 const menus = new Map<string, TelegramMenu>();
@@ -182,7 +181,6 @@ async function sendTelegramMenu(params: SendTelegramMenuParamsType): Promise<Tel
     text: params.text.trim(),
     options,
     allowCancel,
-    createdAt: Date.now(),
     expiresAt: Date.now() + expiresMinutes * 60_000,
   };
 

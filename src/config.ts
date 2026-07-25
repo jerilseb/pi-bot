@@ -2,7 +2,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { normalizeModelRef, parseModelRef } from './util.ts';
+import { parseModelRef } from './util.ts';
 
 /**
  * Application configuration.
@@ -58,12 +58,10 @@ const CONFIG_ALLOWED_MODELS = [
   'openrouter/moonshotai/kimi-k2.6',
 ] as const;
 
-export const DEFAULT_MODEL = normalizeModelRef(CHAT_MODEL);
-export const BACKGROUND_MODEL = normalizeModelRef(CONFIG_BACKGROUND_MODEL);
-export const SUBAGENT_MODEL = normalizeModelRef(CONFIG_SUBAGENT_MODEL);
-export const ALLOWED_MODELS = CONFIG_ALLOWED_MODELS.map((model) => normalizeModelRef(model)).filter(
-  Boolean,
-);
+export const DEFAULT_MODEL = CHAT_MODEL.trim();
+export const BACKGROUND_MODEL = CONFIG_BACKGROUND_MODEL.trim();
+export const SUBAGENT_MODEL = CONFIG_SUBAGENT_MODEL.trim();
+export const ALLOWED_MODELS: readonly string[] = CONFIG_ALLOWED_MODELS.map((model) => model.trim());
 
 interface BotSettings {
   defaultProvider?: unknown;
@@ -82,7 +80,7 @@ function readBotSettings(): BotSettings {
 const BOT_SETTINGS = readBotSettings();
 const SETTINGS_MODEL =
   typeof BOT_SETTINGS.defaultProvider === 'string' && typeof BOT_SETTINGS.defaultModel === 'string'
-    ? normalizeModelRef(`${BOT_SETTINGS.defaultProvider}/${BOT_SETTINGS.defaultModel}`)
+    ? `${BOT_SETTINGS.defaultProvider}/${BOT_SETTINGS.defaultModel}`.trim()
     : '';
 
 export const MODEL = SETTINGS_MODEL || DEFAULT_MODEL;

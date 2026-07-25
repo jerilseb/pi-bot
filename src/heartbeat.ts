@@ -24,7 +24,7 @@ export function createHeartbeatController(options: {
   const runOnce = async (): Promise<void> => {
     if (!options.isRunning()) return;
 
-    const { filePath, instructions } = readHeartbeatInstructions();
+    const instructions = readHeartbeatInstructions();
     if (!instructions) return;
 
     if (options.isChatBusy()) {
@@ -33,7 +33,7 @@ export function createHeartbeatController(options: {
     }
 
     await options.handleIncoming({
-      text: buildHeartbeatPrompt(instructions, filePath),
+      text: buildHeartbeatPrompt(instructions),
       attachments: [],
       source: 'heartbeat',
       suppressNoop: true,
@@ -66,24 +66,23 @@ export function heartbeatStatusText(): string {
   }`;
 }
 
-function readHeartbeatInstructions(): {
-  filePath: string;
-  instructions: string;
-} {
-  if (!fs.existsSync(HEARTBEAT_FILE_PATH)) {
-    return { filePath: HEARTBEAT_FILE_PATH, instructions: '' };
-  }
+/**
+ * Returns the heartbeat file's full trimmed contents, including its
+ * `# Heartbeat` heading, or '' when the file is missing or holds nothing but
+ * that heading.
+ */
+function readHeartbeatInstructions(): string {
+  if (!fs.existsSync(HEARTBEAT_FILE_PATH)) return '';
 
-  const content = fs.readFileSync(HEARTBEAT_FILE_PATH, 'utf8');
-  const trimmed = content.trim();
-  const body = trimmed.replace(/^#\s*Heartbeat\s*/i, '').trim();
-  return { filePath: HEARTBEAT_FILE_PATH, instructions: body ? trimmed : '' };
+  const instructions = fs.readFileSync(HEARTBEAT_FILE_PATH, 'utf8').trim();
+  const withoutHeading = instructions.replace(/^#\s*Heartbeat\s*/i, '').trim();
+  return withoutHeading ? instructions : '';
 }
 
-function buildHeartbeatPrompt(instructions: string, filePath: string): string {
+function buildHeartbeatPrompt(instructions: string): string {
   return [
     'This is a scheduled heartbeat run for the Telegram assistant.',
-    `Heartbeat file: ${filePath}`,
+    `Heartbeat file: ${HEARTBEAT_FILE_PATH}`,
     '',
     'Read and follow these heartbeat instructions:',
     '<heartbeat_instructions>',

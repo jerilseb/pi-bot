@@ -9,8 +9,6 @@ import {
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
 import { telegram } from './telegram.ts';
 
-const EFFECTIVE_TTS_CHAR_LIMIT = MAX_TTS_CHARS;
-
 const SendVoiceNoteParams = Type.Object({
   text: Type.String({
     description:
@@ -83,8 +81,8 @@ function prepareTtsText(text: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (cleaned.length > EFFECTIVE_TTS_CHAR_LIMIT) {
-    cleaned = `${cleaned.slice(0, EFFECTIVE_TTS_CHAR_LIMIT).trimEnd()}… This response was shortened for the voice note.`;
+  if (cleaned.length > MAX_TTS_CHARS) {
+    cleaned = `${cleaned.slice(0, MAX_TTS_CHARS).trimEnd()}… This response was shortened for the voice note.`;
   }
 
   return cleaned;
