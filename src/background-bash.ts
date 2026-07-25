@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import {
   createLocalBashOperations,
@@ -7,6 +6,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { BACKGROUND_BASH_NOOP } from './config.ts';
+import { type Job, JobRegistry } from './job-registry.ts';
 import { BoundedOutputBuffer } from './output-buffer.ts';
 import { textResult } from './tool-result.ts';
 import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
@@ -16,11 +16,13 @@ import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
  * without blocking the agent turn, then poll, list, stop, and report their
  * completion back to the main chat agent later.
  *
- * The registry lives at module level in src/ (imported once by Node), so it is
- * shared across Pi sessions for the lifetime of the bot process.
- * File extensions under extensions/ get fresh module state per Pi session and
- * cannot own running child processes. Sessions do not survive bot restarts;
- * main.ts stops them all on shutdown.
+ * Sessions live in a module-level registry in src/ (imported once by Node), so
+ * they are shared across Pi sessions for the lifetime of the bot process. File
+ * extensions under extensions/ get fresh module state per Pi session and cannot
+ * own running child processes.
+ *
+ * Lifecycle bookkeeping (IDs, pruning, stopping, report delivery) lives in
+ * src/job-registry.ts, shared with sub-agents.
  */
 
 const DEFAULT_YIELD_TIME_MS = 4_000;
@@ -32,22 +34,14 @@ const COMPLETED_SESSION_TTL_MS = 30 * 60_000;
 const STOP_WAIT_MS = 5_000;
 const REPORT_OUTPUT_MAX_CHARS = 3_000;
 
-type BackgroundBashStatus = 'running' | 'exited' | 'stopped' | 'failed';
+type BackgroundBashTerminalStatus = 'exited' | 'stopped' | 'failed';
 
-interface BackgroundBashSession {
-  id: string;
+interface BackgroundBashSession extends Job<BackgroundBashTerminalStatus> {
   command: string;
   cwd: string;
-  startedAt: number;
-  endedAt: number | null;
   output: BoundedOutputBuffer;
   abort: AbortController;
   exitCode: number | null;
-  status: BackgroundBashStatus;
-  statusDetail: string | null;
-  /** True once start returned a session ID; gates the completion report. */
-  backgrounded: boolean;
-  done: Promise<void>;
 }
 
 export interface BackgroundBashReport {
@@ -58,14 +52,34 @@ export interface BackgroundBashReport {
   output: string;
 }
 
-type BackgroundBashReportHandler = (report: BackgroundBashReport) => Promise<void>;
-
-const sessions = new Map<string, BackgroundBashSession>();
-let reportHandler: BackgroundBashReportHandler | null = null;
+const registry = new JobRegistry<
+  BackgroundBashTerminalStatus,
+  BackgroundBashSession,
+  BackgroundBashReport
+>({
+  idPrefix: 'bg',
+  jobNoun: 'background session',
+  jobNounPlural: 'background sessions',
+  listToolName: 'background_bash_list',
+  completedTtlMs: COMPLETED_SESSION_TTL_MS,
+  cancelWaitMs: STOP_WAIT_MS,
+  cancelledStatus: 'stopped',
+  signalCancel: (session) => session.abort.abort(),
+  describeStatus,
+  buildReport: (session) => ({
+    sessionId: session.id,
+    command: session.command,
+    cwd: session.cwd,
+    outcome: describeReportOutcome(session),
+    output: formatOutputReportPreview(session),
+  }),
+});
 
 /** Wires completion reports into the bot's incoming-prompt pipeline. Called from main.ts. */
-export function setBackgroundBashReportHandler(handler: BackgroundBashReportHandler): void {
-  reportHandler = handler;
+export function setBackgroundBashReportHandler(
+  handler: (report: BackgroundBashReport) => Promise<void>,
+): void {
+  registry.setReportHandler(handler);
 }
 
 const StartParams = Type.Object({
@@ -120,9 +134,7 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
     parameters: StartParams,
 
     async execute(_toolCallId, params: Static<typeof StartParams>) {
-      pruneSessions();
-
-      const runningCount = [...sessions.values()].filter((s) => s.status === 'running').length;
+      const runningCount = registry.runningCount();
       if (runningCount >= MAX_RUNNING_SESSIONS) {
         return textResult(
           `Too many background sessions running (${runningCount}/${MAX_RUNNING_SESSIONS}). Stop some with background_bash_stop or background_bash_stop_all first.`,
@@ -145,7 +157,7 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
       await Promise.race([session.done, sleep(yieldTimeMs)]);
 
       if (session.status !== 'running') {
-        sessions.delete(session.id);
+        registry.remove(session.id);
         return textResult(
           [describeCompletion(session), 'Output:', formatOutputSnapshot(session)].join('\n'),
         );
@@ -174,15 +186,14 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
     parameters: ReadParams,
 
     async execute(_toolCallId, params: Static<typeof ReadParams>) {
-      pruneSessions();
-      const session = sessions.get(params.session_id.trim());
-      if (!session) return textResult(unknownSessionMessage(params.session_id));
+      const session = registry.get(params.session_id);
+      if (!session) return textResult(registry.unknownJobMessage(params.session_id));
 
       return textResult(
         [
           `Session ${session.id}`,
           `Command: ${session.command}`,
-          describeStatusLine(session),
+          registry.statusLine(session),
           'Output:',
           formatOutputSnapshot(session),
         ].join('\n'),
@@ -198,9 +209,8 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
     parameters: StopParams,
 
     async execute(_toolCallId, params: Static<typeof StopParams>) {
-      pruneSessions();
-      const session = sessions.get(params.session_id.trim());
-      if (!session) return textResult(unknownSessionMessage(params.session_id));
+      const session = registry.get(params.session_id);
+      if (!session) return textResult(registry.unknownJobMessage(params.session_id));
 
       if (session.status !== 'running') {
         return textResult(
@@ -208,15 +218,9 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
         );
       }
 
-      await stopSessions([session]);
+      await registry.cancel([session]);
       return textResult(
-        [
-          session.status === 'running'
-            ? `Session ${session.id} was signalled to stop but has not exited yet; check it again with background_bash_read.`
-            : `Stopped session ${session.id}.`,
-          'Output:',
-          formatOutputSnapshot(session),
-        ].join('\n'),
+        [`Stopped session ${session.id}.`, 'Output:', formatOutputSnapshot(session)].join('\n'),
       );
     },
   });
@@ -229,8 +233,7 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
     parameters: ListParams,
 
     async execute() {
-      pruneSessions();
-      const all = [...sessions.values()];
+      const all = registry.all();
       if (all.length === 0) return textResult('No background bash sessions.');
 
       return textResult(all.map((session) => formatSessionListEntry(session)).join('\n\n'));
@@ -244,8 +247,7 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
     parameters: StopAllParams,
 
     async execute() {
-      pruneSessions();
-      const stopped = await stopSessions([...sessions.values()]);
+      const stopped = await registry.cancel(registry.all());
       return textResult(
         stopped === 0
           ? 'No running background bash sessions to stop.'
@@ -257,12 +259,12 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
 
 /** Stops every background session regardless of chat. Called from main.ts on shutdown. */
 export async function stopAllBackgroundSessions(): Promise<void> {
-  await stopSessions([...sessions.values()]);
+  await registry.cancelAll();
 }
 
 function startSession(command: string, cwd: string, maxRuntimeMs: number): BackgroundBashSession {
   const session: BackgroundBashSession = {
-    id: allocateSessionId(),
+    id: registry.allocateId(),
     command,
     cwd,
     startedAt: Date.now(),
@@ -282,11 +284,14 @@ function startSession(command: string, cwd: string, maxRuntimeMs: number): Backg
       signal: session.abort.signal,
       timeout: Math.max(1, Math.ceil(maxRuntimeMs / 1000)),
     })
+    // A session stopped through the registry is already terminal; leave it alone.
     .then(({ exitCode }) => {
+      if (session.status !== 'running') return;
       session.exitCode = exitCode;
       session.status = 'exited';
     })
     .catch((error) => {
+      if (session.status !== 'running') return;
       const message = errorMessage(error);
       if (message === 'aborted') {
         session.status = 'stopped';
@@ -301,88 +306,27 @@ function startSession(command: string, cwd: string, maxRuntimeMs: number): Backg
     .finally(() => {
       session.endedAt = Date.now();
       session.output.finish();
-      void reportSessionEnd(session);
+      void registry.reportEnd(session);
     });
 
-  sessions.set(session.id, session);
+  registry.register(session);
   return session;
 }
 
-async function stopSessions(targets: BackgroundBashSession[]): Promise<number> {
-  const running = targets.filter((session) => session.status === 'running');
-  for (const session of running) {
-    session.abort.abort();
-  }
-  if (running.length > 0) {
-    await Promise.race([
-      Promise.allSettled(running.map((session) => session.done)),
-      sleep(STOP_WAIT_MS),
-    ]);
-  }
-  return running.length;
-}
-
-async function reportSessionEnd(session: BackgroundBashSession): Promise<void> {
-  if (!session.backgrounded || session.status === 'stopped') return;
-
-  if (!reportHandler) {
-    console.error('no background bash report handler set; dropping report');
-    return;
-  }
-
-  try {
-    await reportHandler({
-      sessionId: session.id,
-      command: session.command,
-      cwd: session.cwd,
-      outcome: describeReportOutcome(session),
-      output: formatOutputReportPreview(session),
-    });
-  } catch (error) {
-    console.error('failed to deliver background bash report:', errorMessage(error));
-  }
-}
-
-function pruneSessions(): void {
-  const now = Date.now();
-  for (const session of sessions.values()) {
-    if (
-      session.status !== 'running' &&
-      session.endedAt !== null &&
-      now - session.endedAt > COMPLETED_SESSION_TTL_MS
-    ) {
-      sessions.delete(session.id);
-    }
-  }
-}
-
-function allocateSessionId(): string {
-  for (;;) {
-    const id = `bg_${randomBytes(3).toString('hex')}`;
-    if (!sessions.has(id)) return id;
-  }
-}
-
-function unknownSessionMessage(sessionId: string): string {
-  return `Unknown background session "${sessionId}". It may have been pruned (completed sessions are kept for ${formatDuration(COMPLETED_SESSION_TTL_MS)}) or the bot may have restarted. Use background_bash_list to see current sessions.`;
-}
-
 function describeCompletion(session: BackgroundBashSession): string {
+  const runtime = formatDuration(registry.runtimeMs(session));
   if (session.status === 'exited') {
-    return `Command completed in ${formatDuration(runtimeMs(session))}\nExit code: ${session.exitCode}`;
+    return `Command completed in ${runtime}\nExit code: ${session.exitCode}`;
   }
-  return `Command ${describeStatus(session)} after ${formatDuration(runtimeMs(session))}`;
+  return `Command ${describeStatus(session)} after ${runtime}`;
 }
 
 function describeReportOutcome(session: BackgroundBashSession): string {
+  const runtime = formatDuration(registry.runtimeMs(session));
   if (session.status === 'exited') {
-    return `finished with exit code ${session.exitCode} in ${formatDuration(runtimeMs(session))}`;
+    return `finished with exit code ${session.exitCode} in ${runtime}`;
   }
-  return `${describeStatus(session)} after ${formatDuration(runtimeMs(session))}`;
-}
-
-function describeStatusLine(session: BackgroundBashSession): string {
-  return `Status: ${describeStatus(session)}, ${session.status === 'running' ? 'running for' : 'ran for'} ${formatDuration(runtimeMs(session))}`;
+  return `${describeStatus(session)} after ${runtime}`;
 }
 
 function describeStatus(session: BackgroundBashSession): string {
@@ -404,7 +348,7 @@ function formatSessionListEntry(session: BackgroundBashSession): string {
     `${session.id} — ${describeStatus(session)}`,
     `  Command: ${session.command}`,
     `  Cwd: ${session.cwd}`,
-    `  Runtime: ${formatDuration(runtimeMs(session))}`,
+    `  Runtime: ${formatDuration(registry.runtimeMs(session))}`,
     `  Output: ${snapshot.totalLines} lines, ${formatSize(snapshot.totalBytes)}`,
   ].join('\n');
 }
@@ -457,8 +401,4 @@ function extractResultFromJsonOutput(output: string): string | null {
   } catch {
     return null;
   }
-}
-
-function runtimeMs(session: BackgroundBashSession): number {
-  return (session.endedAt ?? Date.now()) - session.startedAt;
 }

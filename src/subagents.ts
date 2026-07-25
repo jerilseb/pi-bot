@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import {
@@ -25,6 +24,7 @@ import {
   SUBAGENT_SKILLS,
 } from './config.ts';
 import { protectedEnvToolAccessExtension } from './env-guard.ts';
+import { type Job, JobRegistry } from './job-registry.ts';
 import type { PiRuntime } from './pi-session.ts';
 import { textResult } from './tool-result.ts';
 import {
@@ -50,36 +50,27 @@ import {
  *   web_fetch extensions, and only explicitly whitelisted skills, so they have
  *   no Telegram-facing tools and no subagent_* tools (no recursion).
  *
- * The registry lives at module level in src/ (imported once by Node), so it is
- * shared for the lifetime of the bot process. Sub-agents do
- * not survive bot restarts; main.ts cancels them all on shutdown.
+ * Lifecycle bookkeeping (IDs, pruning, cancellation, report delivery) lives in
+ * src/job-registry.ts, shared with background bash sessions.
  */
 
 const CANCEL_WAIT_MS = 5_000;
 const REPORT_TASK_PREVIEW_CHARS = 1_500;
 const LIST_TASK_PREVIEW_CHARS = 120;
 
-type SubagentStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out';
+type SubagentTerminalStatus = 'completed' | 'failed' | 'cancelled' | 'timed_out';
 
-interface Subagent {
-  id: string;
+interface Subagent extends Job<SubagentTerminalStatus> {
   label: string;
   task: string;
   context: string | null;
   modelName: string;
-  status: SubagentStatus;
-  statusDetail: string | null;
-  startedAt: number;
-  endedAt: number | null;
   /** Total streamed assistant characters, including trimmed ones. */
   outputChars: number;
   /** Bounded tail of the streamed assistant text. */
   outputTail: string;
   session: AgentSession | null;
   timeoutTimer: ReturnType<typeof setTimeout> | null;
-  /** True once start returned a sub-agent ID; gates the completion report. */
-  backgrounded: boolean;
-  done: Promise<void>;
 }
 
 export interface SubagentReport {
@@ -90,14 +81,28 @@ export interface SubagentReport {
   result: string;
 }
 
-type SubagentReportHandler = (report: SubagentReport) => Promise<void>;
-
-const subagents = new Map<string, Subagent>();
-let reportHandler: SubagentReportHandler | null = null;
+const registry = new JobRegistry<SubagentTerminalStatus, Subagent, SubagentReport>({
+  idPrefix: 'sub',
+  jobNoun: 'sub-agent',
+  jobNounPlural: 'sub-agents',
+  listToolName: 'subagent_list',
+  completedTtlMs: SUBAGENT_COMPLETED_TTL_MS,
+  cancelWaitMs: CANCEL_WAIT_MS,
+  cancelledStatus: 'cancelled',
+  signalCancel: (subagent) => void subagent.session?.abort(),
+  describeStatus,
+  buildReport: (subagent) => ({
+    subagentId: subagent.id,
+    label: subagent.label,
+    task: subagent.task,
+    outcome: describeOutcome(subagent),
+    result: formatResult(subagent),
+  }),
+});
 
 /** Wires completion reports into the bot's incoming-prompt pipeline. Called from main.ts. */
-export function setSubagentReportHandler(handler: SubagentReportHandler): void {
-  reportHandler = handler;
+export function setSubagentReportHandler(handler: (report: SubagentReport) => Promise<void>): void {
+  registry.setReportHandler(handler);
 }
 
 const SUBAGENT_SYSTEM_PROMPT = [
@@ -164,9 +169,7 @@ export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) =
       parameters: StartParams,
 
       async execute(_toolCallId, params: Static<typeof StartParams>) {
-        pruneSubagents();
-
-        const runningCount = [...subagents.values()].filter((s) => s.status === 'running').length;
+        const runningCount = registry.runningCount();
         if (runningCount >= SUBAGENT_MAX_RUNNING) {
           return textResult(
             `Too many sub-agents running (${runningCount}/${SUBAGENT_MAX_RUNNING}). Wait for one to finish or cancel one with subagent_cancel first.`,
@@ -217,16 +220,15 @@ export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) =
       parameters: ReadParams,
 
       async execute(_toolCallId, params: Static<typeof ReadParams>) {
-        pruneSubagents();
-        const subagent = subagents.get(params.subagent_id.trim());
-        if (!subagent) return textResult(unknownSubagentMessage(params.subagent_id));
+        const subagent = registry.get(params.subagent_id);
+        if (!subagent) return textResult(registry.unknownJobMessage(params.subagent_id));
 
         return textResult(
           [
             `Sub-agent ${subagent.id} (${subagent.label})`,
             `Task: ${preview(subagent.task, LIST_TASK_PREVIEW_CHARS)}`,
             `Model: ${subagent.modelName}`,
-            describeStatusLine(subagent),
+            registry.statusLine(subagent),
             subagent.status === 'running' ? 'Output so far:' : 'Result:',
             formatResult(subagent),
           ].join('\n'),
@@ -242,9 +244,8 @@ export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) =
       parameters: CancelParams,
 
       async execute(_toolCallId, params: Static<typeof CancelParams>) {
-        pruneSubagents();
-        const subagent = subagents.get(params.subagent_id.trim());
-        if (!subagent) return textResult(unknownSubagentMessage(params.subagent_id));
+        const subagent = registry.get(params.subagent_id);
+        if (!subagent) return textResult(registry.unknownJobMessage(params.subagent_id));
 
         if (subagent.status !== 'running') {
           return textResult(
@@ -252,12 +253,8 @@ export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) =
           );
         }
 
-        await cancelSubagents([subagent]);
-        return textResult(
-          subagent.status === 'running'
-            ? `Sub-agent ${subagent.id} was signalled to cancel but has not stopped yet; check it again with subagent_read.`
-            : `Cancelled sub-agent ${subagent.id}.`,
-        );
+        await registry.cancel([subagent]);
+        return textResult(`Cancelled sub-agent ${subagent.id}.`);
       },
     });
 
@@ -269,8 +266,7 @@ export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) =
       parameters: ListParams,
 
       async execute() {
-        pruneSubagents();
-        const all = [...subagents.values()];
+        const all = registry.all();
         if (all.length === 0) return textResult('No sub-agents.');
 
         return textResult(all.map((subagent) => formatListEntry(subagent)).join('\n\n'));
@@ -280,13 +276,13 @@ export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) =
 }
 
 /** Cancels every running sub-agent. Used by /abort and on shutdown. */
-export async function cancelAllSubagents(): Promise<number> {
-  return cancelSubagents([...subagents.values()]);
+export function cancelAllSubagents(): Promise<number> {
+  return registry.cancelAll();
 }
 
 /** Number of running sub-agents. Used by /status. */
 export function runningSubagentCount(): number {
-  return [...subagents.values()].filter((subagent) => subagent.status === 'running').length;
+  return registry.runningCount();
 }
 
 export function formatSubagentReportPrompt(report: SubagentReport): string {
@@ -311,7 +307,7 @@ function launchSubagent(
 ): Subagent {
   const { model, modelName } = resolveSubagentModel(runtime);
   const subagent: Subagent = {
-    id: allocateSubagentId(),
+    id: registry.allocateId(),
     label: params.label?.trim() || preview(params.task, 40),
     task: params.task,
     context: params.context?.trim() || null,
@@ -328,7 +324,7 @@ function launchSubagent(
     done: Promise.resolve(),
   };
 
-  subagents.set(subagent.id, subagent);
+  registry.register(subagent);
   subagent.done = runSubagent(subagent, runtime, model, maxRuntimeMs);
   return subagent;
 }
@@ -387,7 +383,7 @@ async function runSubagent(
     subagent.endedAt = Date.now();
     subagent.session?.dispose();
     subagent.session = null;
-    void reportSubagentEnd(subagent);
+    void registry.reportEnd(subagent);
   }
 }
 
@@ -492,68 +488,8 @@ function appendOutput(subagent: Subagent, text: string): void {
   }
 }
 
-async function cancelSubagents(targets: Subagent[]): Promise<number> {
-  const running = targets.filter((subagent) => subagent.status === 'running');
-  for (const subagent of running) {
-    subagent.status = 'cancelled';
-    void subagent.session?.abort();
-  }
-  if (running.length > 0) {
-    await Promise.race([
-      Promise.allSettled(running.map((subagent) => subagent.done)),
-      sleep(CANCEL_WAIT_MS),
-    ]);
-  }
-  return running.length;
-}
-
-async function reportSubagentEnd(subagent: Subagent): Promise<void> {
-  if (!subagent.backgrounded || subagent.status === 'cancelled') return;
-
-  if (!reportHandler) {
-    console.error('no sub-agent report handler set; dropping sub-agent report');
-    return;
-  }
-
-  try {
-    await reportHandler({
-      subagentId: subagent.id,
-      label: subagent.label,
-      task: subagent.task,
-      outcome: describeOutcome(subagent),
-      result: formatResult(subagent),
-    });
-  } catch (error) {
-    console.error('failed to deliver sub-agent report:', errorMessage(error));
-  }
-}
-
-function pruneSubagents(): void {
-  const now = Date.now();
-  for (const subagent of subagents.values()) {
-    if (
-      subagent.status !== 'running' &&
-      subagent.endedAt !== null &&
-      now - subagent.endedAt > SUBAGENT_COMPLETED_TTL_MS
-    ) {
-      subagents.delete(subagent.id);
-    }
-  }
-}
-
-function allocateSubagentId(): string {
-  for (;;) {
-    const id = `sub_${randomBytes(3).toString('hex')}`;
-    if (!subagents.has(id)) return id;
-  }
-}
-
-function unknownSubagentMessage(subagentId: string): string {
-  return `Unknown sub-agent "${subagentId}". It may have been pruned (finished sub-agents are kept for ${formatDuration(SUBAGENT_COMPLETED_TTL_MS)}) or the bot may have restarted. Use subagent_list to see current sub-agents.`;
-}
-
 function describeOutcome(subagent: Subagent): string {
-  const runtime = formatDuration(runtimeMs(subagent));
+  const runtime = formatDuration(registry.runtimeMs(subagent));
   switch (subagent.status) {
     case 'running':
       return `is still running after ${runtime}`;
@@ -566,10 +502,6 @@ function describeOutcome(subagent: Subagent): string {
     case 'timed_out':
       return `timed out (${subagent.statusDetail ?? `after ${runtime}`})`;
   }
-}
-
-function describeStatusLine(subagent: Subagent): string {
-  return `Status: ${describeStatus(subagent)}, ${subagent.status === 'running' ? 'running for' : 'ran for'} ${formatDuration(runtimeMs(subagent))}`;
 }
 
 function describeStatus(subagent: Subagent): string {
@@ -593,7 +525,7 @@ function formatListEntry(subagent: Subagent): string {
     `  Label: ${subagent.label}`,
     `  Task: ${preview(subagent.task, LIST_TASK_PREVIEW_CHARS)}`,
     `  Model: ${subagent.modelName}`,
-    `  Runtime: ${formatDuration(runtimeMs(subagent))}`,
+    `  Runtime: ${formatDuration(registry.runtimeMs(subagent))}`,
     `  Output: ${subagent.outputChars} chars`,
   ].join('\n');
 }
@@ -615,8 +547,4 @@ function preview(text: string, maxChars: number): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= maxChars) return collapsed;
   return `${collapsed.slice(0, maxChars - 1)}…`;
-}
-
-function runtimeMs(subagent: Subagent): number {
-  return (subagent.endedAt ?? Date.now()) - subagent.startedAt;
 }
