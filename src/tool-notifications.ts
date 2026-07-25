@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { DAILY_MEMORY_DIR, MEMORY_PATH } from './config.ts';
-import { escapeTelegramHtml } from './telegram.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
 import { localDateString } from './util.ts';
 
 /**

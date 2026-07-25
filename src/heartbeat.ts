@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { buildAgentEnvelope } from './agent-envelope.ts';
 import {
   ALLOWED_CHAT_ID,
   HEARTBEAT_ENABLED,
@@ -80,17 +81,20 @@ function readHeartbeatInstructions(): string {
 }
 
 function buildHeartbeatPrompt(instructions: string): string {
-  return [
-    'This is a scheduled heartbeat run for the Telegram assistant.',
-    `Heartbeat file: ${HEARTBEAT_FILE_PATH}`,
-    '',
-    'Read and follow these heartbeat instructions:',
-    '<heartbeat_instructions>',
-    instructions,
-    '</heartbeat_instructions>',
-    '',
-    `If you need durable heartbeat state, create or update ${HEARTBEAT_STATE_PATH}.`,
-    'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the heartbeat instructions.',
-    `If there is nothing user-visible to report, respond exactly: ${HEARTBEAT_NOOP}`,
-  ].join('\n');
+  return buildAgentEnvelope({
+    preamble: 'This is a scheduled heartbeat run for the Telegram assistant.',
+    meta: [['Heartbeat file', HEARTBEAT_FILE_PATH]],
+    sections: [
+      {
+        intro: 'Read and follow these heartbeat instructions:',
+        tag: 'heartbeat_instructions',
+        body: instructions,
+      },
+    ],
+    guidance: [
+      `If you need durable heartbeat state, create or update ${HEARTBEAT_STATE_PATH}.`,
+      'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the heartbeat instructions.',
+    ],
+    noopSentinel: HEARTBEAT_NOOP,
+  });
 }

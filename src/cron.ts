@@ -1,3 +1,4 @@
+import { buildAgentEnvelope } from './agent-envelope.ts';
 import { CRON_JOBS_PATH, CRON_NOOP, isAllowedTelegramChat } from './config.ts';
 import {
   computeNextRunAt,
@@ -164,20 +165,25 @@ function disableCronJob(job: CronJob, now: Date): CronJob {
 }
 
 function buildCronPrompt(job: CronJob): string {
-  return [
-    'This is a scheduled task run for the Telegram assistant.',
-    `Job ID: ${job.id}`,
-    ...(job.title ? [`Title: ${job.title}`] : []),
-    `Schedule: ${formatCronJob(job)}`,
-    `Current time: ${new Date().toISOString()}`,
-    ...(job.timezone ? [`Timezone: ${job.timezone}`] : []),
-    '',
-    'Run these scheduled instructions:',
-    '<scheduled_task_instructions>',
-    job.prompt,
-    '</scheduled_task_instructions>',
-    '',
-    'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the scheduled instructions.',
-    `If there is nothing user-visible to report, respond exactly: ${CRON_NOOP}`,
-  ].join('\n');
+  return buildAgentEnvelope({
+    preamble: 'This is a scheduled task run for the Telegram assistant.',
+    meta: [
+      ['Job ID', job.id],
+      ['Title', job.title],
+      ['Schedule', formatCronJob(job)],
+      ['Current time', new Date().toISOString()],
+      ['Timezone', job.timezone],
+    ],
+    sections: [
+      {
+        intro: 'Run these scheduled instructions:',
+        tag: 'scheduled_task_instructions',
+        body: job.prompt,
+      },
+    ],
+    guidance: [
+      'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the scheduled instructions.',
+    ],
+    noopSentinel: CRON_NOOP,
+  });
 }

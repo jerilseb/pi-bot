@@ -5,7 +5,18 @@ import {
   formatSize,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
-import { BACKGROUND_BASH_NOOP } from './config.ts';
+import { buildAgentEnvelope } from './agent-envelope.ts';
+import {
+  BACKGROUND_BASH_COMPLETED_TTL_MS,
+  BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS,
+  BACKGROUND_BASH_DEFAULT_YIELD_MS,
+  BACKGROUND_BASH_MAX_RUNNING,
+  BACKGROUND_BASH_MAX_RUNTIME_CAP_MS,
+  BACKGROUND_BASH_MAX_YIELD_MS,
+  BACKGROUND_BASH_NOOP,
+  BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS,
+  BACKGROUND_BASH_STOP_WAIT_MS,
+} from './config.ts';
 import { type Job, JobRegistry } from './job-registry.ts';
 import { BoundedOutputBuffer } from './output-buffer.ts';
 import { textResult } from './tool-result.ts';
@@ -22,17 +33,9 @@ import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
  * own running child processes.
  *
  * Lifecycle bookkeeping (IDs, pruning, stopping, report delivery) lives in
- * src/job-registry.ts, shared with sub-agents.
+ * src/job-registry.ts, shared with sub-agents. Tuning knobs live in
+ * src/config.ts under "Background work", next to the sub-agent equivalents.
  */
-
-const DEFAULT_YIELD_TIME_MS = 4_000;
-const MAX_YIELD_TIME_MS = 30_000;
-const DEFAULT_MAX_RUNTIME_MS = 30 * 60_000;
-const MAX_RUNTIME_CAP_MS = 24 * 60 * 60_000;
-const MAX_RUNNING_SESSIONS = 12;
-const COMPLETED_SESSION_TTL_MS = 30 * 60_000;
-const STOP_WAIT_MS = 5_000;
-const REPORT_OUTPUT_MAX_CHARS = 3_000;
 
 type BackgroundBashTerminalStatus = 'exited' | 'stopped' | 'failed';
 
@@ -61,8 +64,8 @@ const registry = new JobRegistry<
   jobNoun: 'background session',
   jobNounPlural: 'background sessions',
   listToolName: 'background_bash_list',
-  completedTtlMs: COMPLETED_SESSION_TTL_MS,
-  cancelWaitMs: STOP_WAIT_MS,
+  completedTtlMs: BACKGROUND_BASH_COMPLETED_TTL_MS,
+  cancelWaitMs: BACKGROUND_BASH_STOP_WAIT_MS,
   cancelledStatus: 'stopped',
   signalCancel: (session) => session.abort.abort(),
   describeStatus,
@@ -91,12 +94,12 @@ const StartParams = Type.Object({
   ),
   yield_time_ms: Type.Optional(
     Type.Number({
-      description: `How long to wait for the command before backgrounding it (default ${DEFAULT_YIELD_TIME_MS}ms, max ${MAX_YIELD_TIME_MS}ms).`,
+      description: `How long to wait for the command before backgrounding it (default ${BACKGROUND_BASH_DEFAULT_YIELD_MS}ms, max ${BACKGROUND_BASH_MAX_YIELD_MS}ms).`,
     }),
   ),
   max_runtime_ms: Type.Optional(
     Type.Number({
-      description: `Kill the command after this long (default ${DEFAULT_MAX_RUNTIME_MS}ms).`,
+      description: `Kill the command after this long (default ${BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS}ms).`,
     }),
   ),
 });
@@ -135,22 +138,22 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
 
     async execute(_toolCallId, params: Static<typeof StartParams>) {
       const runningCount = registry.runningCount();
-      if (runningCount >= MAX_RUNNING_SESSIONS) {
+      if (runningCount >= BACKGROUND_BASH_MAX_RUNNING) {
         return textResult(
-          `Too many background sessions running (${runningCount}/${MAX_RUNNING_SESSIONS}). Stop some with background_bash_stop or background_bash_stop_all first.`,
+          `Too many background sessions running (${runningCount}/${BACKGROUND_BASH_MAX_RUNNING}). Stop some with background_bash_stop or background_bash_stop_all first.`,
         );
       }
 
       const cwd = path.resolve(process.cwd(), params.cwd ?? '.');
       const maxRuntimeMs = clamp(
-        params.max_runtime_ms ?? DEFAULT_MAX_RUNTIME_MS,
+        params.max_runtime_ms ?? BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS,
         1_000,
-        MAX_RUNTIME_CAP_MS,
+        BACKGROUND_BASH_MAX_RUNTIME_CAP_MS,
       );
       const yieldTimeMs = clamp(
-        params.yield_time_ms ?? DEFAULT_YIELD_TIME_MS,
+        params.yield_time_ms ?? BACKGROUND_BASH_DEFAULT_YIELD_MS,
         0,
-        MAX_YIELD_TIME_MS,
+        BACKGROUND_BASH_MAX_YIELD_MS,
       );
 
       const session = startSession(params.command, cwd, maxRuntimeMs);
@@ -364,31 +367,28 @@ function formatOutputSnapshot(session: BackgroundBashSession): string {
 }
 
 export function formatBackgroundBashReportPrompt(report: BackgroundBashReport): string {
-  return [
-    `[background-bash-report] Background bash ${report.sessionId} ${report.outcome}.`,
-    '',
-    'Command:',
-    report.command,
-    '',
-    'Working directory:',
-    report.cwd,
-    '',
-    'Output:',
-    report.output || '(no output)',
-    '',
-    'This is an internal report from a background bash session you started earlier, not a message from the user.',
-    'The user has not been notified separately. Review the result, continue any follow-up work yourself, and only send a user-visible message if it is useful.',
-    `If no user-visible update is needed, reply exactly ${BACKGROUND_BASH_NOOP}.`,
-  ].join('\n');
+  return buildAgentEnvelope({
+    preamble: `[background-bash-report] Background bash ${report.sessionId} ${report.outcome}.`,
+    sections: [
+      { intro: 'Command:', body: report.command },
+      { intro: 'Working directory:', body: report.cwd },
+      { intro: 'Output:', body: report.output, fallback: '(no output)' },
+    ],
+    guidance: [
+      'This is an internal report from a background bash session you started earlier, not a message from the user.',
+      'The user has not been notified separately. Review the result, continue any follow-up work yourself, and only send a user-visible message if it is useful.',
+    ],
+    noopSentinel: BACKGROUND_BASH_NOOP,
+  });
 }
 
 function formatOutputReportPreview(session: BackgroundBashSession): string {
   const snapshot = session.output.snapshot();
   const output =
     extractResultFromJsonOutput(snapshot.content.trimEnd()) ?? formatOutputSnapshot(session);
-  if (output.length <= REPORT_OUTPUT_MAX_CHARS) return output;
+  if (output.length <= BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS) return output;
 
-  const head = output.slice(0, REPORT_OUTPUT_MAX_CHARS);
+  const head = output.slice(0, BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS);
   return `${head}\n[Truncated for report: showing first ${head.length} chars. Use background_bash_read with session_id "${session.id}" for more.]`;
 }
 

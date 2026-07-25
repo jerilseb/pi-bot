@@ -8,7 +8,9 @@ import { gfm } from 'turndown-plugin-gfm';
 
 // Global timeout - exit if script takes too long
 const TIMEOUT = 30000;
-const timeoutId = setTimeout(() => {
+// Unref'd and never cleared: the script always ends in process.exit, so this
+// only has to fire when everything else has hung.
+setTimeout(() => {
   console.error('✗ Timeout after 30s');
   process.exit(1);
 }, TIMEOUT).unref();
@@ -79,7 +81,7 @@ function htmlToMarkdown(html) {
 }
 
 let content;
-if (article && article.content) {
+if (article?.content) {
   content = htmlToMarkdown(article.content);
 } else {
   // Fallback
@@ -87,7 +89,9 @@ if (article && article.content) {
   const fallbackBody = fallbackDoc.window.document;
   fallbackBody
     .querySelectorAll('script, style, noscript, nav, header, footer, aside')
-    .forEach((el) => el.remove());
+    .forEach((el) => {
+      el.remove();
+    });
   const main =
     fallbackBody.querySelector("main, article, [role='main'], .content, #content") ||
     fallbackBody.body;

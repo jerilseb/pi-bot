@@ -16,6 +16,7 @@
  */
 
 import * as fs from 'node:fs';
+import { buildAgentEnvelope } from './src/agent-envelope.ts';
 import {
   formatBackgroundBashReportPrompt,
   setBackgroundBashReportHandler,
@@ -435,20 +436,25 @@ async function enqueuePostRestartTasks(): Promise<void> {
 }
 
 function buildPostRestartPrompt(task: PostRestartTask): string {
-  return [
-    'This is a post-restart task for the Telegram assistant.',
-    `Task ID: ${task.id}`,
-    ...(task.title ? [`Title: ${task.title}`] : []),
-    `Created at: ${task.createdAt}`,
-    `Current time: ${new Date().toISOString()}`,
-    '',
-    'The bot has restarted successfully. Run these instructions now:',
-    '<post_restart_instructions>',
-    task.prompt,
-    '</post_restart_instructions>',
-    '',
-    'Notify the Telegram user with the result, unless the instructions explicitly say not to.',
-  ].join('\n');
+  return buildAgentEnvelope({
+    preamble: 'This is a post-restart task for the Telegram assistant.',
+    meta: [
+      ['Task ID', task.id],
+      ['Title', task.title],
+      ['Created at', task.createdAt],
+      ['Current time', new Date().toISOString()],
+    ],
+    sections: [
+      {
+        intro: 'The bot has restarted successfully. Run these instructions now:',
+        tag: 'post_restart_instructions',
+        body: task.prompt,
+      },
+    ],
+    guidance: [
+      'Notify the Telegram user with the result, unless the instructions explicitly say not to.',
+    ],
+  });
 }
 
 function notifyToolCall(notification: string, source: IncomingPrompt['source']): void {

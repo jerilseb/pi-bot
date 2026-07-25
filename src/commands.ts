@@ -13,8 +13,8 @@ import {
 import { discardPendingIngestion } from './inbound.ts';
 import { runRestartGate } from './restart-flow.ts';
 import { cancelAllSubagents, runningSubagentCount } from './subagents.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
 import {
-  escapeTelegramHtml,
   sendTelegramInlineKeyboard,
   sendTelegramMessage,
   type TelegramBotCommand,

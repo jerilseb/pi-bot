@@ -11,6 +11,6 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitOverride": true
   },
-  "include": ["main.ts", "src/**/*.ts", "extensions/**/*.ts", "scripts/**/*.ts"],
+  "include": ["main.ts", "src/**/*.ts", "extensions/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "extensions/**/node_modules"]
 }

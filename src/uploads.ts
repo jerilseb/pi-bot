@@ -12,7 +12,8 @@ import {
   TELEGRAM_MEDIA_TIMEOUT_MS,
   TELEGRAM_PHOTO_UPLOAD_LIMIT,
 } from './config.ts';
-import { escapeTelegramHtml, telegram } from './telegram.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
+import { telegram } from './telegram.ts';
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
 

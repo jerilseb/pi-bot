@@ -12,13 +12,14 @@ Key files:
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
 - `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection).
 - `src/chat-session.ts` — the single chat's state and idle-session disposal.
-- `src/telegram.ts` — Telegram API helpers, HTML sanitizing, tag-aware message splitting.
+- `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion and ingestion epochs.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
 - `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/model-menu.ts`, `src/reasoning-menu.ts` — their inline keyboards.
 - `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks.
-- `src/subagents.ts` — isolated background sub-agents. `src/background-bash.ts` — background shell sessions.
+- `src/subagents.ts` — isolated background sub-agents. `src/background-bash.ts` — background shell sessions. `src/job-registry.ts` — lifecycle bookkeeping shared by both.
+- `src/agent-envelope.ts` — shared layout for the internal prompts the bot sends itself (heartbeat, cron, post-restart, sub-agent and background-bash reports).
 - `src/uploads.ts`, `src/voice.ts`, `src/speech.ts`, `src/telegram-menu.ts` — agent-facing Telegram tools.
 - `src/env-guard.ts` — blocks tool access to `.env` files. `src/util.ts` — shared helpers.
 - `src/restart-tool.ts`, `src/restart-flow.ts` (shared `/restart` + `restart_bot` gate), `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
@@ -30,7 +31,9 @@ Key files:
 
 - Install: `npm install`
 - Local run: `npm run dev`
+- Lint: `npm run lint`
 - Typecheck: `npm run typecheck`
+- Unit tests: `npm test`
 - Start under PM2: `npm start`
 - Stop PM2 process: `npm stop`
 
@@ -40,7 +43,16 @@ Before finishing code changes, run:
 npm run verify
 ```
 
-That runs `npm run typecheck` plus `npm run smoke` (imports every module, registers every tool, validates env/model/skill config). It is the same gate `/restart` and the `restart_bot` tool use, so a failure there blocks restarts. Use `npm run format` to apply Biome formatting.
+That runs `npm run lint`, then `npm run typecheck`, then `npm test`, then `npm run smoke` (imports every module, registers every tool, validates env/model/skill config). It is the same gate `/restart` and the `restart_bot` tool use, so a failure there blocks restarts — keep tests fast and free of network or filesystem dependencies. Use `npm run format` to apply Biome formatting; `npm run lint` reports rule violations, which Biome does not fix automatically.
+
+Keep `npm run lint` at zero errors. It went unchecked for a while because no script invoked it, and violations accumulated silently in `src/` and `skills/`.
+
+## Tests
+
+- `tests/` holds unit tests run by Node's built-in runner (`node --test`); there is no test framework dependency. Name files `*.test.ts`.
+- Tests must live in `tests/`, not `src/`: `scripts/smoke.ts` imports every `.ts` file under `src/` and would execute them during the smoke check.
+- Current coverage is the pure Telegram HTML machinery in `src/telegram-html.ts` (escaping, sanitizing, tag-aware splitting) — the code where a regression is silent because Telegram rejects a whole message on malformed markup.
+- Prefer invariants over golden strings for the splitter (chunk fits the limit, chunk is independently balanced, no tag or entity cut in half, content preserved). They survive refactors and catch the failure modes that matter.
 
 ## Coding conventions
 
@@ -55,7 +67,7 @@ That runs `npm run typecheck` plus `npm run smoke` (imports every module, regist
 
 - Never commit `.env` or real API keys/tokens.
 - Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys.
-- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval.
+- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. Concurrency limits, timeouts, TTLs, and payload caps for background work (sub-agents and background bash) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
 - Provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 
 ## Operational notes

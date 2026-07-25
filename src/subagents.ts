@@ -12,7 +12,9 @@ import {
 import { Type, type Static } from 'typebox';
 import tavilySearchExtension from '../extensions/tavily-web-search.ts';
 import webFetchExtension from '../extensions/web-fetch/index.ts';
+import { buildAgentEnvelope } from './agent-envelope.ts';
 import {
+  SUBAGENT_CANCEL_WAIT_MS,
   SUBAGENT_COMPLETED_TTL_MS,
   SUBAGENT_DEFAULT_MAX_RUNTIME_MS,
   SUBAGENT_DEFAULT_YIELD_MS,
@@ -51,10 +53,11 @@ import {
  *   no Telegram-facing tools and no subagent_* tools (no recursion).
  *
  * Lifecycle bookkeeping (IDs, pruning, cancellation, report delivery) lives in
- * src/job-registry.ts, shared with background bash sessions.
+ * src/job-registry.ts, shared with background bash sessions. Tuning knobs live
+ * in src/config.ts under "Background work", next to the background-bash
+ * equivalents; only the display widths below are local.
  */
 
-const CANCEL_WAIT_MS = 5_000;
 const REPORT_TASK_PREVIEW_CHARS = 1_500;
 const LIST_TASK_PREVIEW_CHARS = 120;
 
@@ -87,7 +90,7 @@ const registry = new JobRegistry<SubagentTerminalStatus, Subagent, SubagentRepor
   jobNounPlural: 'sub-agents',
   listToolName: 'subagent_list',
   completedTtlMs: SUBAGENT_COMPLETED_TTL_MS,
-  cancelWaitMs: CANCEL_WAIT_MS,
+  cancelWaitMs: SUBAGENT_CANCEL_WAIT_MS,
   cancelledStatus: 'cancelled',
   signalCancel: (subagent) => void subagent.session?.abort(),
   describeStatus,
@@ -286,18 +289,17 @@ export function runningSubagentCount(): number {
 }
 
 export function formatSubagentReportPrompt(report: SubagentReport): string {
-  return [
-    `[subagent-report] Sub-agent ${report.subagentId} (${report.label}) ${report.outcome}.`,
-    '',
-    'Task:',
-    preview(report.task, REPORT_TASK_PREVIEW_CHARS),
-    '',
-    'Result:',
-    report.result || '(no output)',
-    '',
-    'This is an internal report from a background sub-agent you started earlier, not a message from the user.',
-    'Review the result and send the user a concise update with the outcome. Handle any follow-up work yourself.',
-  ].join('\n');
+  return buildAgentEnvelope({
+    preamble: `[subagent-report] Sub-agent ${report.subagentId} (${report.label}) ${report.outcome}.`,
+    sections: [
+      { intro: 'Task:', body: preview(report.task, REPORT_TASK_PREVIEW_CHARS) },
+      { intro: 'Result:', body: report.result, fallback: '(no output)' },
+    ],
+    guidance: [
+      'This is an internal report from a background sub-agent you started earlier, not a message from the user.',
+      'Review the result and send the user a concise update with the outcome. Handle any follow-up work yourself.',
+    ],
+  });
 }
 
 function launchSubagent(

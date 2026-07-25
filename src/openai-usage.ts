@@ -1,4 +1,4 @@
-import { escapeTelegramHtml } from './telegram.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
 import { telegramCode as code, titleCase, usageBar } from './telegram-format.ts';
 import { isRecord } from './util.ts';
 
