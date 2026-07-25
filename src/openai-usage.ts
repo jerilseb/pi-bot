@@ -1,5 +1,6 @@
 import { escapeTelegramHtml } from './telegram.ts';
 import { telegramCode as code, titleCase, usageBar } from './telegram-format.ts';
+import { isRecord } from './util.ts';
 
 const OPENAI_CODEX_PROVIDER = 'openai-codex';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
@@ -35,10 +36,6 @@ interface OpenAIUsage {
 export interface OpenAIUsageResult {
   usage: OpenAIUsage;
   warnings: string[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function parseNumber(value: string | null): number | undefined {
@@ -88,7 +85,7 @@ function formatWindow(minutes: number | undefined): string {
   return `${minutes}m`;
 }
 
-function formatDuration(totalSeconds: number | undefined): string {
+function formatSecondsDuration(totalSeconds: number | undefined): string {
   if (totalSeconds === undefined) return '—';
   const seconds = Math.max(0, Math.floor(totalSeconds));
   const days = Math.floor(seconds / 86_400);
@@ -204,7 +201,7 @@ function windowReport(window: UsageWindow): string[] {
     `<b>${escapeTelegramHtml(titleCase(window.name))} Window</b>`,
     `• Used: ${code(formatPercent(window.usedPercent))} ${code(usageBar(window.usedPercent))}`,
     `• Window: ${code(formatWindow(window.windowMinutes))}`,
-    `• Resets in: ${code(formatDuration(window.resetAfterSeconds))}`,
+    `• Resets in: ${code(formatSecondsDuration(window.resetAfterSeconds))}`,
     `• Reset at: ${code(formatResetAt(window.resetAt))}`,
   ];
 }

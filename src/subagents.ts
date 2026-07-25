@@ -27,7 +27,14 @@ import {
 import { protectedEnvToolAccessExtension } from './env-guard.ts';
 import type { PiRuntime } from './pi-session.ts';
 import { textResult } from './tool-result.ts';
-import { errorMessage, formatModelRef, parseModelRef } from './util.ts';
+import {
+  clamp,
+  errorMessage,
+  formatDuration,
+  formatModelRef,
+  parseModelRef,
+  sleep,
+} from './util.ts';
 
 /**
  * Sub-agents for the main Pi agent: spawn isolated in-memory Pi sessions to
@@ -44,7 +51,7 @@ import { errorMessage, formatModelRef, parseModelRef } from './util.ts';
  *   no Telegram-facing tools and no subagent_* tools (no recursion).
  *
  * The registry lives at module level in src/ (imported once by Node), so it is
- * shared across all chats for the lifetime of the bot process. Sub-agents do
+ * shared for the lifetime of the bot process. Sub-agents do
  * not survive bot restarts; main.ts cancels them all on shutdown.
  */
 
@@ -56,7 +63,6 @@ type SubagentStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_
 
 interface Subagent {
   id: string;
-  chatId: string;
   label: string;
   task: string;
   context: string | null;
@@ -78,7 +84,6 @@ interface Subagent {
 
 export interface SubagentReport {
   subagentId: string;
-  chatId: string;
   label: string;
   task: string;
   outcome: string;
@@ -138,18 +143,9 @@ const CancelParams = Type.Object({
   subagent_id: Type.String({ description: 'Sub-agent ID returned by subagent_start.' }),
 });
 
-const ListParams = Type.Object({
-  all_chats: Type.Optional(
-    Type.Boolean({
-      description: 'List sub-agents started from all Telegram chats, not just this one.',
-    }),
-  ),
-});
+const ListParams = Type.Object({});
 
-export function subagentToolsExtension(
-  chatId: string,
-  runtime: PiRuntime,
-): (pi: ExtensionAPI) => void {
+export function subagentToolsExtension(runtime: PiRuntime): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
       name: 'subagent_start',
@@ -188,7 +184,7 @@ export function subagentToolsExtension(
           SUBAGENT_MAX_YIELD_MS,
         );
 
-        const subagent = launchSubagent(chatId, runtime, params, maxRuntimeMs);
+        const subagent = launchSubagent(runtime, params, maxRuntimeMs);
         await Promise.race([subagent.done, sleep(yieldTimeMs)]);
 
         if (subagent.status !== 'running') {
@@ -207,7 +203,7 @@ export function subagentToolsExtension(
             `Started sub-agent ${subagent.id} (${subagent.label})`,
             `Model: ${subagent.modelName}`,
             `Status: running (max runtime ${formatDuration(maxRuntimeMs)})`,
-            `Poll with subagent_read using subagent_id "${subagent.id}". When it finishes, an internal [subagent-report] message with the result is delivered to this chat agent.`,
+            `Poll with subagent_read using subagent_id "${subagent.id}". When it finishes, an internal [subagent-report] message with the result is delivered to the chat agent.`,
           ].join('\n'),
         );
       },
@@ -269,45 +265,28 @@ export function subagentToolsExtension(
       name: 'subagent_list',
       label: 'List Sub-agents',
       description:
-        'List sub-agents for this chat (or all chats with all_chats=true), including status, runtime, and output size.',
+        'List sub-agents started in this bot process, including status, runtime, and output size.',
       parameters: ListParams,
 
-      async execute(_toolCallId, params: Static<typeof ListParams>) {
+      async execute() {
         pruneSubagents();
-        const visible = [...subagents.values()].filter(
-          (subagent) => params.all_chats || subagent.chatId === chatId,
-        );
-        if (visible.length === 0) {
-          return textResult(
-            params.all_chats
-              ? 'No sub-agents.'
-              : 'No sub-agents for this chat. Use all_chats=true to list every chat.',
-          );
-        }
+        const all = [...subagents.values()];
+        if (all.length === 0) return textResult('No sub-agents.');
 
-        return textResult(visible.map((subagent) => formatListEntry(subagent)).join('\n\n'));
+        return textResult(all.map((subagent) => formatListEntry(subagent)).join('\n\n'));
       },
     });
   };
 }
 
-/** Cancels this chat's running sub-agents. Used by /abort. */
-export async function cancelChatSubagents(chatId: string): Promise<number> {
-  return cancelSubagents(
-    [...subagents.values()].filter((subagent) => subagent.chatId === chatId),
-  );
+/** Cancels every running sub-agent. Used by /abort and on shutdown. */
+export async function cancelAllSubagents(): Promise<number> {
+  return cancelSubagents([...subagents.values()]);
 }
 
-/** Cancels every sub-agent regardless of chat. Called from main.ts on shutdown. */
-export async function cancelAllSubagents(): Promise<void> {
-  await cancelSubagents([...subagents.values()]);
-}
-
-/** Number of running sub-agents, optionally scoped to one chat. Used by /status. */
-export function runningSubagentCount(chatId?: string): number {
-  return [...subagents.values()].filter(
-    (subagent) => subagent.status === 'running' && (!chatId || subagent.chatId === chatId),
-  ).length;
+/** Number of running sub-agents. Used by /status. */
+export function runningSubagentCount(): number {
+  return [...subagents.values()].filter((subagent) => subagent.status === 'running').length;
 }
 
 export function formatSubagentReportPrompt(report: SubagentReport): string {
@@ -326,7 +305,6 @@ export function formatSubagentReportPrompt(report: SubagentReport): string {
 }
 
 function launchSubagent(
-  chatId: string,
   runtime: PiRuntime,
   params: Static<typeof StartParams>,
   maxRuntimeMs: number,
@@ -334,7 +312,6 @@ function launchSubagent(
   const { model, modelName } = resolveSubagentModel(runtime);
   const subagent: Subagent = {
     id: allocateSubagentId(),
-    chatId,
     label: params.label?.trim() || preview(params.task, 40),
     task: params.task,
     context: params.context?.trim() || null,
@@ -414,10 +391,7 @@ async function runSubagent(
   }
 }
 
-async function createSubagentSession(
-  runtime: PiRuntime,
-  model: Model<Api>,
-): Promise<AgentSession> {
+async function createSubagentSession(runtime: PiRuntime, model: Model<Api>): Promise<AgentSession> {
   // Only explicitly approved extensions and skills are loaded. Sub-agents get
   // coding, web research, and whitelisted skill guidance, but cannot reach
   // Telegram, bot lifecycle tools, or subagent_* (no recursion), and cannot
@@ -537,24 +511,20 @@ async function reportSubagentEnd(subagent: Subagent): Promise<void> {
   if (!subagent.backgrounded || subagent.status === 'cancelled') return;
 
   if (!reportHandler) {
-    console.error(`[${subagent.chatId}] no sub-agent report handler set; dropping report`);
+    console.error('no sub-agent report handler set; dropping sub-agent report');
     return;
   }
 
   try {
     await reportHandler({
       subagentId: subagent.id,
-      chatId: subagent.chatId,
       label: subagent.label,
       task: subagent.task,
       outcome: describeOutcome(subagent),
       result: formatResult(subagent),
     });
   } catch (error) {
-    console.error(
-      `[${subagent.chatId}] failed to deliver sub-agent report:`,
-      errorMessage(error),
-    );
+    console.error('failed to deliver sub-agent report:', errorMessage(error));
   }
 }
 
@@ -622,7 +592,6 @@ function formatListEntry(subagent: Subagent): string {
     `${subagent.id} — ${describeStatus(subagent)}`,
     `  Label: ${subagent.label}`,
     `  Task: ${preview(subagent.task, LIST_TASK_PREVIEW_CHARS)}`,
-    `  Chat: ${subagent.chatId}`,
     `  Model: ${subagent.modelName}`,
     `  Runtime: ${formatDuration(runtimeMs(subagent))}`,
     `  Output: ${subagent.outputChars} chars`,
@@ -631,7 +600,10 @@ function formatListEntry(subagent: Subagent): string {
 
 function formatResult(subagent: Subagent): string {
   const full = subagent.outputTail.trim() || '(no output)';
-  if (full.length <= SUBAGENT_MAX_RESULT_CHARS && subagent.outputChars <= subagent.outputTail.length) {
+  if (
+    full.length <= SUBAGENT_MAX_RESULT_CHARS &&
+    subagent.outputChars <= subagent.outputTail.length
+  ) {
     return full;
   }
 
@@ -647,23 +619,4 @@ function preview(text: string, maxChars: number): string {
 
 function runtimeMs(subagent: Subagent): number {
   return (subagent.endedAt ?? Date.now()) - subagent.startedAt;
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.round(ms / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes < 60) return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remMinutes = minutes % 60;
-  return remMinutes ? `${hours}h ${remMinutes}m` : `${hours}h`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

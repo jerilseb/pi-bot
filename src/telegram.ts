@@ -1,4 +1,9 @@
-import { TELEGRAM_API, TELEGRAM_API_TIMEOUT_MS, TELEGRAM_MAX_MESSAGE } from './config.ts';
+import {
+  ALLOWED_CHAT_ID,
+  TELEGRAM_API,
+  TELEGRAM_API_TIMEOUT_MS,
+  TELEGRAM_MAX_MESSAGE,
+} from './config.ts';
 import { errorMessage } from './util.ts';
 
 export async function registerBotCommands(): Promise<void> {
@@ -10,7 +15,6 @@ export async function registerBotCommands(): Promise<void> {
         commands: [
           { command: 'start', description: 'Say hi' },
           { command: 'help', description: 'Show commands' },
-          { command: 'request_access', description: 'Request access for this group' },
           { command: 'status', description: 'Show chat session status' },
           { command: 'models', description: 'Switch chat model' },
           { command: 'reasoning', description: 'Switch chat reasoning level' },
@@ -27,16 +31,16 @@ export async function registerBotCommands(): Promise<void> {
   }
 }
 
-export function startTyping(chatId: string): { stop(): void } {
-  void sendChatAction(chatId);
-  const timer = setInterval(() => void sendChatAction(chatId), 4000);
+export function startTyping(): { stop(): void } {
+  void sendChatAction();
+  const timer = setInterval(() => void sendChatAction(), 4000);
   return { stop: () => clearInterval(timer) };
 }
 
-export async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
+export async function sendTelegramMessage(text: string): Promise<void> {
   const chunks = splitTelegramMessage(text || '(empty)');
   for (const chunk of chunks) {
-    await sendTelegramHtmlMessage(chatId, chunk);
+    await sendTelegramHtmlMessage(chunk);
   }
 }
 
@@ -46,11 +50,10 @@ export interface InlineKeyboardButton {
 }
 
 export async function sendTelegramInlineKeyboard(
-  chatId: string,
   text: string,
   keyboard: InlineKeyboardButton[][],
 ): Promise<void> {
-  await postTelegramHtmlMessage(chatId, escapeTelegramHtml(text || '(empty)'), {
+  await postTelegramHtmlMessage(escapeTelegramHtml(text || '(empty)'), {
     inline_keyboard: keyboard,
   });
 }
@@ -69,16 +72,12 @@ export async function answerTelegramCallbackQuery(
   });
 }
 
-export async function editTelegramMessageText(
-  chatId: string,
-  messageId: number,
-  text: string,
-): Promise<void> {
+export async function editTelegramMessageText(messageId: number, text: string): Promise<void> {
   await telegram('editMessageText', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      chat_id: chatId,
+      chat_id: ALLOWED_CHAT_ID,
       message_id: messageId,
       text: escapeTelegramHtml(text || '(empty)'),
       parse_mode: 'HTML',
@@ -86,25 +85,23 @@ export async function editTelegramMessageText(
   });
 }
 
-async function sendTelegramHtmlMessage(chatId: string, html: string): Promise<void> {
+async function sendTelegramHtmlMessage(html: string): Promise<void> {
   try {
-    await postTelegramHtmlMessage(chatId, html);
+    await postTelegramHtmlMessage(html);
     return;
   } catch (error) {
     if (!isTelegramHtmlParseError(error)) throw error;
   }
-  const sanitized = sanitizeTelegramHtml(html);
   try {
-    await postTelegramHtmlMessage(chatId, sanitized);
+    await postTelegramHtmlMessage(sanitizeTelegramHtml(html));
     return;
   } catch (error) {
     if (!isTelegramHtmlParseError(error)) throw error;
   }
-  await postTelegramHtmlMessage(chatId, escapeTelegramHtml(html));
+  await postTelegramHtmlMessage(escapeTelegramHtml(html));
 }
 
 async function postTelegramHtmlMessage(
-  chatId: string,
   text: string,
   replyMarkup?: Record<string, unknown>,
 ): Promise<void> {
@@ -112,7 +109,7 @@ async function postTelegramHtmlMessage(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      chat_id: chatId,
+      chat_id: ALLOWED_CHAT_ID,
       text,
       parse_mode: 'HTML',
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -120,12 +117,12 @@ async function postTelegramHtmlMessage(
   });
 }
 
-export async function sendChatAction(chatId: string): Promise<void> {
+export async function sendChatAction(): Promise<void> {
   try {
     await telegram('sendChatAction', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+      body: JSON.stringify({ chat_id: ALLOWED_CHAT_ID, action: 'typing' }),
     });
   } catch {
     // Typing indicators are best-effort.
@@ -174,7 +171,7 @@ const TELEGRAM_HTML_TAGS = new Set([
 const TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>/g;
 const ENTITY_RE = /&(?!(?:amp|lt|gt|quot|#\d+|#x[\da-fA-F]+);)/g;
 
-export function sanitizeTelegramHtml(html: string): string {
+function sanitizeTelegramHtml(html: string): string {
   const stack: string[] = [];
   const out: string[] = [];
   let cursor = 0;

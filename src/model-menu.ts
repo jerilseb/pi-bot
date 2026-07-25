@@ -1,4 +1,4 @@
-import type { ChatRegistry } from './chat-session.ts';
+import type { ChatSession } from './chat-session.ts';
 import { ALLOWED_MODELS, isAllowedTelegramChat } from './config.ts';
 import {
   answerTelegramCallbackQuery,
@@ -23,20 +23,19 @@ export function buildModelInlineKeyboard(): InlineKeyboardButton[][] {
 
 export async function handleModelCallbackQuery(
   query: TelegramCallbackQuery,
-  registry: ChatRegistry,
+  session: ChatSession,
 ): Promise<void> {
   const data = query.data ?? '';
   if (!data.startsWith(MODEL_CALLBACK_PREFIX)) return;
 
-  const chatId = query.message ? String(query.message.chat.id) : '';
-  if (!isAllowedTelegramChat(chatId) || !query.message) {
+  if (!query.message || !isAllowedTelegramChat(String(query.message.chat.id))) {
     await answerTelegramCallbackQuery(query.id, 'This model menu is no longer valid.');
     return;
   }
 
   if (data === MODEL_CALLBACK_CANCEL) {
     await answerTelegramCallbackQuery(query.id, 'Cancelled');
-    await editTelegramMessageText(chatId, query.message.message_id, 'Cancelled model switch.');
+    await editTelegramMessageText(query.message.message_id, 'Cancelled model switch.');
     return;
   }
 
@@ -45,18 +44,16 @@ export async function handleModelCallbackQuery(
   if (!modelName) {
     await answerTelegramCallbackQuery(query.id, 'Unknown model.');
     await editTelegramMessageText(
-      chatId,
       query.message.message_id,
       '❌ That model option is no longer available. Use /models again.',
     );
     return;
   }
 
-  const chat = registry.get(chatId);
-  if (registry.isBusy(chatId)) {
+  const chat = session.get();
+  if (session.isBusy()) {
     await answerTelegramCallbackQuery(query.id, 'Chat is busy.');
     await editTelegramMessageText(
-      chatId,
       query.message.message_id,
       '⚠️ Model switch cancelled because the chat is busy. Try /models again when idle.',
     );
@@ -68,14 +65,12 @@ export async function handleModelCallbackQuery(
     const thinking = await chat.pi.getThinkingState();
     await answerTelegramCallbackQuery(query.id, 'Model switched.');
     await editTelegramMessageText(
-      chatId,
       query.message.message_id,
       `✅ Switched chat model to ${chat.pi.modelName}\nReasoning: ${thinking.level}`,
     );
   } catch (error) {
     await answerTelegramCallbackQuery(query.id, 'Model switch failed.');
     await editTelegramMessageText(
-      chatId,
       query.message.message_id,
       `❌ ${sanitizeError(errorMessage(error))}`,
     );

@@ -60,7 +60,6 @@ export interface Attachment {
 }
 
 export interface IncomingPrompt {
-  chatId: string;
   text: string;
   attachments: Attachment[];
   source?: 'telegram' | 'heartbeat' | 'cron' | 'subagent-report' | 'background-bash-report';
@@ -69,7 +68,6 @@ export interface IncomingPrompt {
 
 export interface PiPromptResult {
   text: string;
-  toolOutput: string;
 }
 
 export interface TranscriptionResult {

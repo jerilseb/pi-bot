@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import {
+  ALLOWED_CHAT_ID,
   DOCUMENT_UPLOAD_EXTS,
   LOCAL_DOCUMENT_UPLOAD_DIRS,
   LOCAL_IMAGE_UPLOAD_DIRS,
@@ -39,71 +40,67 @@ const SendDocumentParams = Type.Object({
   ),
 });
 
-export function telegramImageExtension(chatId: string): (pi: ExtensionAPI) => void {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: 'send_image',
-      label: 'Send Image',
-      description:
-        'Upload a local image file to the Telegram user. Use after generating or otherwise producing an image that the user should see.',
-      promptSnippet: 'Send an image file to the Telegram user.',
-      promptGuidelines: [
-        'Call this only when the user should actually see the image — not when merely discussing or analyzing one.',
-        'Pass an absolute path to a file that already exists on disk (e.g. output of the create-image skill).',
-        'Provide a brief caption when extra context would help; omit it for an unannotated send.',
-        'After sending, keep the accompanying text reply short — the image carries the content.',
-      ],
-      parameters: SendImageParams,
-      async execute(_toolCallId, params) {
-        const resolved = resolvePath(params.path);
-        validateUpload(resolved, IMAGE_EXTS, LOCAL_IMAGE_UPLOAD_DIRS);
-        await uploadImage(chatId, resolved, params.caption);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Sent image: ${path.basename(resolved)}`,
-            },
-          ],
-          details: { path: resolved, caption: params.caption ?? null },
-        };
-      },
-    });
-  };
+export function telegramImageExtension(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: 'send_image',
+    label: 'Send Image',
+    description:
+      'Upload a local image file to the Telegram user. Use after generating or otherwise producing an image that the user should see.',
+    promptSnippet: 'Send an image file to the Telegram user.',
+    promptGuidelines: [
+      'Call this only when the user should actually see the image — not when merely discussing or analyzing one.',
+      'Pass an absolute path to a file that already exists on disk (e.g. output of the create-image skill).',
+      'Provide a brief caption when extra context would help; omit it for an unannotated send.',
+      'After sending, keep the accompanying text reply short — the image carries the content.',
+    ],
+    parameters: SendImageParams,
+    async execute(_toolCallId, params) {
+      const resolved = resolvePath(params.path);
+      validateUpload(resolved, IMAGE_EXTS, LOCAL_IMAGE_UPLOAD_DIRS);
+      await uploadImage(resolved, params.caption);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Sent image: ${path.basename(resolved)}`,
+          },
+        ],
+        details: { path: resolved, caption: params.caption ?? null },
+      };
+    },
+  });
 }
 
-export function telegramDocumentExtension(chatId: string): (pi: ExtensionAPI) => void {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: 'send_document',
-      label: 'Send Document',
-      description:
-        'Upload a local document file (pdf, docx, csv, md, txt, etc.) to the Telegram user.',
-      promptSnippet: 'Send a document file to the Telegram user.',
-      promptGuidelines: [
-        'Call this only when the user should actually receive the file — not when merely discussing or analyzing it.',
-        'Pass an absolute path to a file that already exists on disk.',
-        'Supported extensions are configured via PI_CHANNEL_DOCUMENT_UPLOAD_EXTS.',
-        'Provide a brief caption when extra context would help; omit it for an unannotated send.',
-      ],
-      parameters: SendDocumentParams,
-      async execute(_toolCallId, params) {
-        const resolved = resolvePath(params.path);
-        const allowedExts = DOCUMENT_UPLOAD_EXTS.map((ext) => `.${ext}`);
-        validateUpload(resolved, allowedExts, LOCAL_DOCUMENT_UPLOAD_DIRS);
-        await uploadDocument(chatId, resolved, params.caption);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Sent document: ${path.basename(resolved)}`,
-            },
-          ],
-          details: { path: resolved, caption: params.caption ?? null },
-        };
-      },
-    });
-  };
+export function telegramDocumentExtension(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: 'send_document',
+    label: 'Send Document',
+    description:
+      'Upload a local document file (pdf, docx, csv, md, txt, etc.) to the Telegram user.',
+    promptSnippet: 'Send a document file to the Telegram user.',
+    promptGuidelines: [
+      'Call this only when the user should actually receive the file — not when merely discussing or analyzing it.',
+      'Pass an absolute path to a file that already exists on disk.',
+      'Supported extensions are configured via DOCUMENT_UPLOAD_EXTS in src/config.ts.',
+      'Provide a brief caption when extra context would help; omit it for an unannotated send.',
+    ],
+    parameters: SendDocumentParams,
+    async execute(_toolCallId, params) {
+      const resolved = resolvePath(params.path);
+      const allowedExts = DOCUMENT_UPLOAD_EXTS.map((ext) => `.${ext}`);
+      validateUpload(resolved, allowedExts, LOCAL_DOCUMENT_UPLOAD_DIRS);
+      await uploadDocument(resolved, params.caption);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Sent document: ${path.basename(resolved)}`,
+          },
+        ],
+        details: { path: resolved, caption: params.caption ?? null },
+      };
+    },
+  });
 }
 
 function resolvePath(input: string): string {
@@ -163,18 +160,14 @@ function validateUpload(filePath: string, allowedExts: string[], allowedDirs: st
   }
 }
 
-async function uploadImage(
-  chatId: string,
-  filePath: string,
-  caption: string | undefined,
-): Promise<void> {
+async function uploadImage(filePath: string, caption: string | undefined): Promise<void> {
   const stat = fs.statSync(filePath);
   const asPhoto = stat.size <= TELEGRAM_PHOTO_UPLOAD_LIMIT;
   const method = asPhoto ? 'sendPhoto' : 'sendDocument';
   const fieldName = asPhoto ? 'photo' : 'document';
   const fileBuffer = fs.readFileSync(filePath);
   const form = new FormData();
-  form.append('chat_id', chatId);
+  form.append('chat_id', ALLOWED_CHAT_ID);
   form.append(
     fieldName,
     new Blob([fileBuffer], { type: imageMimeType(filePath) }),
@@ -187,14 +180,10 @@ async function uploadImage(
   await telegram(method, { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
 }
 
-async function uploadDocument(
-  chatId: string,
-  filePath: string,
-  caption: string | undefined,
-): Promise<void> {
+async function uploadDocument(filePath: string, caption: string | undefined): Promise<void> {
   const fileBuffer = fs.readFileSync(filePath);
   const form = new FormData();
-  form.append('chat_id', chatId);
+  form.append('chat_id', ALLOWED_CHAT_ID);
   form.append('document', new Blob([fileBuffer]), path.basename(filePath));
   if (caption) {
     form.append('caption', escapeTelegramHtml(caption));

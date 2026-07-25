@@ -3,33 +3,33 @@
 /**
  * Standalone Telegram → Pi chat bridge.
  *
- * Polls Telegram, keeps one Pi SDK session per chat, queues prompts per chat,
- * and sends Pi's final response back to Telegram. Supports text, images,
+ * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID: polls for
+ * updates, keeps one foreground and one background Pi SDK session, queues
+ * prompts, and sends Pi's final response back. Supports text, images,
  * downloaded files, optional audio transcription, local extensions/skills,
  * generated file uploads, model refs across Pi providers, and scheduled heartbeat prompts.
  *
  * This module is the orchestrator: it wires the pieces together and owns the
- * polling loop, per-chat queue, and process lifecycle. Self-contained concerns
+ * polling loop, prompt queue, and process lifecycle. Self-contained concerns
  * live in dedicated modules (commands, model-menu, chat-session, discovery,
  * system-prompt, env-guard, heartbeat, cron).
  */
 
 import * as fs from 'node:fs';
-import { handleGroupAccessRequest } from './src/access-request.ts';
 import {
   formatBackgroundBashReportPrompt,
   setBackgroundBashReportHandler,
   stopAllBackgroundSessions,
 } from './src/background-bash.ts';
-import { createChatRegistry, type ChatRegistry, type ChatState } from './src/chat-session.ts';
+import { createChatSession, type ChatSession, type ChatState } from './src/chat-session.ts';
 import { handleCommand } from './src/commands.ts';
 import {
-  ALLOWED_CHATS_PATH,
+  ALLOWED_CHAT_ID,
   ALLOWED_MODELS,
   BACKGROUND_MODEL,
   BOT_TOKEN,
   DEFAULT_MODEL,
-  MAX_QUEUE_PER_CHAT,
+  MAX_QUEUED_PROMPTS,
   MODEL,
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
@@ -42,8 +42,6 @@ import {
   TOOL_CALL_BATCH_MAX_ITEMS,
   ensureBotSettingsFile,
   TOOL_CALL_BATCH_MS,
-  getAllowedTelegramChatIds,
-  getPrivateTelegramChatIds,
   isAllowedTelegramChat,
 } from './src/config.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
@@ -69,7 +67,6 @@ import {
 } from './src/subagents.ts';
 import {
   activeModelSystemPromptExtension,
-  allowedChatsSystemPromptExtension,
   ensureMemoryFile,
   memorySystemPromptExtension,
   readSystemPrompt,
@@ -82,7 +79,7 @@ import {
   telegram,
 } from './src/telegram.ts';
 import type { IncomingPrompt, TelegramMessage, TelegramUpdate } from './src/types.ts';
-import { errorMessage, isBackgroundSource } from './src/util.ts';
+import { errorMessage, isBackgroundSource, sleep } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
 validateEnvironment();
@@ -101,7 +98,6 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
   extensionFactories: [
     memorySystemPromptExtension,
     activeModelSystemPromptExtension,
-    allowedChatsSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
   requestRestart: restart,
@@ -117,7 +113,6 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
   extensionFactories: [
     memorySystemPromptExtension,
     activeModelSystemPromptExtension,
-    allowedChatsSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
 });
@@ -127,8 +122,8 @@ fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
 ensurePostRestartTasksFile();
 
-const chats = createChatRegistry(CHAT_PI_RUNTIME);
-const backgroundChats = createChatRegistry(BACKGROUND_PI_RUNTIME);
+const chatSession = createChatSession(CHAT_PI_RUNTIME, 'chat');
+const backgroundSession = createChatSession(BACKGROUND_PI_RUNTIME, 'background');
 let offset = 0;
 let running = true;
 
@@ -138,7 +133,7 @@ interface ToolNotificationBatch {
   sending: Promise<void> | null;
 }
 
-const toolNotificationBatches = new Map<string, ToolNotificationBatch>();
+const toolNotifications: ToolNotificationBatch = { notifications: [], timer: null, sending: null };
 
 const heartbeat = createHeartbeatController({
   handleIncoming,
@@ -153,10 +148,9 @@ const cron = createCronController({
 });
 
 // Backgrounded sub-agents report back to the main chat agent as internal
-// subagent-report prompts, which go through the normal per-chat queue.
+// subagent-report prompts, which go through the normal prompt queue.
 setSubagentReportHandler(async (report) => {
   await handleIncoming({
-    chatId: report.chatId,
     text: formatSubagentReportPrompt(report),
     attachments: [],
     source: 'subagent-report',
@@ -168,7 +162,6 @@ setSubagentReportHandler(async (report) => {
 // background-bash-report prompts instead of sending direct Telegram messages.
 setBackgroundBashReportHandler(async (report) => {
   await handleIncoming({
-    chatId: report.chatId,
     text: formatBackgroundBashReportPrompt(report),
     attachments: [],
     source: 'background-bash-report',
@@ -178,9 +171,7 @@ setBackgroundBashReportHandler(async (report) => {
 
 function validateEnvironment(): void {
   if (!BOT_TOKEN) {
-    console.error(
-      'Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc CHAT_MODEL=openrouter/openai/gpt-5.4-mini node main.ts',
-    );
+    console.error('Missing TELEGRAM_BOT_TOKEN. Example: TELEGRAM_BOT_TOKEN=123:abc');
     process.exit(1);
   }
 
@@ -226,11 +217,8 @@ function validateEnvironment(): void {
     process.exit(1);
   }
 
-  const allowedChatIds = getAllowedTelegramChatIds();
-  if (allowedChatIds.length === 0) {
-    console.error(
-      `No enabled Telegram chats configured. Add at least one entry to ${ALLOWED_CHATS_PATH}.`,
-    );
+  if (!ALLOWED_CHAT_ID) {
+    console.error('Missing TELEGRAM_ALLOWED_CHAT_ID. Example: TELEGRAM_ALLOWED_CHAT_ID=123456789');
     process.exit(1);
   }
 }
@@ -242,16 +230,16 @@ async function restart(): Promise<void> {
 }
 
 async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
-  const registry = isBackgroundSource(prompt.source) ? backgroundChats : chats;
-  const chat = registry.get(prompt.chatId);
+  const session = isBackgroundSource(prompt.source) ? backgroundSession : chatSession;
+  const chat = session.get();
   const trimmed = prompt.text.trim();
 
   if (prompt.attachments.length === 0 && trimmed.startsWith('/')) {
     const handled = await handleCommand(
       {
         chat,
-        registry: chats,
-        backgroundRegistry: backgroundChats,
+        session: chatSession,
+        backgroundSession,
         getBackgroundModelName,
         restart,
       },
@@ -262,12 +250,11 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 
   const bypassQueueLimit =
     prompt.source === 'subagent-report' || prompt.source === 'background-bash-report';
-  if (!bypassQueueLimit && chat.queue.length >= MAX_QUEUE_PER_CHAT) {
+  if (!bypassQueueLimit && chat.queue.length >= MAX_QUEUED_PROMPTS) {
     cleanupAttachments(prompt);
     if (!isBackgroundSource(prompt.source)) {
       await sendTelegramMessage(
-        prompt.chatId,
-        `⚠️ Queue full (${MAX_QUEUE_PER_CHAT} pending). Wait or use /abort.`,
+        `⚠️ Queue full (${MAX_QUEUED_PROMPTS} pending). Wait or use /abort.`,
       );
     }
     return;
@@ -275,70 +262,65 @@ async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
 
   chat.queue.push(prompt);
   chat.messageCount++;
-  startQueueProcessing(chat, registry);
+  startQueueProcessing(chat, session);
 }
 
-function startQueueProcessing(chat: ChatState, registry: ChatRegistry): void {
-  void processQueue(chat, registry).catch((error) => {
-    console.error(`[${chat.chatId}] queue worker failed unexpectedly:`, errorMessage(error));
+function startQueueProcessing(chat: ChatState, session: ChatSession): void {
+  void processQueue(chat, session).catch((error) => {
+    console.error('queue worker failed unexpectedly:', errorMessage(error));
     chat.processing = false;
 
     if (running && chat.queue.length > 0) {
-      setTimeout(() => startQueueProcessing(chat, registry), 1_000);
+      setTimeout(() => startQueueProcessing(chat, session), 1_000);
     }
   });
 }
 
-function isAssistantBusy(chatId: string): boolean {
-  return chats.isBusy(chatId) || backgroundChats.isBusy(chatId);
+function isAssistantBusy(): boolean {
+  return chatSession.isBusy() || backgroundSession.isBusy();
 }
 
-function getBackgroundModelName(chatId: string): string {
-  return backgroundChats.getExisting(chatId)?.pi.modelName ?? BACKGROUND_PI_RUNTIME.modelName;
+function getBackgroundModelName(): string {
+  return backgroundSession.existing()?.pi.modelName ?? BACKGROUND_PI_RUNTIME.modelName;
 }
 
-async function processQueue(chat: ChatState, registry: ChatRegistry): Promise<void> {
+async function processQueue(chat: ChatState, session: ChatSession): Promise<void> {
   if (chat.processing) return;
 
   while (chat.queue.length > 0 && running) {
     const prompt = chat.queue.shift();
     if (!prompt) break;
     chat.processing = true;
-    registry.resetIdleTimer(chat);
+    session.resetIdleTimer(chat);
 
-    const typing = isBackgroundSource(prompt.source)
-      ? { stop: () => undefined }
-      : startTyping(prompt.chatId);
+    const typing = isBackgroundSource(prompt.source) ? { stop: () => undefined } : startTyping();
     try {
       const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
-      console.log(`[${prompt.chatId}] ${logLabel}: ${prompt.text.slice(0, 120)}`);
+      console.log(`${logLabel}: ${prompt.text.slice(0, 120)}`);
       const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
         onToolCall: SEND_TOOL_CALLS
-          ? (notification) => notifyToolCall(prompt.chatId, notification, prompt.source)
+          ? (notification) => notifyToolCall(notification, prompt.source)
           : undefined,
       });
-      await flushToolNotifications(prompt.chatId);
-      await sendPiResponse(prompt.chatId, response, {
+      await flushToolNotifications();
+      await sendPiResponse(response, {
         suppressNoop: prompt.suppressNoop,
       });
       cleanupAttachments(prompt);
       enqueuePendingNewSessionTask(chat, prompt);
     } catch (error) {
       const message = errorMessage(error);
-      console.error(`[${prompt.chatId}] error:`, message);
-      await flushToolNotifications(prompt.chatId);
+      console.error('error:', message);
+      await flushToolNotifications();
       try {
-        await sendTelegramMessage(prompt.chatId, `❌ ${sanitizeError(message)}`);
+        await sendTelegramMessage(`❌ ${sanitizeError(message)}`);
       } catch (notificationError) {
-        console.error(
-          `[${prompt.chatId}] failed to send prompt error notification:`,
-          errorMessage(notificationError),
-        );
+        console.error('failed to send prompt error notification:', errorMessage(notificationError));
       }
     } finally {
       typing.stop();
       chat.processing = false;
-      registry.resetIdleTimer(chat);
+      session.resetIdleTimer(chat);
     }
   }
 }
@@ -348,7 +330,6 @@ function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): 
   if (!task) return;
 
   chat.queue.unshift({
-    chatId: prompt.chatId,
     text: task,
     attachments: [],
     ...(prompt.source ? { source: prompt.source } : {}),
@@ -399,8 +380,8 @@ async function pollTelegram(): Promise<void> {
         offset = update.update_id + 1;
 
         if (update.callback_query) {
-          await handleModelCallbackQuery(update.callback_query, chats);
-          await handleReasoningCallbackQuery(update.callback_query, chats);
+          await handleModelCallbackQuery(update.callback_query, chatSession);
+          await handleReasoningCallbackQuery(update.callback_query, chatSession);
           await handleTelegramMenuCallbackQuery(update.callback_query, handleIncoming);
           continue;
         }
@@ -423,30 +404,27 @@ async function pollTelegram(): Promise<void> {
  * the chat's ingestion epoch while this is in flight, the result is dropped.
  */
 async function ingestTelegramMessage(message: TelegramMessage): Promise<void> {
-  const chatId = String(message.chat.id);
-  const epoch = ingestionEpoch(chatId);
+  const epoch = ingestionEpoch();
 
   try {
-    if (await handleGroupAccessRequest(message)) return;
-
     const incoming = await toIncomingPrompt(message);
     if (!incoming) return;
 
-    if (ingestionEpoch(chatId) !== epoch) {
-      console.log(`[${chatId}] dropping message ingested before /abort or /new`);
+    if (ingestionEpoch() !== epoch) {
+      console.log('dropping message ingested before /abort or /new');
       cleanupAttachments(incoming);
       return;
     }
 
     await handleIncoming(incoming);
   } catch (error) {
-    console.error(`[${chatId}] failed to ingest Telegram message:`, errorMessage(error));
+    console.error('failed to ingest Telegram message:', errorMessage(error));
   }
 }
 
 function logStartupBanner(): void {
   console.log('Telegram → Pi bridge started');
-  console.log(`Allowed chats: ${getAllowedTelegramChatIds().join(', ')}`);
+  console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
   console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName}`);
   console.log(`Background model: ${BACKGROUND_PI_RUNTIME.modelName}`);
   console.log(`Sub-agent model: ${SUBAGENT_MODEL}`);
@@ -461,12 +439,10 @@ function logStartupBanner(): void {
 }
 
 async function notifyAppStarted(): Promise<void> {
-  for (const chatId of getPrivateTelegramChatIds()) {
-    try {
-      await sendTelegramMessage(chatId, '✅ Bot is up and running.');
-    } catch (error) {
-      console.error(`[${chatId}] failed to send startup notification:`, errorMessage(error));
-    }
+  try {
+    await sendTelegramMessage('✅ Bot is up and running.');
+  } catch (error) {
+    console.error('failed to send startup notification:', errorMessage(error));
   }
 }
 
@@ -482,28 +458,23 @@ async function enqueuePostRestartTasks(): Promise<void> {
   for (const task of tasks) {
     if (!isAllowedTelegramChat(task.chatId)) {
       console.warn(
-        `[${task.chatId}] skipping post-restart task for unauthorized chat: ${formatPostRestartTask(task)}`,
+        `skipping post-restart task from chat ${task.chatId}: ${formatPostRestartTask(task)}`,
       );
       continue;
     }
 
-    console.log(`[${task.chatId}] enqueueing post-restart task: ${formatPostRestartTask(task)}`);
+    console.log(`enqueueing post-restart task: ${formatPostRestartTask(task)}`);
     try {
       await sendTelegramMessage(
-        task.chatId,
         `🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`,
       );
       await handleIncoming({
-        chatId: task.chatId,
         text: buildPostRestartPrompt(task),
         attachments: [],
         source: 'telegram',
       });
     } catch (error) {
-      console.error(
-        `[${task.chatId}] failed to enqueue post-restart task ${task.id}:`,
-        errorMessage(error),
-      );
+      console.error(`failed to enqueue post-restart task ${task.id}:`, errorMessage(error));
     }
   }
 }
@@ -525,80 +496,47 @@ function buildPostRestartPrompt(task: PostRestartTask): string {
   ].join('\n');
 }
 
-function notifyToolCall(
-  chatId: string,
-  notification: string,
-  source: IncomingPrompt['source'],
-): void {
+function notifyToolCall(notification: string, source: IncomingPrompt['source']): void {
   if (isBackgroundSource(source)) return;
 
-  const batch = getToolNotificationBatch(chatId);
-  batch.notifications.push(notification);
+  toolNotifications.notifications.push(notification);
 
-  if (batch.notifications.length >= TOOL_CALL_BATCH_MAX_ITEMS) {
-    void flushToolNotifications(chatId);
+  if (
+    toolNotifications.notifications.length >= TOOL_CALL_BATCH_MAX_ITEMS ||
+    TOOL_CALL_BATCH_MS <= 0
+  ) {
+    void flushToolNotifications();
     return;
   }
 
-  if (TOOL_CALL_BATCH_MS <= 0) {
-    void flushToolNotifications(chatId);
-    return;
+  if (toolNotifications.timer) {
+    clearTimeout(toolNotifications.timer);
   }
-
-  if (batch.timer) {
-    clearTimeout(batch.timer);
-  }
-  batch.timer = setTimeout(() => {
-    void flushToolNotifications(chatId);
+  toolNotifications.timer = setTimeout(() => {
+    void flushToolNotifications();
   }, TOOL_CALL_BATCH_MS);
 }
 
-function getToolNotificationBatch(chatId: string): ToolNotificationBatch {
-  let batch = toolNotificationBatches.get(chatId);
-  if (!batch) {
-    batch = { notifications: [], timer: null, sending: null };
-    toolNotificationBatches.set(chatId, batch);
-  }
-  return batch;
-}
+async function flushToolNotifications(): Promise<void> {
+  if (toolNotifications.sending) await toolNotifications.sending;
 
-async function flushToolNotifications(chatId: string): Promise<void> {
-  const batch = toolNotificationBatches.get(chatId);
-  if (!batch) return;
-
-  if (batch.sending) await batch.sending;
-
-  if (batch.timer) {
-    clearTimeout(batch.timer);
-    batch.timer = null;
+  if (toolNotifications.timer) {
+    clearTimeout(toolNotifications.timer);
+    toolNotifications.timer = null;
   }
 
-  const notifications = batch.notifications.splice(0);
-  if (notifications.length === 0) {
-    if (!batch.sending) toolNotificationBatches.delete(chatId);
-    return;
-  }
+  const notifications = toolNotifications.notifications.splice(0);
+  if (notifications.length === 0) return;
 
-  batch.sending = sendTelegramMessage(chatId, formatToolNotificationBatch(notifications))
+  toolNotifications.sending = sendTelegramMessage(notifications.join('\n'))
     .catch((error) => {
-      console.error(`[${chatId}] failed to send tool notifications:`, errorMessage(error));
+      console.error('failed to send tool notifications:', errorMessage(error));
     })
     .finally(() => {
-      batch.sending = null;
-      if (batch.notifications.length === 0 && !batch.timer) {
-        toolNotificationBatches.delete(chatId);
-      }
+      toolNotifications.sending = null;
     });
 
-  await batch.sending;
-}
-
-function formatToolNotificationBatch(notifications: string[]): string {
-  return notifications.join('\n');
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  await toolNotifications.sending;
 }
 
 async function shutdown(): Promise<void> {
@@ -607,8 +545,8 @@ async function shutdown(): Promise<void> {
   console.log('Shutting down...');
   heartbeat.stop();
   cron.stop();
-  chats.clearAll();
-  backgroundChats.clearAll();
+  chatSession.clear();
+  backgroundSession.clear();
   await cancelAllSubagents();
   await stopAllBackgroundSessions();
 }

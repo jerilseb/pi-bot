@@ -1,9 +1,11 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
-import { FILES_DIR, POST_RESTART_TASKS_PATH } from './config.ts';
+import { ALLOWED_CHAT_ID, FILES_DIR, POST_RESTART_TASKS_PATH } from './config.ts';
+import { requireValidDate } from './util.ts';
 
 export interface PostRestartTask {
   id: string;
+  /** Chat that queued the task; startup skips tasks from a different chat. */
   chatId: string;
   prompt: string;
   title?: string;
@@ -11,7 +13,6 @@ export interface PostRestartTask {
 }
 
 export interface CreatePostRestartTaskInput {
-  chatId: string;
   prompt: string;
   title?: string;
 }
@@ -23,7 +24,7 @@ export function ensurePostRestartTasksFile(): void {
   }
 }
 
-export function readPostRestartTasks(): PostRestartTask[] {
+function readPostRestartTasks(): PostRestartTask[] {
   ensurePostRestartTasksFile();
   const content = fs.readFileSync(POST_RESTART_TASKS_PATH, 'utf8').trim();
   if (!content) return [];
@@ -42,7 +43,7 @@ export function addPostRestartTask(input: CreatePostRestartTaskInput): PostResta
 
   const task: PostRestartTask = {
     id: `post_restart_${crypto.randomUUID()}`,
-    chatId: input.chatId.trim(),
+    chatId: ALLOWED_CHAT_ID,
     prompt,
     ...(input.title?.trim() ? { title: input.title.trim() } : {}),
     createdAt: new Date().toISOString(),
@@ -89,13 +90,8 @@ function normalizePostRestartTask(value: unknown): PostRestartTask {
     chatId: record.chatId,
     prompt: record.prompt,
     ...(record.title ? { title: String(record.title) } : {}),
-    createdAt: record.createdAt ? requireValidDate(record.createdAt, 'createdAt').toISOString() : new Date().toISOString(),
+    createdAt: record.createdAt
+      ? requireValidDate(record.createdAt, 'createdAt').toISOString()
+      : new Date().toISOString(),
   };
-}
-
-function requireValidDate(value: unknown, label: string): Date {
-  if (typeof value !== 'string') throw new Error(`${label} must be an ISO date string`);
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) throw new Error(`${label} must be a valid ISO date string`);
-  return date;
 }

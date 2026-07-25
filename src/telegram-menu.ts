@@ -70,7 +70,6 @@ interface TelegramMenuOption {
 
 interface TelegramMenu {
   id: string;
-  chatId: string;
   text: string;
   options: TelegramMenuOption[];
   allowCancel: boolean;
@@ -80,32 +79,30 @@ interface TelegramMenu {
 
 const menus = new Map<string, TelegramMenu>();
 
-export function telegramMenuExtension(chatId: string): (pi: ExtensionAPI) => void {
-  return (pi) => {
-    pi.registerTool({
-      name: 'send_telegram_menu',
-      label: 'Send Telegram Menu',
-      description:
-        'Send a Telegram inline button menu to the current chat. Use for yes/no confirmations or asking the user to select from multiple options. When the user taps a button, the selected option is sent back into the chat as a normal user prompt so you can continue from it.',
-      promptSnippet: 'Send Telegram inline menus for confirmations and option selection.',
-      promptGuidelines: [
-        'Use send_telegram_menu when you need the user to choose one of several options before continuing.',
-        'For yes/no confirmations, pass two options such as ✅ Yes and ❌ No.',
-        'Keep button labels short and clear.',
-        'After sending the menu, explain briefly that you are waiting for the user to tap an option.',
-      ],
-      parameters: SendTelegramMenuParams,
-      async execute(_toolCallId, params: SendTelegramMenuParamsType) {
-        const menu = await sendTelegramMenu(chatId, params);
-        return textResult(
-          [
-            `Sent Telegram menu ${menu.id}.`,
-            'The user selection will arrive as a follow-up prompt when they tap a button.',
-          ].join('\n'),
-        );
-      },
-    });
-  };
+export function telegramMenuExtension(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: 'send_telegram_menu',
+    label: 'Send Telegram Menu',
+    description:
+      'Send a Telegram inline button menu to the current chat. Use for yes/no confirmations or asking the user to select from multiple options. When the user taps a button, the selected option is sent back into the chat as a normal user prompt so you can continue from it.',
+    promptSnippet: 'Send Telegram inline menus for confirmations and option selection.',
+    promptGuidelines: [
+      'Use send_telegram_menu when you need the user to choose one of several options before continuing.',
+      'For yes/no confirmations, pass two options such as ✅ Yes and ❌ No.',
+      'Keep button labels short and clear.',
+      'After sending the menu, explain briefly that you are waiting for the user to tap an option.',
+    ],
+    parameters: SendTelegramMenuParams,
+    async execute(_toolCallId, params: SendTelegramMenuParamsType) {
+      const menu = await sendTelegramMenu(params);
+      return textResult(
+        [
+          `Sent Telegram menu ${menu.id}.`,
+          'The user selection will arrive as a follow-up prompt when they tap a button.',
+        ].join('\n'),
+      );
+    },
+  });
 }
 
 export async function handleTelegramMenuCallbackQuery(
@@ -117,8 +114,7 @@ export async function handleTelegramMenuCallbackQuery(
   const data = query.data ?? '';
   if (!data.startsWith(MENU_CALLBACK_PREFIX)) return false;
 
-  const chatId = query.message ? String(query.message.chat.id) : '';
-  if (!query.message || !isAllowedTelegramChat(chatId)) {
+  if (!query.message || !isAllowedTelegramChat(String(query.message.chat.id))) {
     await answerTelegramCallbackQuery(query.id, 'This menu is no longer valid.');
     return true;
   }
@@ -130,11 +126,10 @@ export async function handleTelegramMenuCallbackQuery(
   }
 
   const menu = menus.get(parsed.menuId);
-  if (!menu || menu.chatId !== chatId || menu.expiresAt <= Date.now()) {
+  if (!menu || menu.expiresAt <= Date.now()) {
     menus.delete(parsed.menuId);
     await answerTelegramCallbackQuery(query.id, 'Menu expired.');
     await editMenuMessageBestEffort(
-      chatId,
       query.message.message_id,
       '⏱ This menu has expired. Ask me to send it again.',
     );
@@ -145,9 +140,8 @@ export async function handleTelegramMenuCallbackQuery(
 
   if (parsed.action === MENU_CALLBACK_CANCEL) {
     await answerTelegramCallbackQuery(query.id, 'Cancelled');
-    await editMenuMessageBestEffort(chatId, query.message.message_id, `${menu.text}\n\nCancelled.`);
+    await editMenuMessageBestEffort(query.message.message_id, `${menu.text}\n\nCancelled.`);
     await enqueuePrompt({
-      chatId,
       text: buildMenuCancelledPrompt(menu),
       attachments: [],
       source: 'telegram',
@@ -159,7 +153,6 @@ export async function handleTelegramMenuCallbackQuery(
   if (!option) {
     await answerTelegramCallbackQuery(query.id, 'Unknown option.');
     await editMenuMessageBestEffort(
-      chatId,
       query.message.message_id,
       '❌ That menu option is no longer available. Ask me to send the menu again.',
     );
@@ -168,12 +161,10 @@ export async function handleTelegramMenuCallbackQuery(
 
   await answerTelegramCallbackQuery(query.id, `Selected: ${option.label}`);
   await editMenuMessageBestEffort(
-    chatId,
     query.message.message_id,
     `${menu.text}\n\nSelected: ${option.label}`,
   );
   await enqueuePrompt({
-    chatId,
     text: buildMenuSelectionPrompt(menu, option),
     attachments: [],
     source: 'telegram',
@@ -181,17 +172,13 @@ export async function handleTelegramMenuCallbackQuery(
   return true;
 }
 
-async function sendTelegramMenu(
-  chatId: string,
-  params: SendTelegramMenuParamsType,
-): Promise<TelegramMenu> {
+async function sendTelegramMenu(params: SendTelegramMenuParamsType): Promise<TelegramMenu> {
   const options = normalizeMenuOptions(params.options);
   const columns = normalizeColumns(params.columns);
   const allowCancel = params.allow_cancel ?? false;
   const expiresMinutes = normalizeExpiryMinutes(params.expires_minutes);
   const menu: TelegramMenu = {
     id: createMenuId(),
-    chatId,
     text: params.text.trim(),
     options,
     allowCancel,
@@ -202,7 +189,7 @@ async function sendTelegramMenu(
   menus.set(menu.id, menu);
 
   try {
-    await sendTelegramInlineKeyboard(chatId, menu.text, buildMenuKeyboard(menu, columns));
+    await sendTelegramInlineKeyboard(menu.text, buildMenuKeyboard(menu, columns));
   } catch (error) {
     menus.delete(menu.id);
     throw error;
@@ -211,7 +198,9 @@ async function sendTelegramMenu(
   return menu;
 }
 
-function normalizeMenuOptions(options: SendTelegramMenuParamsType['options']): TelegramMenuOption[] {
+function normalizeMenuOptions(
+  options: SendTelegramMenuParamsType['options'],
+): TelegramMenuOption[] {
   if (options.length === 0) throw new Error('A menu needs at least one option.');
   if (options.length > MAX_MENU_OPTIONS) {
     throw new Error(`A menu can have at most ${MAX_MENU_OPTIONS} options.`);
@@ -255,7 +244,9 @@ function buildMenuKeyboard(menu: TelegramMenu, columns: number): InlineKeyboardB
   return rows;
 }
 
-function parseMenuCallbackData(data: string):
+function parseMenuCallbackData(
+  data: string,
+):
   | { menuId: string; action: typeof MENU_CALLBACK_CANCEL; optionIndex: never }
   | { menuId: string; action: 'select'; optionIndex: number }
   | null {
@@ -311,14 +302,10 @@ function cleanupExpiredMenus(): void {
   }
 }
 
-async function editMenuMessageBestEffort(
-  chatId: string,
-  messageId: number,
-  text: string,
-): Promise<void> {
+async function editMenuMessageBestEffort(messageId: number, text: string): Promise<void> {
   try {
-    await editTelegramMessageText(chatId, messageId, text);
+    await editTelegramMessageText(messageId, text);
   } catch (error) {
-    console.error(`[${chatId}] failed to edit Telegram menu:`, errorMessage(error));
+    console.error('failed to edit Telegram menu:', errorMessage(error));
   }
 }

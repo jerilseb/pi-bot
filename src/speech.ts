@@ -64,14 +64,8 @@ export async function transcribeAudio(
   if (errors.length) return { ok: false, error: errors.join('; ') };
   return {
     ok: false,
-    error: 'Set GOOGLE_GENAI_API_KEY/GEMINI_API_KEY or ELEVENLABS_API_KEY to enable transcription.',
+    error: 'Set GOOGLE_GENAI_API_KEY or ELEVENLABS_API_KEY to enable transcription.',
   };
-}
-
-export function textToSpeechConfigured(): boolean {
-  return providerOrder(TEXT_TO_SPEECH_PROVIDER).some((provider) =>
-    textToSpeechProviderConfigured(provider),
-  );
 }
 
 export function textToSpeechStatusText(): string {
@@ -81,7 +75,7 @@ export function textToSpeechStatusText(): string {
   if (configured.length) {
     return `registered and configured (${configured.map(providerLabel).join(', ')})`;
   }
-  return 'registered, but missing GOOGLE_GENAI_API_KEY/GEMINI_API_KEY or ElevenLabs TTS settings';
+  return 'registered, but missing GOOGLE_GENAI_API_KEY or ElevenLabs TTS settings';
 }
 
 export async function synthesizeTtsAudio(text: string): Promise<TtsAudioResult> {
@@ -98,9 +92,7 @@ export async function synthesizeTtsAudio(text: string): Promise<TtsAudioResult> 
   }
 
   if (errors.length) throw new Error(errors.join('; '));
-  throw new Error(
-    'Set GOOGLE_GENAI_API_KEY/GEMINI_API_KEY or ElevenLabs TTS settings to enable voice notes.',
-  );
+  throw new Error('Set GOOGLE_GENAI_API_KEY or ElevenLabs TTS settings to enable voice notes.');
 }
 
 function checkAudioFile(filePath: string): TranscriptionResult | null {

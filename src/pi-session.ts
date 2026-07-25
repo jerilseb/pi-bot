@@ -15,6 +15,7 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import {
+  ALLOWED_CHAT_ID,
   FILES_DIR,
   OPENAI_CODEX_API_KEY,
   OPENROUTER_API_KEY,
@@ -122,16 +123,14 @@ export class SdkPiSession {
   private session: AgentSession | null = null;
   private starting: Promise<AgentSession> | null = null;
   private runtime: PiRuntime;
-  private chatId: string;
   private selectedModelRef: ModelRef;
   private selectedModel: Model<Api>;
   private forceNewSessionOnNextStart = false;
   private pendingNewSessionRequest = false;
   private pendingNewSessionTask: string | null = null;
 
-  constructor(runtime: PiRuntime, chatId: string) {
+  constructor(runtime: PiRuntime) {
     this.runtime = runtime;
-    this.chatId = chatId;
     this.selectedModelRef = parseModelRef(runtime.modelName);
     this.selectedModel = resolveModel(runtime.modelRegistry, this.selectedModelRef);
   }
@@ -191,14 +190,12 @@ export class SdkPiSession {
     }
 
     const chunks: string[] = [];
-    const toolOutputs: string[] = [];
     let errorMessage = '';
     const unsubscribe = session.subscribe((event) => {
       this.collectPromptEvent(
         event,
         session,
         chunks,
-        toolOutputs,
         (message) => {
           errorMessage = message;
         },
@@ -214,10 +211,7 @@ export class SdkPiSession {
 
       if (errorMessage) throw new Error(errorMessage);
 
-      return {
-        text: chunks.join('').trim() || '(no response)',
-        toolOutput: toolOutputs.join('\n'),
-      };
+      return { text: chunks.join('').trim() || '(no response)' };
     } finally {
       unsubscribe();
       this.applyPendingNewSession();
@@ -296,16 +290,16 @@ export class SdkPiSession {
       extensionFactories: [
         ...this.runtime.extensionFactories,
         ...(this.runtime.requestRestart
-          ? [telegramRestartToolExtension(this.chatId, this.runtime.requestRestart)]
+          ? [telegramRestartToolExtension(this.runtime.requestRestart)]
           : []),
         telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
-        scheduledTasksExtension(this.chatId),
-        subagentToolsExtension(this.chatId, this.runtime),
-        telegramMenuExtension(this.chatId),
-        telegramVoiceNoteExtension(this.chatId),
-        backgroundBashExtension(this.chatId),
-        ...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.chatId)] : []),
-        ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension(this.chatId)] : []),
+        scheduledTasksExtension,
+        subagentToolsExtension(this.runtime),
+        telegramMenuExtension,
+        telegramVoiceNoteExtension,
+        backgroundBashExtension,
+        ...(SEND_LOCAL_IMAGES ? [telegramImageExtension] : []),
+        ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension] : []),
       ],
       systemPromptOverride: this.runtime.systemPromptOverride,
     });
@@ -327,7 +321,7 @@ export class SdkPiSession {
   }
 
   private async createSessionManager(): Promise<SessionManager> {
-    const sessionId = buildTelegramSessionId(this.runtime.sessionPrefix, this.chatId);
+    const sessionId = buildTelegramSessionId(this.runtime.sessionPrefix);
 
     if (!this.forceNewSessionOnNextStart) {
       const existingSession = await findMostRecentSessionForId(
@@ -349,7 +343,6 @@ export class SdkPiSession {
     event: AgentSessionEvent,
     session: AgentSession,
     chunks: string[],
-    toolOutputs: string[],
     setError: (message: string) => void,
     onToolCall: ((notification: string) => void) | undefined,
   ): void {
@@ -367,11 +360,6 @@ export class SdkPiSession {
       onToolCall?.(formatToolStartNotification(event, session, this.runtime.cwd));
     }
 
-    if (event.type === 'tool_execution_end') {
-      const output = extractToolResultText(event.result);
-      if (output) toolOutputs.push(output);
-    }
-
     if (event.type === 'agent_end') {
       const failed = event.messages.find(
         (message) => message.role === 'assistant' && message.errorMessage,
@@ -383,8 +371,9 @@ export class SdkPiSession {
   }
 }
 
-function buildTelegramSessionId(prefix: string, chatId: string): string {
-  const sanitized = `${prefix}-${chatId}`
+/** Keeps the historical `<prefix>-<chatId>` shape so existing sessions/ files still resume. */
+function buildTelegramSessionId(prefix: string): string {
+  const sanitized = `${prefix}-${ALLOWED_CHAT_ID}`
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[^A-Za-z0-9]+/, '')
     .replace(/[^A-Za-z0-9]+$/, '');
@@ -438,21 +427,4 @@ function buildPiPrompt(
     message: `${filePrefix}${text}`,
     ...(images.length > 0 ? { images } : {}),
   };
-}
-
-function extractToolResultText(result: unknown): string {
-  if (typeof result === 'string') return result;
-  if (!result || typeof result !== 'object' || !('content' in result)) return '';
-
-  const content = result.content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((part) => {
-      if (part && typeof part === 'object' && 'text' in part) {
-        return typeof part.text === 'string' ? part.text : '';
-      }
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
 }

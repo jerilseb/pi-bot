@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { DAILY_MEMORY_DIR, MEMORY_PATH } from './config.ts';
 import { escapeTelegramHtml } from './telegram.ts';
+import { localDateString } from './util.ts';
 
 /**
  * Formats Pi tool-execution events into short Telegram HTML notifications,
@@ -161,13 +162,6 @@ function getDailyMemoryReadLabel(event: ToolExecutionStartEvent, cwd: string): s
 
 function dailyMemoryDateFromPath(filePath: string): string | null {
   return path.basename(filePath).match(/^(\d{4}-\d{2}-\d{2})\.md$/)?.[1] ?? null;
-}
-
-function localDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function skillNameForReadTool(

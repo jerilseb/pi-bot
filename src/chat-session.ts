@@ -3,7 +3,6 @@ import { type PiRuntime, SdkPiSession } from './pi-session.ts';
 import type { IncomingPrompt } from './types.ts';
 
 export interface ChatState {
-  chatId: string;
   queue: IncomingPrompt[];
   processing: boolean;
   pi: SdkPiSession;
@@ -12,66 +11,66 @@ export interface ChatState {
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 
-export interface ChatRegistry {
-  /** Returns the chat's state, creating a fresh Pi session on first use. */
-  get(chatId: string): ChatState;
-  /** Returns the chat's state if it already exists. */
-  getExisting(chatId: string): ChatState | null;
-  /** True while the chat is processing a prompt or has queued prompts. */
-  isBusy(chatId: string): boolean;
+/**
+ * Holds the single chat's state for one Pi runtime. The bot serves exactly one
+ * Telegram chat (TELEGRAM_ALLOWED_CHAT_ID), so this is a lazily created
+ * singleton rather than a registry.
+ */
+export interface ChatSession {
+  /** Returns the chat's state, creating a Pi session on first use. */
+  get(): ChatState;
+  /** Returns the chat's state only if it has already been created. */
+  existing(): ChatState | null;
+  /** True while a prompt is being processed or queued. */
+  isBusy(): boolean;
   /** (Re)starts the idle timer that disposes an unused session. */
   resetIdleTimer(chat: ChatState): void;
-  /** Disposes every session and forgets all tracked chats. */
-  clearAll(): void;
+  /** Disposes the session and forgets the tracked state. */
+  clear(): void;
 }
 
-export function createChatRegistry(runtime: PiRuntime): ChatRegistry {
-  const chats = new Map<string, ChatState>();
+export function createChatSession(runtime: PiRuntime, label: string): ChatSession {
+  let chat: ChatState | null = null;
 
-  const resetIdleTimer = (chat: ChatState): void => {
-    if (chat.idleTimer) clearTimeout(chat.idleTimer);
-    chat.idleTimer = setTimeout(() => {
-      console.log(`[${chat.chatId}] idle timeout; stopping Pi SDK session`);
-      chat.pi.cleanup();
-      chats.delete(chat.chatId);
+  const resetIdleTimer = (state: ChatState): void => {
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(() => {
+      console.log(`idle timeout; stopping ${label} Pi SDK session`);
+      state.pi.cleanup();
+      if (chat === state) chat = null;
     }, IDLE_TIMEOUT_MS);
   };
 
   return {
-    get(chatId): ChatState {
-      let chat = chats.get(chatId);
+    get(): ChatState {
       if (!chat) {
         chat = {
-          chatId,
           queue: [],
           processing: false,
-          pi: new SdkPiSession(runtime, chatId),
+          pi: new SdkPiSession(runtime),
           messageCount: 0,
           startedAt: Date.now(),
         };
-        chats.set(chatId, chat);
       }
       resetIdleTimer(chat);
       return chat;
     },
 
-    getExisting(chatId): ChatState | null {
-      return chats.get(chatId) ?? null;
+    existing(): ChatState | null {
+      return chat;
     },
 
-    isBusy(chatId): boolean {
-      const chat = chats.get(chatId);
+    isBusy(): boolean {
       return Boolean(chat?.processing || (chat?.queue.length ?? 0) > 0);
     },
 
     resetIdleTimer,
 
-    clearAll(): void {
-      for (const chat of chats.values()) {
-        if (chat.idleTimer) clearTimeout(chat.idleTimer);
-        chat.pi.cleanup();
-      }
-      chats.clear();
+    clear(): void {
+      if (!chat) return;
+      if (chat.idleTimer) clearTimeout(chat.idleTimer);
+      chat.pi.cleanup();
+      chat = null;
     },
   };
 }

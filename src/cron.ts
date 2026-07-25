@@ -23,7 +23,7 @@ export interface CronController {
 
 export function createCronController(options: {
   handleIncoming: (prompt: IncomingPrompt) => Promise<void>;
-  isChatBusy: (chatId: string) => boolean;
+  isChatBusy: () => boolean;
   isRunning: () => boolean;
 }): CronController {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -77,24 +77,23 @@ export function createCronController(options: {
       if (!job.enabled || !job.nextRunAt) continue;
       if (new Date(job.nextRunAt).getTime() > now.getTime()) continue;
 
-      const { chatId } = job;
-      if (!isAllowedTelegramChat(chatId)) {
-        console.warn(`[${chatId}] disabling cron ${job.id}; owning chat is not allowed`);
+      // A job persisted under a previous TELEGRAM_ALLOWED_CHAT_ID must not fire here.
+      if (!isAllowedTelegramChat(job.chatId)) {
+        console.warn(`disabling cron ${job.id}; it belongs to chat ${job.chatId}`);
         jobs[index] = disableCronJob(job, now);
         changed = true;
         continue;
       }
 
-      if (options.isChatBusy(chatId)) {
-        console.log(`[${chatId}] cron ${job.id} deferred; chat is busy`);
+      if (options.isChatBusy()) {
+        console.log(`cron ${job.id} deferred; chat is busy`);
         jobs[index] = deferCronJob(job, BUSY_DEFER_MS);
         changed = true;
         continue;
       }
 
-      console.log(`[${chatId}] cron ${job.id} due: ${job.title ?? job.prompt.slice(0, 80)}`);
+      console.log(`cron ${job.id} due: ${job.title ?? job.prompt.slice(0, 80)}`);
       await options.handleIncoming({
-        chatId,
         text: buildCronPrompt(job),
         attachments: [],
         source: 'cron',

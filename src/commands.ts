@@ -1,5 +1,5 @@
 import type { SessionStats } from '@earendil-works/pi-coding-agent';
-import type { ChatRegistry, ChatState } from './chat-session.ts';
+import type { ChatSession, ChatState } from './chat-session.ts';
 import { ELEVENLABS_API_KEY, HEARTBEAT_ENABLED, SEND_TOOL_CALLS } from './config.ts';
 import { cronStatusText } from './cron.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
@@ -12,15 +12,15 @@ import {
 } from './openai-usage.ts';
 import { discardPendingIngestion } from './inbound.ts';
 import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
-import { cancelChatSubagents, runningSubagentCount } from './subagents.ts';
+import { cancelAllSubagents, runningSubagentCount } from './subagents.ts';
 import { escapeTelegramHtml, sendTelegramInlineKeyboard, sendTelegramMessage } from './telegram.ts';
 import { voiceStatusText } from './voice.ts';
 
 export interface CommandContext {
   chat: ChatState;
-  registry: ChatRegistry;
-  backgroundRegistry: ChatRegistry;
-  getBackgroundModelName(chatId: string): string;
+  session: ChatSession;
+  backgroundSession: ChatSession;
+  getBackgroundModelName(): string;
   /** Shuts the bot down and exits so PM2 brings it back up. */
   restart(): Promise<void>;
 }
@@ -34,7 +34,6 @@ const TOKEN_NUMBER_FORMAT = new Intl.NumberFormat('en-US', {
 const HELP_TEXT = [
   'Telegram → Pi bridge commands:',
   '/status — show this chat session status',
-  '/request_access — request access for a new group',
   '/models — choose an allowed chat model',
   '/reasoning — choose the chat reasoning level',
   '/openaiusage — show OpenAI Codex usage windows and reset times',
@@ -79,23 +78,19 @@ function formatTokenCount(value: number): string {
 }
 
 const COMMANDS: Record<string, CommandHandler> = {
-  '/start': async ({ chat }) => {
-    await sendTelegramMessage(
-      chat.chatId,
-      "👋 Hi! Send me a message and I'll ask Pi. Use /help for commands.",
-    );
+  '/start': async () => {
+    await sendTelegramMessage("👋 Hi! Send me a message and I'll ask Pi. Use /help for commands.");
   },
 
-  '/help': async ({ chat }) => {
-    await sendTelegramMessage(chat.chatId, HELP_TEXT);
+  '/help': async () => {
+    await sendTelegramMessage(HELP_TEXT);
   },
 
-  '/status': async ({ chat, backgroundRegistry, getBackgroundModelName }) => {
+  '/status': async ({ chat, backgroundSession, getBackgroundModelName }) => {
     const uptimeSeconds = Math.floor((Date.now() - chat.startedAt) / 1000);
-    const background = backgroundRegistry.getExisting(chat.chatId);
+    const background = backgroundSession.existing();
     const thinking = await chat.pi.getThinkingState();
     await sendTelegramMessage(
-      chat.chatId,
       [
         'Session status:',
         `- Chat state: ${chat.processing ? 'processing' : 'idle'}`,
@@ -107,8 +102,8 @@ const COMMANDS: Record<string, CommandHandler> = {
         `- Session tokens: ${formatSessionTokens(chat.pi.getSessionStats())}`,
         `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
         `- Background queue: ${background?.queue.length ?? 0}`,
-        `- Background model: ${getBackgroundModelName(chat.chatId)}`,
-        `- Sub-agents running: ${runningSubagentCount(chat.chatId)}`,
+        `- Background model: ${getBackgroundModelName()}`,
+        `- Sub-agents running: ${runningSubagentCount()}`,
         `- Voice note tool: ${voiceStatusText()}`,
         `- Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`,
         `- Heartbeat: ${HEARTBEAT_ENABLED ? 'enabled' : 'off'}`,
@@ -117,26 +112,23 @@ const COMMANDS: Record<string, CommandHandler> = {
     );
   },
 
-  '/models': async ({ chat, registry }) => {
-    if (registry.isBusy(chat.chatId)) {
+  '/models': async ({ chat, session }) => {
+    if (session.isBusy()) {
       await sendTelegramMessage(
-        chat.chatId,
         '⚠️ Wait for the current chat response and queue to finish before switching models.',
       );
       return;
     }
 
     await sendTelegramInlineKeyboard(
-      chat.chatId,
       [`Current chat model: ${chat.pi.modelName}`, 'Choose a chat model:'].join('\n'),
       buildModelInlineKeyboard(),
     );
   },
 
-  '/reasoning': async ({ chat, registry }) => {
-    if (registry.isBusy(chat.chatId)) {
+  '/reasoning': async ({ chat, session }) => {
+    if (session.isBusy()) {
       await sendTelegramMessage(
-        chat.chatId,
         '⚠️ Wait for the current chat response and queue to finish before switching reasoning.',
       );
       return;
@@ -144,7 +136,6 @@ const COMMANDS: Record<string, CommandHandler> = {
 
     const thinking = await chat.pi.getThinkingState();
     await sendTelegramInlineKeyboard(
-      chat.chatId,
       [
         `Current chat model: ${chat.pi.modelName}`,
         `Current reasoning: ${thinking.level}`,
@@ -158,56 +149,49 @@ const COMMANDS: Record<string, CommandHandler> = {
     const accessToken = await chat.pi.getApiKeyForProvider(OPENAI_CODEX_PROVIDER);
     if (!accessToken) {
       await sendTelegramMessage(
-        chat.chatId,
         '❌ No OpenAI Codex credentials found. Authenticate with Pi using /login openai-codex, or set OPENAI_CODEX_API_KEY.',
       );
       return;
     }
 
-    await sendTelegramMessage(chat.chatId, 'Fetching OpenAI Codex usage...');
+    await sendTelegramMessage('Fetching OpenAI Codex usage...');
 
     try {
       const { usage, warnings } = await fetchOpenAIUsage(accessToken);
-      await sendTelegramMessage(chat.chatId, buildOpenAIUsageTelegramHtml(usage, warnings));
+      await sendTelegramMessage(buildOpenAIUsageTelegramHtml(usage, warnings));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await sendTelegramMessage(
-        chat.chatId,
         `❌ Failed to fetch OpenAI Codex usage: ${escapeTelegramHtml(message)}`,
       );
     }
   },
 
-  '/elevenlabsusage': async ({ chat }) => {
+  '/elevenlabsusage': async () => {
     if (!ELEVENLABS_API_KEY) {
-      await sendTelegramMessage(
-        chat.chatId,
-        '❌ No ElevenLabs API key found. Set ELEVENLABS_API_KEY in .env.',
-      );
+      await sendTelegramMessage('❌ No ElevenLabs API key found. Set ELEVENLABS_API_KEY in .env.');
       return;
     }
 
-    await sendTelegramMessage(chat.chatId, 'Fetching ElevenLabs usage...');
+    await sendTelegramMessage('Fetching ElevenLabs usage...');
 
     try {
       const usage = await fetchElevenLabsUsage(ELEVENLABS_API_KEY);
-      await sendTelegramMessage(chat.chatId, buildElevenLabsUsageTelegramHtml(usage));
+      await sendTelegramMessage(buildElevenLabsUsageTelegramHtml(usage));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await sendTelegramMessage(
-        chat.chatId,
         `❌ Failed to fetch ElevenLabs usage: ${escapeTelegramHtml(message)}`,
       );
     }
   },
 
   '/abort': async ({ chat }) => {
-    discardPendingIngestion(chat.chatId);
+    discardPendingIngestion();
     chat.queue.length = 0;
     chat.pi.abort();
-    const cancelledSubagents = await cancelChatSubagents(chat.chatId);
+    const cancelledSubagents = await cancelAllSubagents();
     await sendTelegramMessage(
-      chat.chatId,
       cancelledSubagents > 0
         ? `⏹ Aborting current prompt, clearing queue, and cancelling ${cancelledSubagents} sub-agent${cancelledSubagents === 1 ? '' : 's'}...`
         : '⏹ Aborting current prompt and clearing queue...',
@@ -215,7 +199,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   },
 
   '/new': async ({ chat }) => {
-    discardPendingIngestion(chat.chatId);
+    discardPendingIngestion();
     chat.queue.length = 0;
     // Never force chat.processing or dispose a streaming session here: abort the
     // in-flight response and queue the session swap, which runPrompt applies in
@@ -226,16 +210,15 @@ const COMMANDS: Record<string, CommandHandler> = {
     if (!chat.processing) chat.pi.reset();
     chat.messageCount = 0;
     chat.startedAt = Date.now();
-    await sendTelegramMessage(chat.chatId, '🔄 Started a fresh Pi conversation for this chat.');
+    await sendTelegramMessage('🔄 Started a fresh Pi conversation for this chat.');
   },
 
-  '/restart': async ({ chat, restart }) => {
-    await sendTelegramMessage(chat.chatId, '🧪 Running pre-restart checks...');
+  '/restart': async ({ restart }) => {
+    await sendTelegramMessage('🧪 Running pre-restart checks...');
 
     const checks = await runPreRestartChecks();
     if (!checks.ok) {
       await sendTelegramMessage(
-        chat.chatId,
         [
           `❌ Restart blocked. Pre-restart checks failed after ${formatPreRestartDuration(checks.durationMs)}.`,
           '',
@@ -246,7 +229,6 @@ const COMMANDS: Record<string, CommandHandler> = {
     }
 
     await sendTelegramMessage(
-      chat.chatId,
       `✅ Pre-restart checks passed in ${formatPreRestartDuration(checks.durationMs)}. Restarting bot process. PM2 should bring it back up shortly.`,
     );
     await restart();

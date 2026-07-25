@@ -21,7 +21,7 @@ Most AI tools are either:
 - **Useful on your machine** — it can inspect files, edit code, run tests, use local skills, and work inside a real repository.
 - **Proactive when needed** — it can schedule future tasks, run recurring checks, and keep heartbeat-style monitoring instructions.
 - **Persistent enough to be personal** — it has long-term memory and daily work notes so context does not vanish every session.
-- **Still under your control** — it is restricted to explicitly allowed Telegram chats and secrets stay in your `.env`.
+- **Still under your control** — it answers only the single Telegram chat in `TELEGRAM_ALLOWED_CHAT_ID` and secrets stay in your `.env`.
 
 ## What you can do with it
 
@@ -129,29 +129,11 @@ Create `.env`:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:your-telegram-token
+TELEGRAM_ALLOWED_CHAT_ID=123456789
 OPENROUTER_API_KEY=sk-or-your-key
 ```
 
-Create `files/allowed-chats.json`:
-
-```json
-[
-  {
-    "name": "Personal chat",
-    "id": "123456789",
-    "type": "private",
-    "enabled": true
-  },
-  {
-    "name": "Work group",
-    "id": "-1001234567890",
-    "type": "supergroup",
-    "enabled": true
-  }
-]
-```
-
-Secrets and deployment-specific values live in `.env`. Allowed Telegram chats live in `files/allowed-chats.json`, so the agent can manage them by editing that JSON file. Private chats are usually positive IDs; groups/supergroups are usually negative IDs such as `-1001234567890`.
+Secrets and deployment-specific values live in `.env`. `TELEGRAM_ALLOWED_CHAT_ID` is the single Telegram chat allowed to use the bot — messages from any other chat are ignored, and the value is read once at startup, so changing it requires a restart. Your own chat ID is a positive number; you can get it by messaging [@userinfobot](https://t.me/userinfobot).
 
 ### 3. Run locally
 
@@ -172,10 +154,10 @@ The startup logs show the active chat model, background model, enabled extension
 The default chat model is configured in `src/config.ts`:
 
 ```ts
-export const CHAT_MODEL = "openai-codex/gpt-5.4-mini";
+export const CHAT_MODEL = "openai-codex/gpt-5.6-luna";
 ```
 
-The active chat model can be changed from Telegram with `/models` and is persisted in `.active_model`.
+The active chat model and reasoning level can be changed from Telegram with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `CONFIG_ALLOWED_MODELS` or startup fails.
 
 Background heartbeat and cron prompts use `CONFIG_BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
 
@@ -203,6 +185,9 @@ Add any of these to `.env` to enable extra capabilities:
 # voice/audio transcription and Telegram voice-note replies
 ELEVENLABS_API_KEY=your-elevenlabs-key
 
+# Google GenAI transcription and voice-note replies
+GOOGLE_GENAI_API_KEY=your-google-genai-key
+
 # Tavily web search extension
 TAVILY_API_KEY_1=tvly-your-key
 # TAVILY_API_KEY_2=another-key-if-you-want
@@ -216,12 +201,14 @@ OPENAI_CODEX_API_KEY=your-codex-bearer-token
 
 Useful non-secret settings in `src/config.ts` include:
 
-- `CHAT_MODEL`, `CONFIG_BACKGROUND_MODEL`, and `CONFIG_ALLOWED_MODELS`
-- `CONFIG_ELEVENLABS_TTS_VOICE_ID`, `CONFIG_ELEVENLABS_TTS_MODEL`, and `CONFIG_ELEVENLABS_TTS_OUTPUT_FORMAT`
-- `PI_CHANNEL_IDLE_TIMEOUT_MINUTES` and `PI_CHANNEL_MAX_QUEUE_PER_CHAT`
-- `PI_CHANNEL_SEND_TOOL_CALLS`, `PI_CHANNEL_TOOL_CALL_BATCH_MS`, and `PI_CHANNEL_TOOL_CALL_BATCH_MAX_ITEMS`
-- `PI_CHANNEL_SEND_LOCAL_IMAGES`, `PI_CHANNEL_IMAGE_UPLOAD_DIRS`, `PI_CHANNEL_SEND_LOCAL_DOCUMENTS`, `PI_CHANNEL_DOCUMENT_UPLOAD_DIRS`, and `PI_CHANNEL_DOCUMENT_UPLOAD_EXTS`
-- `CONFIG_HEARTBEAT_ENABLED` and `PI_HEARTBEAT_INTERVAL_SECONDS`
+- `CHAT_MODEL`, `CONFIG_BACKGROUND_MODEL`, `CONFIG_SUBAGENT_MODEL`, and `CONFIG_ALLOWED_MODELS`
+- `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
+- `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
+- `IDLE_TIMEOUT_MINUTES` and `MAX_QUEUE_PER_CHAT`
+- `SEND_TOOL_CALLS`, `TOOL_CALL_BATCH_MS`, and `TOOL_CALL_BATCH_MAX_ITEMS`
+- `SEND_LOCAL_IMAGES`, `LOCAL_IMAGE_UPLOAD_DIRS`, `SEND_LOCAL_DOCUMENTS`, `LOCAL_DOCUMENT_UPLOAD_DIRS`, and `DOCUMENT_UPLOAD_EXTS`
+- `HEARTBEAT_ENABLED` and `HEARTBEAT_INTERVAL_SECONDS`
+- `SUBAGENT_MAX_RUNNING`, `SUBAGENT_DEFAULT_MAX_RUNTIME_MS`, and `SUBAGENT_SKILLS`
 
 ## Telegram commands
 
@@ -233,6 +220,7 @@ Inside Telegram:
 | `/help` | Show commands |
 | `/status` | Show the current chat session status |
 | `/models` | Choose an allowed chat model |
+| `/reasoning` | Choose the chat reasoning level |
 | `/openaiusage` | Show OpenAI Codex usage windows and reset times |
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
 | `/abort` | Stop the current response and clear the queue |
@@ -297,13 +285,13 @@ files/memory/YYYY-MM-DD.md       Daily/session notes
 files/heartbeat.md               Standing heartbeat instructions
 files/heartbeat-state.md         Durable heartbeat state
 files/cron-jobs.json             Scheduled tasks
-files/allowed-chats.json         Allowed Telegram chats/groups
-.active_model                    Active chat model
+files/post-restart-tasks.json    Tasks queued to run after a restart
+files/settings.json              Active chat model and reasoning level
 ```
 
 ## Safety notes
 
-- The bot is intentionally restricted to enabled entries in `files/allowed-chats.json`.
+- The bot is intentionally restricted to the single chat in `TELEGRAM_ALLOWED_CHAT_ID`.
 - Do not commit `.env` or real API keys.
 - Bots cannot participate in Telegram Secret Chats.
 - True disappearing messages are Telegram chat-level behavior; bot-simulated disappearing messages would require sending and later deleting a normal bot message.

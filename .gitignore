@@ -12,7 +12,6 @@ files/*
 .claude
 .headless-profile/
 debug-*.png
-.active_model
 sessions/
 workspace/
 certs/

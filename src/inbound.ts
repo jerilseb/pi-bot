@@ -13,28 +13,27 @@ import type { IncomingPrompt, TelegramMessage } from './types.ts';
 import { errorMessage } from './util.ts';
 
 /**
- * Per-chat ingestion epochs. Media ingestion (downloads, transcription) runs
- * detached from the polling loop, so /abort and /new bump the epoch to drop
- * ingestion results that finish after the user cancelled.
+ * Ingestion epoch. Media ingestion (downloads, transcription) runs detached
+ * from the polling loop, so /abort and /new bump the epoch to drop ingestion
+ * results that finish after the user cancelled.
  */
-const ingestionEpochs = new Map<string, number>();
+let epoch = 0;
 
-export function ingestionEpoch(chatId: string): number {
-  return ingestionEpochs.get(chatId) ?? 0;
+export function ingestionEpoch(): number {
+  return epoch;
 }
 
-export function discardPendingIngestion(chatId: string): void {
-  ingestionEpochs.set(chatId, ingestionEpoch(chatId) + 1);
+export function discardPendingIngestion(): void {
+  epoch++;
 }
 
 export async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPrompt | null> {
-  const chatId = String(message.chat.id);
-  if (!isAllowedTelegramChat(chatId)) return null;
+  if (!isAllowedTelegramChat(String(message.chat.id))) return null;
 
   const caption = message.caption?.trim() ?? '';
 
   if (message.text) {
-    return { chatId, text: message.text, attachments: [] };
+    return { text: message.text, attachments: [] };
   }
 
   if (message.photo?.length) {
@@ -42,13 +41,11 @@ export async function toIncomingPrompt(message: TelegramMessage): Promise<Incomi
     const downloaded = await downloadTelegramFile(largest.file_id, 'photo.jpg', largest.file_size);
     if (!downloaded) {
       return {
-        chatId,
         text: '⚠️ I could not download that photo.',
         attachments: [],
       };
     }
     return {
-      chatId,
       text: caption || 'Describe this image.',
       attachments: [
         {
@@ -69,21 +66,19 @@ export async function toIncomingPrompt(message: TelegramMessage): Promise<Incomi
     const downloaded = await downloadTelegramFile(file.file_id, filename, file.file_size);
     if (!downloaded) {
       return {
-        chatId,
         text: `⚠️ I could not download ${filename}.`,
         attachments: [],
       };
     }
 
     if (isTranscribableAudio(message, mimeType, filename)) {
-      void sendChatAction(chatId);
+      void sendChatAction();
       const transcription = await transcribeAudio(downloaded.localPath, mimeType, filename);
       if (transcription.ok && transcription.text) {
         deleteLocalFile(downloaded.localPath);
         const label = message.voice ? '🎤 Voice message' : `🎵 Audio: ${filename}`;
         const prefix = caption ? `${caption}\n\n` : '';
         return {
-          chatId,
           text: `${prefix}${label}: ${transcription.text}`,
           attachments: [],
         };
@@ -93,7 +88,6 @@ export async function toIncomingPrompt(message: TelegramMessage): Promise<Incomi
         ? ` Transcription failed: ${transcription.error}`
         : ' Transcription is not configured.';
       return {
-        chatId,
         text: `${caption || `Audio file uploaded: ${filename}.`}${reason}\nLocal file path: ${downloaded.localPath}`,
         attachments: [
           {
@@ -108,7 +102,6 @@ export async function toIncomingPrompt(message: TelegramMessage): Promise<Incomi
     }
 
     return {
-      chatId,
       text:
         caption ||
         `A file was uploaded: ${filename}. Use the attached local path if you need to inspect it.`,

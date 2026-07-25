@@ -2,12 +2,14 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CronExpressionParser } from 'cron-parser';
-import { CRON_JOBS_PATH, FILES_DIR, getPrimaryTelegramChatId } from './config.ts';
+import { ALLOWED_CHAT_ID, CRON_JOBS_PATH, FILES_DIR } from './config.ts';
+import { requireValidDate } from './util.ts';
 
 export type CronJobKind = 'once' | 'interval' | 'cron';
 
 export interface CronJob {
   id: string;
+  /** Chat that created the job; cron refuses to fire jobs from a different chat. */
   chatId: string;
   enabled: boolean;
   kind: CronJobKind;
@@ -24,7 +26,6 @@ export interface CronJob {
 }
 
 export interface CreateCronJobInput {
-  chatId: string;
   kind: CronJobKind;
   prompt: string;
   title?: string;
@@ -67,11 +68,7 @@ export function readCronJobs(): CronJob[] {
     throw new Error(`${CRON_JOBS_PATH} must contain a JSON array`);
   }
 
-  const hasLegacyJobs = parsed.some((job) => !hasCronJobChatId(job));
-  const legacyChatId = hasLegacyJobs ? getPrimaryTelegramChatId() : '';
-  const jobs = parsed.map((job) => normalizeCronJob(job, legacyChatId));
-  if (hasLegacyJobs) writeCronJobsFile(jobs);
-  return jobs;
+  return parsed.map((job) => normalizeCronJob(job));
 }
 
 export function writeCronJobs(jobs: CronJob[], options: { notify?: boolean } = {}): void {
@@ -79,12 +76,12 @@ export function writeCronJobs(jobs: CronJob[], options: { notify?: boolean } = {
   if (options.notify !== false) notifyCronJobsChanged();
 }
 
-export function createCronJob(input: CreateCronJobInput): CronJob {
+function createCronJob(input: CreateCronJobInput): CronJob {
   const now = new Date();
   const nowIso = now.toISOString();
   const job = normalizeCronJob({
     id: `job_${crypto.randomUUID()}`,
-    chatId: input.chatId,
+    chatId: ALLOWED_CHAT_ID,
     enabled: input.enabled ?? true,
     kind: input.kind,
     ...(input.title ? { title: input.title } : {}),
@@ -113,13 +110,9 @@ export function addCronJob(input: CreateCronJobInput): CronJob {
   return job;
 }
 
-export function updateCronJob(
-  chatId: string,
-  id: string,
-  input: UpdateCronJobInput,
-): CronJob {
+export function updateCronJob(id: string, input: UpdateCronJobInput): CronJob {
   const jobs = readCronJobs();
-  const index = jobs.findIndex((job) => job.id === id && job.chatId === chatId);
+  const index = jobs.findIndex((job) => job.id === id);
   if (index < 0) throw new Error(`No scheduled task found with id ${id}`);
 
   const existing = jobs[index];
@@ -137,8 +130,8 @@ export function updateCronJob(
   return updated;
 }
 
-export function cancelCronJob(chatId: string, id: string): CronJob {
-  return updateCronJob(chatId, id, { enabled: false });
+export function cancelCronJob(id: string): CronJob {
+  return updateCronJob(id, { enabled: false });
 }
 
 export function onCronJobsChanged(listener: CronJobsChangedListener): () => void {
@@ -146,7 +139,7 @@ export function onCronJobsChanged(listener: CronJobsChangedListener): () => void
   return () => listeners.delete(listener);
 }
 
-export function notifyCronJobsChanged(): void {
+function notifyCronJobsChanged(): void {
   for (const listener of listeners) listener();
 }
 
@@ -205,7 +198,7 @@ export function deferCronJob(job: CronJob, delayMs: number, fromDate: Date = new
 export function formatCronJob(job: CronJob): string {
   const title = job.title ? `${job.title} ` : '';
   const schedule = formatCronSchedule(job);
-  return `${job.id} — ${title}${job.enabled ? 'enabled' : 'disabled'}, chat: ${job.chatId}, ${schedule}, next: ${job.nextRunAt ?? 'none'}`;
+  return `${job.id} — ${title}${job.enabled ? 'enabled' : 'disabled'}, ${schedule}, next: ${job.nextRunAt ?? 'none'}`;
 }
 
 function formatCronSchedule(job: CronJob): string {
@@ -217,12 +210,7 @@ function formatCronSchedule(job: CronJob): string {
   return `cron ${job.schedule}${job.timezone ? ` (${job.timezone})` : ''}`;
 }
 
-function hasCronJobChatId(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || !('chatId' in value)) return false;
-  return typeof value.chatId === 'string' && Boolean(value.chatId.trim());
-}
-
-function normalizeCronJob(value: unknown, legacyChatId = ''): CronJob {
+function normalizeCronJob(value: unknown): CronJob {
   if (!value || typeof value !== 'object') {
     throw new Error('Scheduled task entries must be objects');
   }
@@ -238,7 +226,7 @@ function normalizeCronJob(value: unknown, legacyChatId = ''): CronJob {
     throw new Error(`Scheduled task ${record.id} requires prompt`);
   }
 
-  const chatId = typeof record.chatId === 'string' ? record.chatId.trim() : legacyChatId.trim();
+  const chatId = typeof record.chatId === 'string' ? record.chatId.trim() : '';
   if (!chatId) {
     throw new Error(`Scheduled task ${record.id} requires chatId`);
   }
@@ -289,15 +277,6 @@ function validateCronJob(job: CronJob): void {
   CronExpressionParser.parse(job.schedule, {
     ...(job.timezone ? { tz: job.timezone } : {}),
   });
-}
-
-function requireValidDate(value: string | undefined, field: string): Date {
-  if (!value) throw new Error(`Missing required date field ${field}`);
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid date for ${field}: ${value}`);
-  }
-  return date;
 }
 
 function definedOnly<T extends object>(value: T): Partial<T> {

@@ -29,7 +29,6 @@ export const MEMORY_PATH = path.join(FILES_DIR, 'memory.md');
 export const DAILY_MEMORY_DIR = path.join(FILES_DIR, 'memory');
 export const CRON_JOBS_PATH = path.join(FILES_DIR, 'cron-jobs.json');
 export const POST_RESTART_TASKS_PATH = path.join(FILES_DIR, 'post-restart-tasks.json');
-export const ALLOWED_CHATS_PATH = path.join(FILES_DIR, 'allowed-chats.json');
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, 'heartbeat.md');
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');
 
@@ -37,11 +36,12 @@ export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');
 // Environment and secrets
 // ---------------------------------------------------------------------------
 
-export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN;
+export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+/** The single Telegram chat allowed to use this bot. */
+export const ALLOWED_CHAT_ID = process.env.TELEGRAM_ALLOWED_CHAT_ID?.trim() ?? '';
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? '';
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? '';
-export const GOOGLE_GENAI_API_KEY =
-  process.env.GOOGLE_GENAI_API_KEY ?? process.env.GEMINI_API_KEY ?? '';
+export const GOOGLE_GENAI_API_KEY = process.env.GOOGLE_GENAI_API_KEY ?? '';
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 // ---------------------------------------------------------------------------
@@ -49,8 +49,8 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 // ---------------------------------------------------------------------------
 
 export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
-const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.6-luna';
-const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.6-luna';
+const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.6-terra';
+const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.6-terra';
 const CONFIG_ALLOWED_MODELS = [
   'openai-codex/gpt-5.5',
   'openai-codex/gpt-5.6-luna',
@@ -129,7 +129,7 @@ export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 const IDLE_TIMEOUT_MINUTES = 120;
 export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60_000;
-export const MAX_QUEUE_PER_CHAT = 5;
+export const MAX_QUEUED_PROMPTS = 5;
 export const SEND_TOOL_CALLS = true;
 export const TOOL_CALL_BATCH_MS = 5000;
 export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
@@ -210,88 +210,7 @@ export const HEARTBEAT_NOOP = '__HEARTBEAT_NOOP__';
 export const CRON_NOOP = '__CRON_NOOP__';
 export const BACKGROUND_BASH_NOOP = '__BACKGROUND_BASH_NOOP__';
 
-export interface AllowedTelegramChat {
-  id: string;
-  name: string;
-  enabled: boolean;
-  type?: string;
-}
-
-export function ensureAllowedChatsFile(): void {
-  if (fs.existsSync(ALLOWED_CHATS_PATH)) return;
-  fs.mkdirSync(FILES_DIR, { recursive: true });
-  fs.writeFileSync(ALLOWED_CHATS_PATH, '[]\n', 'utf8');
-}
-
-export function readAllowedTelegramChats(): AllowedTelegramChat[] {
-  ensureAllowedChatsFile();
-  const content = fs.readFileSync(ALLOWED_CHATS_PATH, 'utf8').trim();
-  if (!content) return [];
-
-  const parsed = JSON.parse(content) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error(`${ALLOWED_CHATS_PATH} must contain a JSON array of allowed chats`);
-  }
-
-  const seen = new Set<string>();
-  const chats: AllowedTelegramChat[] = [];
-  for (let index = 0; index < parsed.length; index++) {
-    const chat = parseAllowedTelegramChat(parsed[index], index);
-    if (seen.has(chat.id)) continue;
-    seen.add(chat.id);
-    chats.push(chat);
-  }
-  return chats;
-}
-
-export function getAllowedTelegramChatIds(): string[] {
-  return readAllowedTelegramChats()
-    .filter((chat) => chat.enabled)
-    .map((chat) => chat.id);
-}
-
-export function getPrivateTelegramChatIds(): string[] {
-  return readAllowedTelegramChats()
-    .filter((chat) => chat.enabled && chat.type === 'private')
-    .map((chat) => chat.id);
-}
-
-export function getPrimaryTelegramChatId(): string {
-  return getAllowedTelegramChatIds()[0] ?? '';
-}
-
+/** True only for the single chat configured via TELEGRAM_ALLOWED_CHAT_ID. */
 export function isAllowedTelegramChat(chatId: string): boolean {
-  return getAllowedTelegramChatIds().includes(chatId.trim());
-}
-
-function parseAllowedTelegramChat(entry: unknown, index: number): AllowedTelegramChat {
-  if (!isRecord(entry)) {
-    throw new Error(`${ALLOWED_CHATS_PATH}[${index}] must be an object`);
-  }
-
-  const id = parseAllowedTelegramChatId(entry.id, index);
-  const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : id;
-  const enabled = typeof entry.enabled === 'boolean' ? entry.enabled : true;
-  const type = typeof entry.type === 'string' && entry.type.trim() ? entry.type.trim() : undefined;
-
-  return {
-    id,
-    name,
-    enabled,
-    ...(type ? { type } : {}),
-  };
-}
-
-function parseAllowedTelegramChatId(value: unknown, index: number): string {
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    throw new Error(`${ALLOWED_CHATS_PATH}[${index}].id must be a string or number`);
-  }
-
-  const id = String(value).trim();
-  if (!id) throw new Error(`${ALLOWED_CHATS_PATH}[${index}].id must not be empty`);
-  return id;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return Boolean(ALLOWED_CHAT_ID) && chatId.trim() === ALLOWED_CHAT_ID;
 }

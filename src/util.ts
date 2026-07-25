@@ -27,16 +27,53 @@ export function parseModelRef(value: string): ModelRef {
   };
 }
 
-export function normalizeModelRef(value: string, defaultProvider?: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  if (!defaultProvider || trimmed.startsWith(`${defaultProvider}/`)) {
-    return trimmed;
-  }
-  return `${defaultProvider}/${trimmed}`;
+export function normalizeModelRef(value: string): string {
+  return value.trim();
 }
 
 export function formatModelRef(ref: ModelRef): string {
   return `${ref.provider}/${ref.model}`;
 }
 
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Formats a millisecond duration as `45s`, `3m 20s`, or `2h 15m`. */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes ? `${hours}h ${remMinutes}m` : `${hours}h`;
+}
+
+/** Local-timezone YYYY-MM-DD, used for daily memory note filenames. */
+export function localDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function requireValidDate(value: unknown, field: string): Date {
+  if (typeof value !== 'string' || !value) {
+    throw new Error(`Missing required date field ${field}`);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Invalid date for ${field}: ${value}`);
+  }
+  return date;
+}

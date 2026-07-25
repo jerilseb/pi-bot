@@ -24,7 +24,6 @@ type RestartBotParamsType = Static<typeof RestartBotParams>;
 const RESTART_DELAY_MS = 300;
 
 export function telegramRestartToolExtension(
-  chatId: string,
   restart: () => Promise<void>,
 ): (pi: ExtensionAPI) => void {
   let restartRequested = false;
@@ -53,13 +52,12 @@ export function telegramRestartToolExtension(
         }
 
         restartRequested = true;
-        await sendTelegramMessage(chatId, '🧪 Running pre-restart checks...');
+        await sendTelegramMessage('🧪 Running pre-restart checks...');
 
         const checks = await runPreRestartChecks();
         if (!checks.ok) {
           restartRequested = false;
           await sendTelegramMessage(
-            chatId,
             [
               `❌ Restart blocked. Pre-restart checks failed after ${formatPreRestartDuration(checks.durationMs)}.`,
               '',
@@ -72,7 +70,6 @@ export function telegramRestartToolExtension(
         const afterRestartPrompt = params.after_restart_prompt?.trim();
         const postRestartTask = afterRestartPrompt
           ? addPostRestartTask({
-              chatId,
               prompt: afterRestartPrompt,
               ...(params.after_restart_title?.trim()
                 ? { title: params.after_restart_title.trim() }
@@ -81,7 +78,6 @@ export function telegramRestartToolExtension(
           : null;
 
         await sendTelegramMessage(
-          chatId,
           [
             `✅ Pre-restart checks passed in ${formatPreRestartDuration(checks.durationMs)}. Restarting bot process. PM2 should bring it back up shortly.`,
             ...(postRestartTask

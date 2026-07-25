@@ -1,6 +1,11 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { MAX_TTS_CHARS, TELEGRAM_MEDIA_TIMEOUT_MS, TELEGRAM_VOICE_UPLOAD_LIMIT } from './config.ts';
+import {
+  ALLOWED_CHAT_ID,
+  MAX_TTS_CHARS,
+  TELEGRAM_MEDIA_TIMEOUT_MS,
+  TELEGRAM_VOICE_UPLOAD_LIMIT,
+} from './config.ts';
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
 import { telegram } from './telegram.ts';
 
@@ -17,39 +22,37 @@ export function voiceStatusText(): string {
   return textToSpeechStatusText();
 }
 
-export function telegramVoiceNoteExtension(chatId: string): (pi: ExtensionAPI) => void {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: 'send_voice_note',
-      label: 'Send Voice Note',
-      description:
-        'Send the Telegram user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.',
-      promptSnippet: 'Send a Telegram voice note to the user using the configured TTS provider',
-      promptGuidelines: [
-        'Use send_voice_note when the user asks for a voice note, audio reply, spoken summary, or says to reply by voice.',
-        'You may use it proactively for short personal or time-sensitive messages where voice is clearly helpful.',
-        'Keep voice-note text concise and natural. Do not read long code blocks or large tables aloud unless the user explicitly asks.',
-        "After sending a voice note, keep the final text response brief, e.g. 'Sent a voice note.'",
-      ],
-      parameters: SendVoiceNoteParams,
+export function telegramVoiceNoteExtension(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: 'send_voice_note',
+    label: 'Send Voice Note',
+    description:
+      'Send the Telegram user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.',
+    promptSnippet: 'Send a Telegram voice note to the user using the configured TTS provider',
+    promptGuidelines: [
+      'Use send_voice_note when the user asks for a voice note, audio reply, spoken summary, or says to reply by voice.',
+      'You may use it proactively for short personal or time-sensitive messages where voice is clearly helpful.',
+      'Keep voice-note text concise and natural. Do not read long code blocks or large tables aloud unless the user explicitly asks.',
+      "After sending a voice note, keep the final text response brief, e.g. 'Sent a voice note.'",
+    ],
+    parameters: SendVoiceNoteParams,
 
-      async execute(_toolCallId, params) {
-        const result = await sendTelegramVoiceNote(chatId, params.text);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Voice note sent (${prepareTtsText(params.text).length} characters).`,
-            },
-          ],
-          details: result,
-        };
-      },
-    });
-  };
+    async execute(_toolCallId, params) {
+      const result = await sendTelegramVoiceNote(params.text);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Voice note sent (${prepareTtsText(params.text).length} characters).`,
+          },
+        ],
+        details: result,
+      };
+    },
+  });
 }
 
-export async function sendTelegramVoiceNote(chatId: string, text: string): Promise<TtsAudioResult> {
+async function sendTelegramVoiceNote(text: string): Promise<TtsAudioResult> {
   const speechText = prepareTtsText(text);
   if (!speechText) {
     throw new Error('Voice note text is empty after cleanup.');
@@ -63,7 +66,7 @@ export async function sendTelegramVoiceNote(chatId: string, text: string): Promi
   }
 
   const form = new FormData();
-  form.append('chat_id', chatId);
+  form.append('chat_id', ALLOWED_CHAT_ID);
   form.append('voice', new Blob([result.audio], { type: 'audio/ogg' }), 'pi-reply.ogg');
   await telegram('sendVoice', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
   return result;

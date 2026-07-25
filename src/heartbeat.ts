@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import {
+  ALLOWED_CHAT_ID,
   HEARTBEAT_ENABLED,
-  getPrimaryTelegramChatId,
   HEARTBEAT_FILE_PATH,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_NOOP,
@@ -16,24 +16,23 @@ export interface HeartbeatController {
 
 export function createHeartbeatController(options: {
   handleIncoming: (prompt: IncomingPrompt) => Promise<void>;
-  isChatBusy: (chatId: string) => boolean;
+  isChatBusy: () => boolean;
   isRunning: () => boolean;
 }): HeartbeatController {
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  const runOnce = async (chatId: string): Promise<void> => {
+  const runOnce = async (): Promise<void> => {
     if (!options.isRunning()) return;
 
     const { filePath, instructions } = readHeartbeatInstructions();
     if (!instructions) return;
 
-    if (options.isChatBusy(chatId)) {
-      console.log(`[${chatId}] heartbeat skipped; chat is busy`);
+    if (options.isChatBusy()) {
+      console.log('heartbeat skipped; chat is busy');
       return;
     }
 
     await options.handleIncoming({
-      chatId,
       text: buildHeartbeatPrompt(instructions, filePath),
       attachments: [],
       source: 'heartbeat',
@@ -43,19 +42,12 @@ export function createHeartbeatController(options: {
 
   return {
     start(): void {
-      if (!HEARTBEAT_ENABLED || timer) return;
-
-      const chatId = getPrimaryTelegramChatId();
-      if (!chatId) return;
+      if (!HEARTBEAT_ENABLED || timer || !ALLOWED_CHAT_ID) return;
 
       console.log(
-        `Heartbeat: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${chatId}`,
+        `Heartbeat: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${ALLOWED_CHAT_ID}`,
       );
-      timer = setInterval(() => {
-        const currentChatId = getPrimaryTelegramChatId();
-        if (!currentChatId) return;
-        void runOnce(currentChatId);
-      }, HEARTBEAT_INTERVAL_MS);
+      timer = setInterval(() => void runOnce(), HEARTBEAT_INTERVAL_MS);
     },
 
     stop(): void {
@@ -84,7 +76,7 @@ function readHeartbeatInstructions(): {
 
   const content = fs.readFileSync(HEARTBEAT_FILE_PATH, 'utf8');
   const trimmed = content.trim();
-  const body = trimmed.replace(/^#\s*(?:Heartbeat|Heatbeat)\s*/i, '').trim();
+  const body = trimmed.replace(/^#\s*Heartbeat\s*/i, '').trim();
   return { filePath: HEARTBEAT_FILE_PATH, instructions: body ? trimmed : '' };
 }
 
