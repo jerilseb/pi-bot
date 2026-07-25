@@ -48,20 +48,18 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 // Models
 // ---------------------------------------------------------------------------
 
+/** Default chat model. files/settings.json overrides it; see MODEL below. */
 export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
-const CONFIG_BACKGROUND_MODEL = 'openai-codex/gpt-5.6-terra';
-const CONFIG_SUBAGENT_MODEL = 'openai-codex/gpt-5.6-terra';
-const CONFIG_ALLOWED_MODELS = [
+/** Model for heartbeat and cron prompts. Not changeable from Telegram. */
+export const BACKGROUND_MODEL = 'openai-codex/gpt-5.6-terra';
+export const SUBAGENT_MODEL = 'openai-codex/gpt-5.6-terra';
+/** Chat models offered by /models. Must contain CHAT_MODEL and the active model. */
+export const ALLOWED_MODELS: readonly string[] = [
   'openai-codex/gpt-5.5',
   'openai-codex/gpt-5.6-luna',
   'openai-codex/gpt-5.6-sol',
   'openrouter/moonshotai/kimi-k2.6',
-] as const;
-
-export const DEFAULT_MODEL = CHAT_MODEL.trim();
-export const BACKGROUND_MODEL = CONFIG_BACKGROUND_MODEL.trim();
-export const SUBAGENT_MODEL = CONFIG_SUBAGENT_MODEL.trim();
-export const ALLOWED_MODELS: readonly string[] = CONFIG_ALLOWED_MODELS.map((model) => model.trim());
+];
 
 interface BotSettings {
   defaultProvider?: unknown;
@@ -83,7 +81,7 @@ const SETTINGS_MODEL =
     ? `${BOT_SETTINGS.defaultProvider}/${BOT_SETTINGS.defaultModel}`.trim()
     : '';
 
-export const MODEL = SETTINGS_MODEL || DEFAULT_MODEL;
+export const MODEL = SETTINGS_MODEL || CHAT_MODEL;
 
 export function ensureBotSettingsFile(): void {
   if (fs.existsSync(BOT_SETTINGS_PATH)) return;

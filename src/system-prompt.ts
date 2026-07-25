@@ -90,7 +90,7 @@ function appendActiveModelToSystemPrompt(systemPrompt: string): string {
     '## Active chat settings',
     `The bot stores its active chat model and reasoning level in ${BOT_SETTINGS_PATH}.`,
     'The model is stored as defaultProvider plus defaultModel; reasoning is stored as defaultThinkingLevel.',
-    'The heartbeat/cron background model is configured only by CONFIG_BACKGROUND_MODEL in src/config.ts and cannot be changed from Telegram.',
+    'The heartbeat/cron background model is configured only by BACKGROUND_MODEL in src/config.ts and cannot be changed from Telegram.',
     'When the Telegram user changes chat models with /models or reasoning with /reasoning, the bot updates this bot-specific settings file.',
     'These settings are isolated from ~/.pi/agent/settings.json.',
   ].join('\n');

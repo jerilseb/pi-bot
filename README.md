@@ -157,9 +157,9 @@ The default chat model is configured in `src/config.ts`:
 export const CHAT_MODEL = "openai-codex/gpt-5.6-luna";
 ```
 
-The active chat model and reasoning level can be changed from Telegram with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `CONFIG_ALLOWED_MODELS` or startup fails.
+The active chat model and reasoning level can be changed from Telegram with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `ALLOWED_MODELS` or startup fails.
 
-Background heartbeat and cron prompts use `CONFIG_BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
+Background heartbeat and cron prompts use `BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
 
 Model refs use this form:
 
@@ -201,7 +201,7 @@ OPENAI_CODEX_API_KEY=your-codex-bearer-token
 
 Useful non-secret settings in `src/config.ts` include:
 
-- `CHAT_MODEL`, `CONFIG_BACKGROUND_MODEL`, `CONFIG_SUBAGENT_MODEL`, and `CONFIG_ALLOWED_MODELS`
+- `CHAT_MODEL`, `BACKGROUND_MODEL`, `SUBAGENT_MODEL`, and `ALLOWED_MODELS`
 - `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
 - `IDLE_TIMEOUT_MINUTES` and `MAX_QUEUE_PER_CHAT`
