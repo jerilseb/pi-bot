@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
-import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
+import { RESTART_TOOL_DELAY_MS } from './config.ts';
 import { addPostRestartTask, formatPostRestartTask } from './post-restart-tasks.ts';
-import { escapeTelegramHtml, sendTelegramMessage } from './telegram.ts';
+import { runRestartGate } from './restart-flow.ts';
 import { textResult } from './tool-result.ts';
 import { errorMessage } from './util.ts';
 
@@ -20,8 +20,6 @@ const RestartBotParams = Type.Object({
 });
 
 type RestartBotParamsType = Static<typeof RestartBotParams>;
-
-const RESTART_DELAY_MS = 300;
 
 export function telegramRestartToolExtension(
   restart: () => Promise<void>,
@@ -52,45 +50,32 @@ export function telegramRestartToolExtension(
         }
 
         restartRequested = true;
-        await sendTelegramMessage('🧪 Running pre-restart checks...');
+        const afterRestartPrompt = params.after_restart_prompt?.trim();
 
-        const checks = await runPreRestartChecks();
-        if (!checks.ok) {
+        // The follow-up task is queued inside the gate so it is only persisted
+        // once the checks pass, never on a blocked restart.
+        const passed = await runRestartGate(() => {
+          if (!afterRestartPrompt) return [];
+
+          const task = addPostRestartTask({
+            prompt: afterRestartPrompt,
+            ...(params.after_restart_title?.trim()
+              ? { title: params.after_restart_title.trim() }
+              : {}),
+          });
+          return [`Queued post-restart task: ${formatPostRestartTask(task)}`];
+        });
+
+        if (!passed) {
           restartRequested = false;
-          await sendTelegramMessage(
-            [
-              `❌ Restart blocked. Pre-restart checks failed after ${formatPreRestartDuration(checks.durationMs)}.`,
-              '',
-              `<pre><code>${escapeTelegramHtml(checks.output)}</code></pre>`,
-            ].join('\n'),
-          );
           return textResult('Restart blocked because pre-restart checks failed.');
         }
-
-        const afterRestartPrompt = params.after_restart_prompt?.trim();
-        const postRestartTask = afterRestartPrompt
-          ? addPostRestartTask({
-              prompt: afterRestartPrompt,
-              ...(params.after_restart_title?.trim()
-                ? { title: params.after_restart_title.trim() }
-                : {}),
-            })
-          : null;
-
-        await sendTelegramMessage(
-          [
-            `✅ Pre-restart checks passed in ${formatPreRestartDuration(checks.durationMs)}. Restarting bot process. PM2 should bring it back up shortly.`,
-            ...(postRestartTask
-              ? [`Queued post-restart task: ${formatPostRestartTask(postRestartTask)}`]
-              : []),
-          ].join('\n'),
-        );
 
         setTimeout(() => {
           void restart().catch((error) => {
             console.error('Restart tool failed:', errorMessage(error));
           });
-        }, RESTART_DELAY_MS);
+        }, RESTART_TOOL_DELAY_MS);
 
         return textResult(
           'Restart scheduled after successful pre-restart checks. The bot process will exit shortly so PM2 can restart it.',

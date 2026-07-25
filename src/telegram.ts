@@ -6,25 +6,19 @@ import {
 } from './config.ts';
 import { errorMessage } from './util.ts';
 
-export async function registerBotCommands(): Promise<void> {
+/** One entry of the Telegram command menu. Built from the table in src/commands.ts. */
+export interface TelegramBotCommand {
+  /** Command name without the leading slash. */
+  command: string;
+  description: string;
+}
+
+export async function registerBotCommands(commands: TelegramBotCommand[]): Promise<void> {
   try {
     await telegram('setMyCommands', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        commands: [
-          { command: 'start', description: 'Say hi' },
-          { command: 'help', description: 'Show commands' },
-          { command: 'status', description: 'Show chat session status' },
-          { command: 'models', description: 'Switch chat model' },
-          { command: 'reasoning', description: 'Switch chat reasoning level' },
-          { command: 'openaiusage', description: 'Show OpenAI Codex usage' },
-          { command: 'elevenlabsusage', description: 'Show ElevenLabs usage' },
-          { command: 'abort', description: 'Stop the current Pi response' },
-          { command: 'new', description: "Reset this chat's Pi conversation" },
-          { command: 'restart', description: 'Restart the bot process via PM2' },
-        ],
-      }),
+      body: JSON.stringify({ commands }),
     });
   } catch (error) {
     console.error('Failed to register bot commands:', errorMessage(error));

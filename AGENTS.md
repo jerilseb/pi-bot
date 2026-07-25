@@ -15,13 +15,13 @@ Key files:
 - `src/telegram.ts` — Telegram API helpers, HTML sanitizing, tag-aware message splitting.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion and ingestion epochs.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
-- `src/commands.ts` — slash commands; `src/model-menu.ts`, `src/reasoning-menu.ts` — their inline keyboards.
+- `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/model-menu.ts`, `src/reasoning-menu.ts` — their inline keyboards.
 - `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks.
 - `src/subagents.ts` — isolated background sub-agents. `src/background-bash.ts` — background shell sessions.
 - `src/uploads.ts`, `src/voice.ts`, `src/speech.ts`, `src/telegram-menu.ts` — agent-facing Telegram tools.
 - `src/env-guard.ts` — blocks tool access to `.env` files. `src/util.ts` — shared helpers.
-- `src/restart-tool.ts`, `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
+- `src/restart-tool.ts`, `src/restart-flow.ts` (shared `/restart` + `restart_bot` gate), `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
 - `extensions/` — local Pi extensions (web search, web fetch).
 - `skills/` — Pi skills.
 - `files/` — persistent prompt/memory/heartbeat/schedule state.

@@ -22,7 +22,7 @@ import {
   stopAllBackgroundSessions,
 } from './src/background-bash.ts';
 import { createChatSession, type ChatSession, type ChatState } from './src/chat-session.ts';
-import { handleCommand } from './src/commands.ts';
+import { handleCommand, telegramCommandMenu } from './src/commands.ts';
 import {
   ALLOWED_CHAT_ID,
   BACKGROUND_MODEL,
@@ -31,6 +31,7 @@ import {
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_SKILLS_DIR,
+  RESTART_EXIT_DELAY_MS,
   SEND_TOOL_CALLS,
   SESSIONS_DIR,
   SUBAGENT_MODEL,
@@ -180,7 +181,7 @@ function validateConfiguration(): void {
 /** Shuts the bot down and exits so PM2 brings the process back up. */
 async function restart(): Promise<void> {
   await shutdown();
-  setTimeout(() => process.exit(0), 250);
+  setTimeout(() => process.exit(0), RESTART_EXIT_DELAY_MS);
 }
 
 async function handleIncoming(prompt: IncomingPrompt): Promise<void> {
@@ -307,7 +308,7 @@ function cleanupAttachments(prompt: IncomingPrompt): void {
 async function pollTelegram(): Promise<void> {
   logStartupBanner();
 
-  await registerBotCommands();
+  await registerBotCommands(telegramCommandMenu());
   heartbeat.start();
   cron.start();
   await notifyAppStarted();

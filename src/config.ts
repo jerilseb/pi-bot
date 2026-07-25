@@ -133,6 +133,15 @@ export const TOOL_CALL_BATCH_MS = 5000;
 export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
 
 // ---------------------------------------------------------------------------
+// Restart lifecycle
+// ---------------------------------------------------------------------------
+
+/** Grace period after shutdown so final Telegram sends flush before the exit. */
+export const RESTART_EXIT_DELAY_MS = 250;
+/** Delay before restart_bot restarts, so its tool result reaches the agent first. */
+export const RESTART_TOOL_DELAY_MS = 300;
+
+// ---------------------------------------------------------------------------
 // Voice and transcription
 // ---------------------------------------------------------------------------
 
