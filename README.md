@@ -175,6 +175,8 @@ Both default to **off** — only a literal `true` enables either. Both are read 
 
 `files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`.
 
+The file is gitignored, but `files/settings.json.example` is checked in and shows the defaults the bot writes on first start. You do not need to copy it — startup creates `files/settings.json` if it is missing — it is there to document the shape.
+
 Background heartbeat and cron prompts use `BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
 
 Model refs use this form:
@@ -307,6 +309,7 @@ files/heartbeat-state.md         Durable heartbeat state
 files/cron-jobs.json             Scheduled tasks
 files/post-restart-tasks.json    Tasks queued to run after a restart
 files/settings.json              Active chat model, reasoning level, heartbeat/cron switches
+files/settings.json.example      Checked-in reference copy of the above defaults
 ```
 
 ## Safety notes

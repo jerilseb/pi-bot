@@ -9,6 +9,7 @@ logs
 .vscode/settings.json
 files/*
 !files/system.md
+!files/settings.json.example
 .claude
 .headless-profile/
 debug-*.png
