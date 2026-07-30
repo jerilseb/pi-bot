@@ -31,7 +31,7 @@ export function telegramRestartToolExtension(
       name: 'restart_bot',
       label: 'Restart Bot',
       description:
-        'Restart the Telegram bot process. Use only when the user explicitly asks the assistant to restart itself or restart the bot. Optionally stores a self-contained task to run automatically after PM2 brings the bot back up.',
+        'Restart the Telegram bot process. Use only when the user explicitly asks the assistant to restart itself or restart the bot. Optionally stores a self-contained task to run automatically after systemd brings the bot back up.',
       promptSnippet:
         'Restart the Telegram bot process when the user explicitly asks for a restart.',
       promptGuidelines: [
@@ -45,7 +45,7 @@ export function telegramRestartToolExtension(
       async execute(_toolCallId, params: RestartBotParamsType) {
         if (restartRequested) {
           return textResult(
-            'Restart already requested. The bot process will exit shortly so PM2 can restart it.',
+            'Restart already requested. The bot process will exit shortly so systemd can restart it.',
           );
         }
 
@@ -78,7 +78,7 @@ export function telegramRestartToolExtension(
         }, RESTART_TOOL_DELAY_MS);
 
         return textResult(
-          'Restart scheduled after successful pre-restart checks. The bot process will exit shortly so PM2 can restart it.',
+          'Restart scheduled after successful pre-restart checks. The bot process will exit shortly so systemd can restart it.',
         );
       },
     });

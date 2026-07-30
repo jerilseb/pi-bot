@@ -32,7 +32,7 @@ export async function runRestartGate(onChecksPassed?: () => string[]): Promise<b
 
   await sendTelegramMessage(
     [
-      `✅ Pre-restart checks passed in ${duration}. Restarting bot process. PM2 should bring it back up shortly.`,
+      `✅ Pre-restart checks passed in ${duration}. Restarting bot process. systemd should bring it back up shortly.`,
       ...(onChecksPassed?.() ?? []),
     ].join('\n'),
   );

@@ -141,10 +141,10 @@ Secrets and deployment-specific values live in `.env`. `TELEGRAM_ALLOWED_CHAT_ID
 npm run dev
 ```
 
-### 4. Run under pm2
+### 4. Run under systemd
 
 ```bash
-npm start
+npm run systemd:install
 ```
 
 The startup logs show the active chat model, background model, enabled extensions, and discovered skills.
@@ -227,7 +227,7 @@ Inside Telegram:
 | `/new` | Reset the Pi conversation for this chat |
 | `/restart` | Restart the bot process |
 
-The chat runtime also exposes a constrained `restart_bot` Pi tool. It is intended only for explicit natural-language requests such as “restart yourself” and uses the same graceful shutdown path as `/restart`, letting pm2 bring the process back up.
+The chat runtime also exposes a constrained `restart_bot` Pi tool. It is intended only for explicit natural-language requests such as “restart yourself” and uses the same graceful shutdown path as `/restart`, letting systemd bring the process back up.
 
 ## Deployment
 
@@ -241,30 +241,34 @@ cd pi-bot
 npm ci
 cp .env.example .env
 # edit .env with your Telegram chat/token and provider keys
-npm start
+npm run systemd:install
 ```
 
-Production is managed through npm scripts that wrap `pm2` and `ecosystem.config.cjs`:
+Long-running deployment is a systemd `--user` unit:
 
 ```bash
-npm start   # pm2 start ecosystem.config.cjs --update-env && pm2 save
-npm stop    # pm2 delete pi-bot || true && pm2 save
+npm run systemd:install     # write the unit, enable it, start it
+npm run systemd:uninstall   # stop, disable, and remove the unit
 ```
 
-Useful pm2 commands:
+Once installed:
 
 ```bash
-npx pm2 logs pi-bot
-npx pm2 restart pi-bot --update-env
+npm run systemd:start     # systemctl --user start pi-bot
+npm run systemd:stop      # systemctl --user stop pi-bot
+npm run systemd:restart   # systemctl --user restart pi-bot
+npm run systemd:status    # systemctl --user status pi-bot
+npm run logs              # journalctl --user -u pi-bot -f
 ```
 
-On a new server, enable pm2 startup once so the bot comes back after reboot:
+`systemd:install` writes `~/.config/systemd/user/pi-bot.service` and enables lingering so the bot
+survives logout and comes back after reboot. The unit sets `WorkingDirectory` to the repo, so `.env`
+loads through dotenv exactly as under `npm run dev`, and copies the installing shell's `PATH` so the
+bot's Bash tool, background shell sessions, and `npm run verify` can still find `node`, `npm`, and
+`git`. `Restart=always` covers the deliberate zero-exit used by `/restart` and `restart_bot`.
+`systemd:uninstall` removes the unit and leaves `files/` alone.
 
-```bash
-npx pm2 startup
-```
-
-Keep exactly one `pm2` instance running per Telegram bot token. Multiple pollers on the same token can steal updates from each other.
+Keep exactly one instance running per Telegram bot token. Multiple pollers on the same token can steal updates from each other — in particular, stop the unit before running `npm run dev`.
 
 Operational notes:
 
@@ -273,7 +277,7 @@ Operational notes:
 - Persistent app state lives under `files/`.
 - Back up `files/` if you care about memory, heartbeat state, or scheduled tasks.
 - Telegram downloads and generated temp files are stored under your system temp directory.
-- After changing extensions, skills, prompts, `src/config.ts`, or environment variables, restart with `npx pm2 restart pi-bot --update-env` or `npm stop && npm start`.
+- After changing extensions, skills, prompts, `src/config.ts`, or environment variables, restart with `npm run systemd:restart`. If the unit file itself needs to change (new node path, new repo location), re-run `npm run systemd:install`.
 
 ## Memory files
 

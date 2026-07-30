@@ -179,7 +179,7 @@ function validateConfiguration(): void {
   process.exit(1);
 }
 
-/** Shuts the bot down and exits so PM2 brings the process back up. */
+/** Shuts the bot down and exits so systemd brings the process back up. */
 async function restart(): Promise<void> {
   await shutdown();
   setTimeout(() => process.exit(0), RESTART_EXIT_DELAY_MS);

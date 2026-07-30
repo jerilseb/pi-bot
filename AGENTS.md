@@ -26,6 +26,7 @@ Key files:
 - `extensions/` — local Pi extensions (web search, web fetch).
 - `skills/` — Pi skills.
 - `files/` — persistent prompt/memory/heartbeat/schedule state.
+- `scripts/systemd.sh` — installs/removes the systemd `--user` unit. `scripts/smoke.ts` — the smoke check.
 
 ## Commands
 
@@ -34,8 +35,9 @@ Key files:
 - Lint: `npm run lint`
 - Typecheck: `npm run typecheck`
 - Unit tests: `npm test`
-- Start under PM2: `npm start`
-- Stop PM2 process: `npm stop`
+- Install/remove the systemd `--user` unit: `npm run systemd:install` / `npm run systemd:uninstall`
+- Control the running service: `npm run systemd:start` / `systemd:stop` / `systemd:restart` / `systemd:status`
+- Tail logs: `npm run logs` (`journalctl --user -u pi-bot -f`)
 
 Before finishing code changes, run:
 
@@ -77,6 +79,7 @@ Keep `npm run lint` at zero errors. It went unchecked for a while because no scr
 - Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested. `TELEGRAM_ALLOWED_CHAT_ID` in `.env` is the single Telegram chat allowed to use the bot; every other chat is ignored.
 - Temporary downloads/generated files are under the system temp directory.
 - After changing extensions, skills, prompts, or env vars, restart the bot.
+- Deployment is a systemd `--user` unit written by `scripts/systemd.sh` to `~/.config/systemd/user/pi-bot.service`. It is generated, not checked in: change the script, then re-run `npm run systemd:install`. `Restart=always` is what makes `/restart` and `restart_bot` work — both exit 0 on purpose and rely on the supervisor to bring the process back.
 
 ## Pi-specific work
 

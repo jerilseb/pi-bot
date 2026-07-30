@@ -27,7 +27,7 @@ export interface CommandContext {
   session: ChatSession;
   backgroundSession: ChatSession;
   getBackgroundModelName(): string;
-  /** Shuts the bot down and exits so PM2 brings it back up. */
+  /** Shuts the bot down and exits so systemd brings it back up. */
   restart(): Promise<void>;
 }
 
@@ -272,8 +272,8 @@ const BOT_COMMANDS: BotCommand[] = [
 
   {
     name: 'restart',
-    description: 'Restart the bot process via PM2',
-    help: 'exit this process so PM2 can restart it',
+    description: 'Restart the bot process',
+    help: 'exit this process so systemd can restart it',
     handler: async ({ restart }) => {
       if (!(await runRestartGate())) return;
       await restart();
