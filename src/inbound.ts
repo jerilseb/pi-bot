@@ -15,19 +15,57 @@ import { errorMessage } from './util.ts';
 /**
  * Ingestion epoch. Media ingestion (downloads, transcription) runs detached
  * from the polling loop, so /abort and /new bump the epoch to drop ingestion
- * results that finish after the user cancelled.
+ * results that finish after the user cancelled. Only ingestTelegramMessage
+ * compares epochs, so the counter stays private to this module.
  */
 let epoch = 0;
-
-export function ingestionEpoch(): number {
-  return epoch;
-}
 
 export function discardPendingIngestion(): void {
   epoch++;
 }
 
-export async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPrompt | null> {
+/**
+ * Ingests one Telegram message detached from the polling loop, since media
+ * downloads and audio transcription can take minutes. If /abort or /new bumps
+ * the ingestion epoch while this is in flight, the result is dropped.
+ */
+export async function ingestTelegramMessage(
+  message: TelegramMessage,
+  handleIncoming: (prompt: IncomingPrompt) => Promise<void>,
+): Promise<void> {
+  const startEpoch = epoch;
+
+  try {
+    const incoming = await toIncomingPrompt(message);
+    if (!incoming) return;
+
+    if (epoch !== startEpoch) {
+      console.log('dropping message ingested before /abort or /new');
+      cleanupAttachments(incoming);
+      return;
+    }
+
+    await handleIncoming(incoming);
+  } catch (error) {
+    console.error('failed to ingest Telegram message:', errorMessage(error));
+  }
+}
+
+/**
+ * Best-effort removal of the temp downloads this module created for a prompt.
+ * Only paths under TMP_DIR are touched, so an attachment pointing at a real file
+ * elsewhere is never deleted.
+ */
+export function cleanupAttachments(prompt: IncomingPrompt): void {
+  for (const attachment of prompt.attachments) {
+    if (attachment.path?.startsWith(TMP_DIR)) {
+      deleteLocalFile(attachment.path);
+    }
+  }
+}
+
+/** Converts one Telegram message into a prompt, downloading media as needed. */
+async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPrompt | null> {
   if (!isAllowedTelegramChat(String(message.chat.id))) return null;
 
   const caption = message.caption?.trim() ?? '';

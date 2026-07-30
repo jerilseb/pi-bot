@@ -52,7 +52,6 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
 /** Model for heartbeat and cron prompts. Not changeable from Telegram. */
 export const BACKGROUND_MODEL = 'openai-codex/gpt-5.6-terra';
-export const SUBAGENT_MODEL = 'openai-codex/gpt-5.6-terra';
 /** Chat models offered by /models. Must contain CHAT_MODEL and the active model. */
 export const ALLOWED_MODELS: readonly string[] = [
   'openai-codex/gpt-5.5',
@@ -200,24 +199,12 @@ export const DOCUMENT_UPLOAD_EXTS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Background work: sub-agents and background bash
+// Background work: background bash
 //
-// Both subsystems are built on the same JobRegistry (src/job-registry.ts) and
-// expose the same knobs, so they are tuned together here. Every concurrency
-// limit, timeout, TTL, and payload cap for background work belongs in this
-// section — only narrow display widths stay next to the formatter that uses them.
+// Every concurrency limit, timeout, TTL, and payload cap for background work
+// belongs in this section — only narrow display widths stay next to the
+// formatter that uses them.
 // ---------------------------------------------------------------------------
-
-export const SUBAGENT_MAX_RUNNING = 3;
-export const SUBAGENT_DEFAULT_YIELD_MS = 5_000;
-export const SUBAGENT_MAX_YIELD_MS = 30_000;
-export const SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 10 * 60_000;
-export const SUBAGENT_MAX_RUNTIME_CAP_MS = 60 * 60_000;
-export const SUBAGENT_MAX_RESULT_CHARS = 6_000;
-export const SUBAGENT_COMPLETED_TTL_MS = 30 * 60_000;
-/** How long subagent_cancel waits for a signalled sub-agent to settle. */
-export const SUBAGENT_CANCEL_WAIT_MS = 5_000;
-export const SUBAGENT_SKILLS = ['pdf'];
 
 export const BACKGROUND_BASH_MAX_RUNNING = 12;
 export const BACKGROUND_BASH_DEFAULT_YIELD_MS = 4_000;

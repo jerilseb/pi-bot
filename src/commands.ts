@@ -1,8 +1,9 @@
 import type { SessionStats } from '@earendil-works/pi-coding-agent';
 import type { ChatSession, ChatState } from './chat-session.ts';
-import { ELEVENLABS_API_KEY, HEARTBEAT_ENABLED, SEND_TOOL_CALLS } from './config.ts';
+import { ELEVENLABS_API_KEY, SEND_TOOL_CALLS } from './config.ts';
 import { cronStatusText } from './cron.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
+import { heartbeatStatusText } from './heartbeat.ts';
 import { buildModelInlineKeyboard } from './model-menu.ts';
 import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
 import {
@@ -12,7 +13,6 @@ import {
 } from './openai-usage.ts';
 import { discardPendingIngestion } from './inbound.ts';
 import { runRestartGate } from './restart-flow.ts';
-import { cancelAllSubagents, runningSubagentCount } from './subagents.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
 import {
   sendTelegramInlineKeyboard,
@@ -129,10 +129,9 @@ const BOT_COMMANDS: BotCommand[] = [
           `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
           `- Background queue: ${background?.queue.length ?? 0}`,
           `- Background model: ${getBackgroundModelName()}`,
-          `- Sub-agents running: ${runningSubagentCount()}`,
           `- Voice note tool: ${voiceStatusText()}`,
           `- Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`,
-          `- Heartbeat: ${HEARTBEAT_ENABLED ? 'enabled' : 'off'}`,
+          `- ${heartbeatStatusText()}`,
           `- ${cronStatusText()}`,
         ].join('\n'),
       );
@@ -241,12 +240,7 @@ const BOT_COMMANDS: BotCommand[] = [
       discardPendingIngestion();
       chat.queue.length = 0;
       chat.pi.abort();
-      const cancelledSubagents = await cancelAllSubagents();
-      await sendTelegramMessage(
-        cancelledSubagents > 0
-          ? `⏹ Aborting current prompt, clearing queue, and cancelling ${cancelledSubagents} sub-agent${cancelledSubagents === 1 ? '' : 's'}...`
-          : '⏹ Aborting current prompt and clearing queue...',
-      );
+      await sendTelegramMessage('⏹ Aborting current prompt and clearing queue...');
     },
   },
 

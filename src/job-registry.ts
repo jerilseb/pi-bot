@@ -2,18 +2,18 @@ import { randomBytes } from 'node:crypto';
 import { errorMessage, formatDuration, sleep } from './util.ts';
 
 /**
- * Shared bookkeeping for the bot's background-work registries: sub-agents
- * (src/subagents.ts) and background bash sessions (src/background-bash.ts).
+ * Bookkeeping for the bot's background-work registries. The only caller today is
+ * background bash sessions (src/background-bash.ts); the shape stays generic
+ * because it describes any job that starts as 'running', settles into exactly
+ * one terminal status, and reports back to the chat agent when it finishes.
  *
- * Both track jobs that start as 'running', settle into exactly one terminal
- * status, and report back to the chat agent when they finish. This module owns
- * the parts that are identical between them — ID allocation, TTL pruning,
- * cancellation, and report delivery — while each caller keeps its own status
- * vocabulary and user-facing wording.
+ * This module owns the parts that are not specific to a kind of job — ID
+ * allocation, TTL pruning, cancellation, and report delivery — while the caller
+ * keeps its own status vocabulary and user-facing wording.
  *
  * A registry lives at module level in src/ (imported once by Node), so it is
  * shared for the lifetime of the bot process. Jobs do not survive bot restarts;
- * main.ts cancels them all on shutdown.
+ * main.ts stops them all on shutdown.
  */
 
 /** 'running' plus the caller's terminal statuses. */
@@ -35,11 +35,11 @@ export interface JobRegistryOptions<
   TJob extends Job<TTerminal>,
   TReport,
 > {
-  /** ID prefix; 'sub' produces IDs like `sub_1a2b3c`. */
+  /** ID prefix; 'bash' produces IDs like `bash_1a2b3c`. */
   idPrefix: string;
-  /** Noun used in agent-facing messages, e.g. 'sub-agent'. */
+  /** Noun used in agent-facing messages, e.g. 'background bash session'. */
   jobNoun: string;
-  /** Plural of jobNoun, e.g. 'sub-agents'. */
+  /** Plural of jobNoun, e.g. 'background bash sessions'. */
   jobNounPlural: string;
   /** Tool that lists jobs, named in "unknown job" messages. */
   listToolName: string;

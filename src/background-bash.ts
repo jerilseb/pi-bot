@@ -33,8 +33,8 @@ import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
  * own running child processes.
  *
  * Lifecycle bookkeeping (IDs, pruning, stopping, report delivery) lives in
- * src/job-registry.ts, shared with sub-agents. Tuning knobs live in
- * src/config.ts under "Background work", next to the sub-agent equivalents.
+ * src/job-registry.ts. Tuning knobs live in src/config.ts under
+ * "Background work".
  */
 
 type BackgroundBashTerminalStatus = 'exited' | 'stopped' | 'failed';

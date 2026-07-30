@@ -8,14 +8,12 @@ import {
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   PROJECT_SKILLS_DIR,
-  SUBAGENT_SKILLS,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts';
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
-import { createPiRuntime, type PiRuntime } from '../src/pi-session.ts';
+import { createPiRuntime } from '../src/pi-session.ts';
 import { scheduledTasksExtension } from '../src/scheduled-tasks.ts';
-import { subagentToolsExtension } from '../src/subagents.ts';
 import { isRecord } from '../src/util.ts';
 import {
   activeModelSystemPromptExtension,
@@ -132,7 +130,8 @@ async function importAndRegisterExtensions(extensionPaths: string[]): Promise<nu
   return registeredTools;
 }
 
-function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): PiRuntime {
+/** Asserts by construction: both runtimes resolve their model, auth, and paths. */
+function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): void {
   const common = {
     cwd: process.cwd(),
     getExtensionPaths: () => extensionPaths,
@@ -145,7 +144,7 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Pi
     ],
   };
 
-  const chatRuntime = createPiRuntime({
+  createPiRuntime({
     ...common,
     model: MODEL,
     sessionPrefix: 'smoke-chat',
@@ -156,22 +155,6 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Pi
     model: BACKGROUND_MODEL,
     sessionPrefix: 'smoke-background',
   });
-
-  return chatRuntime;
-}
-
-function verifySubagentSkillConfig(skillPaths: string[]): void {
-  const discovered = new Set(
-    skillPaths.flatMap((skillPath) => [
-      path.basename(skillPath),
-      path.basename(skillPath).replace(/\.[^.]+$/, ''),
-      path.basename(path.dirname(skillPath)),
-    ]),
-  );
-
-  for (const skill of SUBAGENT_SKILLS) {
-    assert(discovered.has(skill), `Configured sub-agent skill was not discovered: ${skill}`);
-  }
 }
 
 function verifyScheduledTaskTools(): number {
@@ -200,30 +183,6 @@ function verifyScheduledTaskTools(): number {
   return registeredTools.size;
 }
 
-function verifySubagentTools(runtime: PiRuntime): number {
-  const registeredTools = new Set<string>();
-  const fakePi = {
-    registerTool(tool: unknown) {
-      assert(isRecord(tool), 'Sub-agent extension attempted to register a non-object tool.');
-      assert(
-        typeof tool.name === 'string' && tool.name.trim(),
-        'Sub-agent extension registered a tool without a name.',
-      );
-      registeredTools.add(tool.name);
-    },
-    on() {
-      return () => undefined;
-    },
-  } as unknown as ExtensionAPI;
-
-  subagentToolsExtension(runtime)(fakePi);
-
-  for (const name of ['subagent_start', 'subagent_read', 'subagent_cancel', 'subagent_list']) {
-    assert(registeredTools.has(name), `Sub-agent extension did not register ${name}.`);
-  }
-  return registeredTools.size;
-}
-
 async function main(): Promise<void> {
   validateConfiguration();
   ensureMemoryFile();
@@ -232,14 +191,12 @@ async function main(): Promise<void> {
   const importedModules = await importAllSourceModules();
   const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
   const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
-  verifySubagentSkillConfig(skillPaths);
   const registeredTools = await importAndRegisterExtensions(extensionPaths);
-  const chatRuntime = createSmokeRuntimes(extensionPaths, skillPaths);
+  createSmokeRuntimes(extensionPaths, skillPaths);
   const scheduledTaskTools = verifyScheduledTaskTools();
-  const subagentTools = verifySubagentTools(chatRuntime);
 
   console.log(
-    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
+    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${skillPaths.length} skill(s).`,
   );
 }
 

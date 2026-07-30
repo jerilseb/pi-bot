@@ -32,7 +32,6 @@ import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts'
 import { telegramRestartToolExtension } from './restart-tool.ts';
 import { scheduledTasksExtension } from './scheduled-tasks.ts';
 import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
-import { subagentToolsExtension } from './subagents.ts';
 import { telegramMenuExtension } from './telegram-menu.ts';
 import { telegramVoiceNoteExtension } from './voice.ts';
 
@@ -297,7 +296,6 @@ export class SdkPiSession {
         // Withheld when cron is off, so the agent cannot create jobs that would
         // never fire.
         ...(CRON_JOBS_ENABLED ? [scheduledTasksExtension] : []),
-        subagentToolsExtension(this.runtime),
         telegramMenuExtension,
         telegramVoiceNoteExtension,
         backgroundBashExtension,

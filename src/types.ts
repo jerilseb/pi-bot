@@ -62,7 +62,7 @@ export interface Attachment {
 export interface IncomingPrompt {
   text: string;
   attachments: Attachment[];
-  source?: 'telegram' | 'heartbeat' | 'cron' | 'subagent-report' | 'background-bash-report';
+  source?: 'telegram' | 'heartbeat' | 'cron' | 'background-bash-report';
   suppressNoop?: boolean;
 }
 

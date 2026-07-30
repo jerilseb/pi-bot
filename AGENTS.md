@@ -8,18 +8,20 @@ Guidance for AI coding agents working in this repository.
 
 Key files:
 
-- `main.ts` — entrypoint/orchestrator: foreground + background chat sessions, command dispatch, prompt queue, polling loop, tool-notification batching, shutdown.
+- `main.ts` — entrypoint/orchestrator: constructs the runtimes and sessions, wires the modules together, owns the polling loop, startup banner, post-restart tasks, and shutdown. Keep it to wiring and lifecycle; new behavior belongs in a module.
+- `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the worker that drains it. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report.
+- `src/tool-notification-batch.ts` — coalesces tool-call notifications into one Telegram message; `src/tool-notifications.ts` — formats a single event (pure).
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
 - `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection).
 - `src/chat-session.ts` — the single chat's state and idle-session disposal.
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
-- `src/inbound.ts` — Telegram message/file/photo/audio ingestion and ingestion epochs.
+- `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
 - `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/model-menu.ts`, `src/reasoning-menu.ts` — their inline keyboards.
 - `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks.
-- `src/subagents.ts` — isolated background sub-agents. `src/background-bash.ts` — background shell sessions. `src/job-registry.ts` — lifecycle bookkeeping shared by both.
-- `src/agent-envelope.ts` — shared layout for the internal prompts the bot sends itself (heartbeat, cron, post-restart, sub-agent and background-bash reports).
+- `src/background-bash.ts` — background shell sessions. `src/job-registry.ts` — its lifecycle bookkeeping.
+- `src/agent-envelope.ts` — shared layout for the internal prompts the bot sends itself (heartbeat, cron, post-restart, background-bash reports).
 - `src/uploads.ts`, `src/voice.ts`, `src/speech.ts`, `src/telegram-menu.ts` — agent-facing Telegram tools.
 - `src/env-guard.ts` — blocks tool access to `.env` files. `src/util.ts` — shared helpers.
 - `src/restart-tool.ts`, `src/restart-flow.ts` (shared `/restart` + `restart_bot` gate), `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
@@ -69,7 +71,7 @@ Keep `npm run lint` at zero errors. It went unchecked for a while because no scr
 
 - Never commit `.env` or real API keys/tokens.
 - Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys.
-- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. The exception is runtime state in `files/settings.json`: the active model/reasoning level plus `"heartbeat"` and `"cronJobs"` (both default `false`, both gating the ways the bot acts unprompted). That file belongs to Pi's `SettingsManager`, which merges writes into the existing contents, so bot-only keys added there survive `/models` and `/reasoning` — but they must be read through `BotSettings` in `src/config.ts`, not by re-reading the file elsewhere. `files/settings.json` itself is gitignored; `files/settings.json.example` is checked in and must stay byte-identical to what `ensureBotSettingsFile()` writes, so update both together when adding a key. Concurrency limits, timeouts, TTLs, and payload caps for background work (sub-agents and background bash) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
+- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. The exception is runtime state in `files/settings.json`: the active model/reasoning level plus `"heartbeat"` and `"cronJobs"` (both default `false`, both gating the ways the bot acts unprompted). That file belongs to Pi's `SettingsManager`, which merges writes into the existing contents, so bot-only keys added there survive `/models` and `/reasoning` — but they must be read through `BotSettings` in `src/config.ts`, not by re-reading the file elsewhere. `files/settings.json` itself is gitignored; `files/settings.json.example` is checked in and must stay byte-identical to what `ensureBotSettingsFile()` writes, so update both together when adding a key. Concurrency limits, timeouts, TTLs, and payload caps for background work (background bash) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
 - Provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 
 ## Operational notes

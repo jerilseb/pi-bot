@@ -47,7 +47,7 @@ export function createHeartbeatController(options: {
       if (!HEARTBEAT_ENABLED || timer || !ALLOWED_CHAT_ID) return;
 
       console.log(
-        `Heartbeat: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${ALLOWED_CHAT_ID}`,
+        `Heartbeat scheduler: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${ALLOWED_CHAT_ID}`,
       );
       timer = setInterval(() => void runOnce(), HEARTBEAT_INTERVAL_MS);
     },
@@ -60,6 +60,10 @@ export function createHeartbeatController(options: {
   };
 }
 
+/**
+ * The single rendering of heartbeat state, shared by the startup banner and
+ * /status so the two cannot drift. Mirrors cronStatusText in src/cron.ts.
+ */
 export function heartbeatStatusText(): string {
   return `Heartbeat: ${
     HEARTBEAT_ENABLED
