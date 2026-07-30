@@ -69,7 +69,7 @@ Keep `npm run lint` at zero errors. It went unchecked for a while because no scr
 
 - Never commit `.env` or real API keys/tokens.
 - Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys.
-- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. Concurrency limits, timeouts, TTLs, and payload caps for background work (sub-agents and background bash) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
+- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. The exception is runtime state in `files/settings.json`: the active model/reasoning level plus `"heartbeat"` and `"cronJobs"` (both default `false`, both gating the ways the bot acts unprompted). That file belongs to Pi's `SettingsManager`, which merges writes into the existing contents, so bot-only keys added there survive `/models` and `/reasoning` — but they must be read through `BotSettings` in `src/config.ts`, not by re-reading the file elsewhere. Concurrency limits, timeouts, TTLs, and payload caps for background work (sub-agents and background bash) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
 - Provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 
 ## Operational notes

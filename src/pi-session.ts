@@ -16,6 +16,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   ALLOWED_CHAT_ID,
+  CRON_JOBS_ENABLED,
   FILES_DIR,
   OPENAI_CODEX_API_KEY,
   OPENROUTER_API_KEY,
@@ -293,7 +294,9 @@ export class SdkPiSession {
           ? [telegramRestartToolExtension(this.runtime.requestRestart)]
           : []),
         telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
-        scheduledTasksExtension,
+        // Withheld when cron is off, so the agent cannot create jobs that would
+        // never fire.
+        ...(CRON_JOBS_ENABLED ? [scheduledTasksExtension] : []),
         subagentToolsExtension(this.runtime),
         telegramMenuExtension,
         telegramVoiceNoteExtension,

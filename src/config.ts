@@ -61,9 +61,17 @@ export const ALLOWED_MODELS: readonly string[] = [
   'openrouter/moonshotai/kimi-k2.6',
 ];
 
+/**
+ * The subset of settings.json this bot reads. The file is owned by Pi's
+ * SettingsManager, which merges writes into the existing contents rather than
+ * rewriting it, so bot-only keys such as `heartbeat` survive /models and
+ * /reasoning.
+ */
 interface BotSettings {
   defaultProvider?: unknown;
   defaultModel?: unknown;
+  heartbeat?: unknown;
+  cronJobs?: unknown;
 }
 
 function readBotSettings(): BotSettings {
@@ -94,6 +102,8 @@ export function ensureBotSettingsFile(): void {
         defaultProvider: model.provider,
         defaultModel: model.model,
         defaultThinkingLevel: 'high',
+        heartbeat: false,
+        cronJobs: false,
       },
       null,
       2,
@@ -224,7 +234,20 @@ export const BACKGROUND_BASH_STOP_WAIT_MS = 5_000;
 // ---------------------------------------------------------------------------
 
 export const EXTENSION_ENTRYPOINT_EXTS = new Set<string>(['.ts', '.js', '.mjs', '.cjs']);
-export const HEARTBEAT_ENABLED = true;
+/**
+ * Heartbeat runs only when settings.json holds `"heartbeat": true`. It is a
+ * runtime setting rather than a constant here because it makes the bot act on
+ * its own schedule, so it must be switchable without a code change. Read at
+ * startup, so a change takes effect on the next restart.
+ */
+export const HEARTBEAT_ENABLED = BOT_SETTINGS.heartbeat === true;
+/**
+ * Scheduled tasks run only when settings.json holds `"cronJobs": true`. Off by
+ * default for the same reason as the heartbeat: it lets the bot act unprompted.
+ * This gates both the scheduler and the create/list/cancel/update tools, so the
+ * agent cannot queue jobs that would never fire. Read at startup.
+ */
+export const CRON_JOBS_ENABLED = BOT_SETTINGS.cronJobs === true;
 const HEARTBEAT_INTERVAL_SECONDS = 3600;
 export const HEARTBEAT_INTERVAL_MS = HEARTBEAT_INTERVAL_SECONDS * 1000;
 

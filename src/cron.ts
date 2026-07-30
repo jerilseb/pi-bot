@@ -1,5 +1,11 @@
 import { buildAgentEnvelope } from './agent-envelope.ts';
-import { CRON_JOBS_PATH, CRON_NOOP, isAllowedTelegramChat } from './config.ts';
+import {
+  BOT_SETTINGS_PATH,
+  CRON_JOBS_ENABLED,
+  CRON_JOBS_PATH,
+  CRON_NOOP,
+  isAllowedTelegramChat,
+} from './config.ts';
 import {
   computeNextRunAt,
   deferCronJob,
@@ -111,7 +117,7 @@ export function createCronController(options: {
 
   return {
     start(): void {
-      if (started) return;
+      if (!CRON_JOBS_ENABLED || started) return;
       started = true;
       ensureCronJobsFile();
       unsubscribe = onCronJobsChanged(scheduleNext);
@@ -130,6 +136,10 @@ export function createCronController(options: {
 }
 
 export function cronStatusText(): string {
+  if (!CRON_JOBS_ENABLED) {
+    return `Cron: off (set "cronJobs": true in ${BOT_SETTINGS_PATH})`;
+  }
+
   try {
     const jobs = readCronJobs();
     const enabled = jobs.filter((job) => job.enabled).length;

@@ -78,7 +78,7 @@ Open this site and test the login flow.
 
 ### Schedule work and reminders
 
-Ask it to do something later, once, repeatedly, or on a cron-like schedule.
+Ask it to do something later, once, repeatedly, or on a cron-like schedule. Requires `"cronJobs": true` in `files/settings.json` — see [Configuration](#configuration).
 
 Examples:
 
@@ -107,8 +107,8 @@ That means it can remember stable context without stuffing every temporary detai
 - ElevenLabs text-to-speech for voice-note replies when requested.
 - Generated local image and document uploads back to Telegram.
 - Tavily `web_search` and browser-style `web_fetch` tools.
-- Scheduled one-time, interval, and cron-like tasks.
-- Heartbeat loop for proactive monitoring instructions.
+- Scheduled one-time, interval, and cron-like tasks (off by default).
+- Heartbeat loop for proactive monitoring instructions (off by default).
 - Long-term memory plus daily/session notes.
 - Model switching with Telegram inline buttons.
 - Usage commands for OpenAI Codex and ElevenLabs.
@@ -159,6 +159,22 @@ export const CHAT_MODEL = "openai-codex/gpt-5.6-luna";
 
 The active chat model and reasoning level can be changed from Telegram with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `ALLOWED_MODELS` or startup fails.
 
+The same file gates the two ways the bot can act unprompted:
+
+```json
+{
+  "heartbeat": false,
+  "cronJobs": false
+}
+```
+
+Both default to **off** — only a literal `true` enables either. Both are read at startup, so flip and restart. `/status` reports the current state of each.
+
+- `heartbeat` — the hourly heartbeat run. Ticks also need `files/heartbeat.md` to hold instructions beyond its `# Heartbeat` heading; with the switch on but the file empty, every tick is a silent no-op.
+- `cronJobs` — the scheduled-task scheduler *and* the `create_schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` / `update_scheduled_task` tools. The tools are withheld when it is off, so the agent cannot queue jobs that would never fire; existing entries in `files/cron-jobs.json` are left in place, just not run.
+
+`files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`.
+
 Background heartbeat and cron prompts use `BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
 
 Model refs use this form:
@@ -207,7 +223,7 @@ Useful non-secret settings in `src/config.ts` include:
 - `IDLE_TIMEOUT_MINUTES` and `MAX_QUEUE_PER_CHAT`
 - `SEND_TOOL_CALLS`, `TOOL_CALL_BATCH_MS`, and `TOOL_CALL_BATCH_MAX_ITEMS`
 - `SEND_LOCAL_IMAGES`, `LOCAL_IMAGE_UPLOAD_DIRS`, `SEND_LOCAL_DOCUMENTS`, `LOCAL_DOCUMENT_UPLOAD_DIRS`, and `DOCUMENT_UPLOAD_EXTS`
-- `HEARTBEAT_ENABLED` and `HEARTBEAT_INTERVAL_SECONDS`
+- `HEARTBEAT_INTERVAL_SECONDS` (whether the heartbeat runs at all is a `files/settings.json` setting — see below)
 - `SUBAGENT_MAX_RUNNING`, `SUBAGENT_DEFAULT_MAX_RUNTIME_MS`, and `SUBAGENT_SKILLS`
 
 ## Telegram commands
@@ -290,7 +306,7 @@ files/heartbeat.md               Standing heartbeat instructions
 files/heartbeat-state.md         Durable heartbeat state
 files/cron-jobs.json             Scheduled tasks
 files/post-restart-tasks.json    Tasks queued to run after a restart
-files/settings.json              Active chat model and reasoning level
+files/settings.json              Active chat model, reasoning level, heartbeat/cron switches
 ```
 
 ## Safety notes

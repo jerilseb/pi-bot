@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { buildAgentEnvelope } from './agent-envelope.ts';
 import {
   ALLOWED_CHAT_ID,
+  BOT_SETTINGS_PATH,
   HEARTBEAT_ENABLED,
   HEARTBEAT_FILE_PATH,
   HEARTBEAT_INTERVAL_MS,
@@ -63,7 +64,7 @@ export function heartbeatStatusText(): string {
   return `Heartbeat: ${
     HEARTBEAT_ENABLED
       ? `${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s (${HEARTBEAT_FILE_PATH})`
-      : 'off'
+      : `off (set "heartbeat": true in ${BOT_SETTINGS_PATH})`
   }`;
 }
 
