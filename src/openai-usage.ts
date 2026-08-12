@@ -28,9 +28,7 @@ interface OpenAIUsage {
   creditsBalance?: string;
   creditsHasCredits?: boolean;
   creditsUnlimited?: boolean;
-  primaryOverSecondaryLimitPercent?: number;
-  primary: UsageWindow;
-  secondary: UsageWindow;
+  weekly: UsageWindow;
 }
 
 export interface OpenAIUsageResult {
@@ -127,22 +125,12 @@ function parseUsageHeaders(response: Response): OpenAIUsage {
     creditsBalance: h.get('x-codex-credits-balance') ?? undefined,
     creditsHasCredits: parseBoolean(h.get('x-codex-credits-has-credits')),
     creditsUnlimited: parseBoolean(h.get('x-codex-credits-unlimited')),
-    primaryOverSecondaryLimitPercent: parseNumber(
-      h.get('x-codex-primary-over-secondary-limit-percent'),
-    ),
-    primary: {
-      name: '5 hour',
+    weekly: {
+      name: '7 day',
       usedPercent: parseNumber(h.get('x-codex-primary-used-percent')),
       resetAfterSeconds: parseNumber(h.get('x-codex-primary-reset-after-seconds')),
       resetAt: parseNumber(h.get('x-codex-primary-reset-at')),
       windowMinutes: parseNumber(h.get('x-codex-primary-window-minutes')),
-    },
-    secondary: {
-      name: '7 day',
-      usedPercent: parseNumber(h.get('x-codex-secondary-used-percent')),
-      resetAfterSeconds: parseNumber(h.get('x-codex-secondary-reset-after-seconds')),
-      resetAt: parseNumber(h.get('x-codex-secondary-reset-at')),
-      windowMinutes: parseNumber(h.get('x-codex-secondary-window-minutes')),
     },
   };
 }
@@ -216,12 +204,7 @@ export function buildOpenAIUsageTelegramHtml(usage: OpenAIUsage, warnings: strin
     `• Credits: ${code(formatCredits(usage))}`,
   ];
 
-  if (usage.primaryOverSecondaryLimitPercent !== undefined) {
-    lines.push(`• Overage: ${code(formatPercent(usage.primaryOverSecondaryLimitPercent))}`);
-  }
-
-  lines.push('', ...windowReport(usage.primary));
-  lines.push('', ...windowReport(usage.secondary));
+  lines.push('', ...windowReport(usage.weekly));
 
   if (usage.requestId) {
     lines.push('', `Request ID: ${code(usage.requestId)}`);

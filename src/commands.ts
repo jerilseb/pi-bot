@@ -183,8 +183,8 @@ const BOT_COMMANDS: BotCommand[] = [
 
   {
     name: 'openaiusage',
-    description: 'Show OpenAI Codex usage',
-    help: 'show OpenAI Codex usage windows and reset times',
+    description: 'Show OpenAI Codex weekly usage',
+    help: 'show OpenAI Codex seven-day usage and reset time',
     handler: async ({ chat }) => {
       const accessToken = await chat.pi.getApiKeyForProvider(OPENAI_CODEX_PROVIDER);
       if (!accessToken) {
