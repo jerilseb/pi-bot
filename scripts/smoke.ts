@@ -131,7 +131,10 @@ async function importAndRegisterExtensions(extensionPaths: string[]): Promise<nu
 }
 
 /** Asserts by construction: both runtimes resolve their model, auth, and paths. */
-function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): void {
+async function createSmokeRuntimes(
+  extensionPaths: string[],
+  skillPaths: string[],
+): Promise<void> {
   const common = {
     cwd: process.cwd(),
     getExtensionPaths: () => extensionPaths,
@@ -144,13 +147,13 @@ function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): vo
     ],
   };
 
-  createPiRuntime({
+  await createPiRuntime({
     ...common,
     model: MODEL,
     sessionPrefix: 'smoke-chat',
   });
 
-  createPiRuntime({
+  await createPiRuntime({
     ...common,
     model: BACKGROUND_MODEL,
     sessionPrefix: 'smoke-background',
@@ -192,7 +195,7 @@ async function main(): Promise<void> {
   const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
   const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
   const registeredTools = await importAndRegisterExtensions(extensionPaths);
-  createSmokeRuntimes(extensionPaths, skillPaths);
+  await createSmokeRuntimes(extensionPaths, skillPaths);
   const scheduledTaskTools = verifyScheduledTaskTools();
 
   console.log(

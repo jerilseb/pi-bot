@@ -75,7 +75,7 @@ ensureBotSettingsFile();
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
 
-const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
+const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: MODEL,
   sessionPrefix: 'telegram-chat',
@@ -90,7 +90,7 @@ const CHAT_PI_RUNTIME: PiRuntime = createPiRuntime({
   requestRestart: restart,
 });
 
-const BACKGROUND_PI_RUNTIME: PiRuntime = createPiRuntime({
+const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: BACKGROUND_MODEL,
   sessionPrefix: 'telegram-background',

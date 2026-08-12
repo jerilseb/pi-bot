@@ -5,12 +5,11 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type SessionStats,
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
@@ -42,8 +41,7 @@ export interface PiRunPromptOptions {
 export interface PiRuntime {
   modelName: string;
   model: Model<Api>;
-  authStorage: ReturnType<typeof AuthStorage.create>;
-  modelRegistry: ReturnType<typeof ModelRegistry.create>;
+  modelRuntime: ModelRuntime;
   settingsManager: ReturnType<typeof SettingsManager.create>;
   cwd: string;
   sessionDir: string;
@@ -55,7 +53,7 @@ export interface PiRuntime {
   requestRestart?: () => Promise<void>;
 }
 
-export function createPiRuntime(options: {
+export async function createPiRuntime(options: {
   cwd: string;
   model: string;
   sessionPrefix: string;
@@ -64,28 +62,26 @@ export function createPiRuntime(options: {
   systemPromptOverride: () => string;
   extensionFactories?: Array<(pi: ExtensionAPI) => void>;
   requestRestart?: () => Promise<void>;
-}): PiRuntime {
-  const authStorage = AuthStorage.create();
+}): Promise<PiRuntime> {
+  const modelRuntime = await ModelRuntime.create();
   if (OPENROUTER_API_KEY) {
-    authStorage.setRuntimeApiKey('openrouter', OPENROUTER_API_KEY);
+    await modelRuntime.setRuntimeApiKey('openrouter', OPENROUTER_API_KEY);
   }
   if (OPENAI_CODEX_API_KEY) {
-    authStorage.setRuntimeApiKey('openai-codex', OPENAI_CODEX_API_KEY);
+    await modelRuntime.setRuntimeApiKey('openai-codex', OPENAI_CODEX_API_KEY);
   }
 
-  const modelRegistry = ModelRegistry.create(authStorage);
   const selectedModelRef = parseModelRef(options.model);
-  const model = resolveModel(modelRegistry, selectedModelRef);
-  ensureConfiguredAuth(modelRegistry, model, selectedModelRef);
+  const model = resolveModel(modelRuntime, selectedModelRef);
+  ensureConfiguredAuth(modelRuntime, selectedModelRef);
   // Keep Telegram model/reasoning preferences isolated from ~/.pi/agent/settings.json.
-  // AuthStorage still uses Pi's normal agent directory, so provider logins remain shared.
+  // ModelRuntime still uses Pi's normal agent directory, so provider logins remain shared.
   const settingsManager = SettingsManager.create(options.cwd, FILES_DIR);
 
   return {
     modelName: formatModelRef(selectedModelRef),
     model,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     settingsManager,
     cwd: options.cwd,
     sessionDir: SESSIONS_DIR,
@@ -98,23 +94,16 @@ export function createPiRuntime(options: {
   };
 }
 
-function resolveModel(
-  modelRegistry: ReturnType<typeof ModelRegistry.create>,
-  modelRef: ModelRef,
-): Model<Api> {
-  const model = modelRegistry.find(modelRef.provider, modelRef.model);
+function resolveModel(modelRuntime: ModelRuntime, modelRef: ModelRef): Model<Api> {
+  const model = modelRuntime.getModel(modelRef.provider, modelRef.model);
   if (!model) {
     throw new Error(`Unknown model: ${formatModelRef(modelRef)}`);
   }
   return model;
 }
 
-function ensureConfiguredAuth(
-  modelRegistry: ReturnType<typeof ModelRegistry.create>,
-  model: Model<Api>,
-  modelRef: ModelRef,
-): void {
-  if (!modelRegistry.hasConfiguredAuth(model)) {
+function ensureConfiguredAuth(modelRuntime: ModelRuntime, modelRef: ModelRef): void {
+  if (!modelRuntime.hasConfiguredAuth(modelRef.provider)) {
     throw new Error(`No auth configured for ${formatModelRef(modelRef)}`);
   }
 }
@@ -132,7 +121,7 @@ export class SdkPiSession {
   constructor(runtime: PiRuntime) {
     this.runtime = runtime;
     this.selectedModelRef = parseModelRef(runtime.modelName);
-    this.selectedModel = resolveModel(runtime.modelRegistry, this.selectedModelRef);
+    this.selectedModel = resolveModel(runtime.modelRuntime, this.selectedModelRef);
   }
 
   get modelName(): string {
@@ -161,9 +150,9 @@ export class SdkPiSession {
 
   async setModel(modelName: string): Promise<void> {
     const modelRef = parseModelRef(modelName);
-    this.runtime.modelRegistry.refresh();
-    const model = resolveModel(this.runtime.modelRegistry, modelRef);
-    ensureConfiguredAuth(this.runtime.modelRegistry, model, modelRef);
+    await this.runtime.modelRuntime.refresh();
+    const model = resolveModel(this.runtime.modelRuntime, modelRef);
+    ensureConfiguredAuth(this.runtime.modelRuntime, modelRef);
 
     const session = await this.start();
     if (session.isStreaming) {
@@ -233,7 +222,11 @@ export class SdkPiSession {
   }
 
   async getApiKeyForProvider(provider: string): Promise<string | undefined> {
-    return this.runtime.modelRegistry.getApiKeyForProvider(provider);
+    try {
+      return (await this.runtime.modelRuntime.getAuth(provider))?.auth.apiKey;
+    } catch {
+      return undefined;
+    }
   }
 
   getSessionStats(): SessionStats | null {
@@ -310,8 +303,7 @@ export class SdkPiSession {
     const { session } = await createAgentSession({
       cwd: this.runtime.cwd,
       model: this.selectedModel,
-      authStorage: this.runtime.authStorage,
-      modelRegistry: this.runtime.modelRegistry,
+      modelRuntime: this.runtime.modelRuntime,
       resourceLoader,
       sessionManager,
       settingsManager: this.runtime.settingsManager,
