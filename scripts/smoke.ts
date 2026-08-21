@@ -5,6 +5,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   BACKGROUND_MODEL,
   MODEL,
+  PI_AGENT_SKILLS_DIR,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   PROJECT_SKILLS_DIR,
@@ -131,10 +132,7 @@ async function importAndRegisterExtensions(extensionPaths: string[]): Promise<nu
 }
 
 /** Asserts by construction: both runtimes resolve their model, auth, and paths. */
-async function createSmokeRuntimes(
-  extensionPaths: string[],
-  skillPaths: string[],
-): Promise<void> {
+async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Promise<void> {
   const common = {
     cwd: process.cwd(),
     getExtensionPaths: () => extensionPaths,
@@ -193,7 +191,7 @@ async function main(): Promise<void> {
 
   const importedModules = await importAllSourceModules();
   const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-  const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR);
+  const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR, PI_AGENT_SKILLS_DIR);
   const registeredTools = await importAndRegisterExtensions(extensionPaths);
   await createSmokeRuntimes(extensionPaths, skillPaths);
   const scheduledTaskTools = verifyScheduledTaskTools();

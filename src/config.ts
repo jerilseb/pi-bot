@@ -2,6 +2,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { parseModelRef } from './util.ts';
 
 /**
@@ -22,6 +23,8 @@ export const TMP_DIR = path.join(os.tmpdir(), 'pi-channel');
 
 export const PROJECT_EXTENSIONS_DIR = path.join(PROJECT_ROOT, 'extensions');
 export const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
+/** Global Pi skills; getAgentDir() respects PI_CODING_AGENT_DIR. */
+export const PI_AGENT_SKILLS_DIR = path.join(getAgentDir(), 'skills');
 export const FILES_DIR = path.join(PROJECT_ROOT, 'files');
 export const BOT_SETTINGS_PATH = path.join(FILES_DIR, 'settings.json');
 export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, 'system.md');

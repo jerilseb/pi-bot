@@ -30,6 +30,7 @@ import {
   ALLOWED_CHAT_ID,
   BACKGROUND_MODEL,
   MODEL,
+  PI_AGENT_SKILLS_DIR,
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_SKILLS_DIR,
@@ -73,7 +74,7 @@ validateConfiguration();
 ensureBotSettingsFile();
 
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR);
+const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR, PI_AGENT_SKILLS_DIR);
 
 const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),

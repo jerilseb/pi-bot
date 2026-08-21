@@ -179,6 +179,8 @@ The file is gitignored, but `files/settings.json.example` is checked in and show
 
 Background heartbeat and cron prompts use `BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
 
+Skills are discovered from both the project `skills/` directory and Pi's global `~/.pi/agent/skills/` directory. The latter follows `PI_CODING_AGENT_DIR` when that environment variable overrides Pi's agent directory.
+
 Model refs use this form:
 
 ```text

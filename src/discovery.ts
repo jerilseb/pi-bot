@@ -32,9 +32,7 @@ function isExtensionDirectory(directory: string): boolean {
   );
 }
 
-export function discoverSkillPaths(directory: string): string[] {
-  if (!fs.existsSync(directory)) return [];
-
+export function discoverSkillPaths(...directories: string[]): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
 
@@ -45,7 +43,7 @@ export function discoverSkillPaths(directory: string): string[] {
     paths.push(normalized);
   };
 
-  const walk = (current: string) => {
+  const walk = (current: string, root: string) => {
     if (fs.existsSync(path.join(current, 'SKILL.md'))) {
       add(current);
       return;
@@ -56,12 +54,12 @@ export function discoverSkillPaths(directory: string): string[] {
 
       const entryPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        walk(entryPath);
+        walk(entryPath, root);
         continue;
       }
 
       if (
-        current === directory &&
+        current === root &&
         entry.isFile() &&
         path.extname(entry.name).toLowerCase() === '.md' &&
         entry.name.toLowerCase() !== 'readme.md'
@@ -71,6 +69,10 @@ export function discoverSkillPaths(directory: string): string[] {
     }
   };
 
-  walk(directory);
+  for (const directory of directories) {
+    const root = path.resolve(directory);
+    if (fs.existsSync(root)) walk(root, root);
+  }
+
   return paths.sort((a, b) => a.localeCompare(b));
 }
