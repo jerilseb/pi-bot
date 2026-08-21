@@ -34,33 +34,52 @@ function isExtensionDirectory(directory: string): boolean {
 
 export function discoverSkillPaths(...directories: string[]): string[] {
   const paths: string[] = [];
-  const seen = new Set<string>();
+  const seenSkills = new Set<string>();
+  const visitedDirectories = new Set<string>();
 
   const add = (skillPath: string) => {
-    const normalized = path.resolve(skillPath);
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    paths.push(normalized);
+    const resolved = path.resolve(skillPath);
+    const canonical = fs.realpathSync(resolved);
+    if (seenSkills.has(canonical)) return;
+    seenSkills.add(canonical);
+    paths.push(resolved);
   };
 
   const walk = (current: string, root: string) => {
+    // Canonical paths both prevent symlink cycles and deduplicate a skill that
+    // is reachable through multiple links or roots.
+    const canonicalDirectory = fs.realpathSync(current);
+    if (visitedDirectories.has(canonicalDirectory)) return;
+    visitedDirectories.add(canonicalDirectory);
+
     if (fs.existsSync(path.join(current, 'SKILL.md'))) {
       add(current);
       return;
     }
 
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    const entries = fs
+      .readdirSync(current, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 
       const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
+      let stats: fs.Stats;
+      try {
+        // statSync follows symlinks; dangling links are skipped below.
+        stats = fs.statSync(entryPath);
+      } catch {
+        continue;
+      }
+
+      if (stats.isDirectory()) {
         walk(entryPath, root);
         continue;
       }
 
       if (
         current === root &&
-        entry.isFile() &&
+        stats.isFile() &&
         path.extname(entry.name).toLowerCase() === '.md' &&
         entry.name.toLowerCase() !== 'readme.md'
       ) {
