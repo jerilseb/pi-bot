@@ -1,17 +1,21 @@
 ---
-name: expose-port
-description: Expose a local port (dev server, API, web app) as a public https URL using a Cloudflare quick tunnel. Use when the user asks to access localhost:<port> from their phone, share or expose a dev server, open a tunnel to a local service, or stop/list running tunnels.
+name: cloudflare-tunnel
+description: Expose a local port as a public https URL using a Cloudflare quick tunnel. Use when the user asks for a tunnel by name - "create a tunnel for port 8000", "tunnel localhost:3000", "start a cloudflare tunnel", "stop/list my tunnels", "cloudflared". Do NOT use it for generic requests to expose, share, or make public a local port when the user never says "tunnel" (or Cloudflare).
 ---
 
-# Expose Port
+# Cloudflare Tunnel
 
 Turn a service running on `localhost:<port>` into a public `https://<random>.trycloudflare.com` URL using a Cloudflare quick tunnel. No account, no signup, no confirmation page.
 
 ## When to Use
 
-- User wants to open a local dev server (e.g. `localhost:8000`) on their phone or share it
-- User asks to "expose", "tunnel", or "make public" a local port
-- User asks which tunnels are running, or to stop one
+Use this skill when the user asks for a **tunnel** (or names Cloudflare / `cloudflared` / trycloudflare). Examples:
+
+- "Create a tunnel for port 8000" / "Tunnel localhost:3000"
+- "Start a cloudflare tunnel for port 3000"
+- "Which tunnels are running?" / "Stop the tunnel on 8000"
+
+Do **not** invoke this skill when the user asks to expose, share, or make public a local port without saying "tunnel" or naming Cloudflare. Handle those with whatever tool the user prefers, or ask them.
 
 ## Usage
 
@@ -26,7 +30,7 @@ Run the tunnel script from the skill directory:
 If your current working directory is the project root, use:
 
 ```bash
-.pi/skills/expose-port/scripts/tunnel.sh start <port>
+.pi/skills/cloudflare-tunnel/scripts/tunnel.sh start <port>
 ```
 
 After `start`, share the `TUNNEL_URL` with the user as a tappable link:
