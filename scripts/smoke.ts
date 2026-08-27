@@ -11,6 +11,7 @@ import {
   PROJECT_SKILLS_DIR,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
+import { contextGistSystemPromptExtension } from '../src/context-gist.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts';
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
 import { createPiRuntime } from '../src/pi-session.ts';
@@ -139,6 +140,7 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
     getSkillPaths: () => skillPaths,
     systemPromptOverride: () => readSystemPrompt(),
     extensionFactories: [
+      contextGistSystemPromptExtension,
       memorySystemPromptExtension,
       activeModelSystemPromptExtension,
       protectedEnvToolAccessExtension,

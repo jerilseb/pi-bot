@@ -217,7 +217,14 @@ KIE_API_KEY=your-kie-api-key
 
 # optional OpenAI Codex runtime override
 OPENAI_CODEX_API_KEY=your-codex-bearer-token
+
+# shared agent preferences, read once at startup from a gist owned by jerilseb
+CONTEXT_GIST_URL=https://gist.github.com/jerilseb/<gist-id>
 ```
+
+`CONTEXT_GIST_URL` points at one gist holding standing preferences that every agent reads, so a change made in one place reaches all of them. It is fetched once at startup and appended to the system prompt inside a `<user-preferences>` block, which means editing the gist takes effect on the bot's next restart.
+
+The gist page URL is enough — the gist's first file is read, so a single-file gist needs no file name. A raw URL naming one file works too, but drop the revision SHA that GitHub's "Raw" button adds: it pins the file's current content, so that URL would serve the same text after every edit. The bot strips it and says so in the startup log. Only gists owned by `jerilseb` are accepted.
 
 Useful non-secret settings in `src/config.ts` include:
 

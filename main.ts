@@ -43,6 +43,11 @@ import {
   isAllowedTelegramChat,
 } from './src/config.ts';
 import { collectConfigProblems } from './src/config-validation.ts';
+import {
+  contextGistStatusText,
+  contextGistSystemPromptExtension,
+  loadContextGist,
+} from './src/context-gist.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
@@ -72,6 +77,7 @@ import { voiceStatusText } from './src/voice.ts';
 
 validateConfiguration();
 ensureBotSettingsFile();
+await loadContextGist();
 
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR, PI_AGENT_SKILLS_DIR);
@@ -84,6 +90,7 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   getSkillPaths: () => SKILL_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
   extensionFactories: [
+    contextGistSystemPromptExtension,
     memorySystemPromptExtension,
     activeModelSystemPromptExtension,
     protectedEnvToolAccessExtension,
@@ -99,6 +106,7 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   getSkillPaths: () => SKILL_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
   extensionFactories: [
+    contextGistSystemPromptExtension,
     memorySystemPromptExtension,
     activeModelSystemPromptExtension,
     protectedEnvToolAccessExtension,
@@ -220,6 +228,7 @@ function logStartupBanner(): void {
   console.log(`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(', ') : 'none'}`);
   console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(', ') : 'none'}`);
   console.log(`Voice note tool: ${voiceStatusText()}`);
+  console.log(`Context gist: ${contextGistStatusText()}`);
   console.log(`Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`);
   console.log(heartbeatStatusText());
   console.log(cronStatusText());
