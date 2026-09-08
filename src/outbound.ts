@@ -1,17 +1,21 @@
 import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP } from './config.ts';
 import { sendTelegramMessage } from './telegram.ts';
-import type { PiPromptResult } from './types.ts';
+import type { IncomingPrompt, PiPromptResult } from './types.ts';
 
 export async function sendPiResponse(
   response: PiPromptResult,
-  options: { suppressNoop?: boolean } = {},
+  options: { suppressNoop?: boolean; source?: IncomingPrompt['source'] } = {},
 ): Promise<void> {
   if (options.suppressNoop && isNoopResponse(response.text)) {
     console.log('background task completed with no user-visible update');
     return;
   }
 
-  await sendTelegramMessage(response.text);
+  const text =
+    options.source === 'cron'
+      ? `⏰ <b>Scheduled report</b>\n\n${response.text || '(empty)'}`
+      : response.text;
+  await sendTelegramMessage(text);
 }
 
 // Match on the bare sentinel name (wrapping underscores stripped) so a model that

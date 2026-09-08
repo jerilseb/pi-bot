@@ -120,6 +120,7 @@ export function createPromptQueue(options: {
         await flushToolNotifications();
         await sendPiResponse(response, {
           suppressNoop: prompt.suppressNoop,
+          source: prompt.source,
         });
         cleanupAttachments(prompt);
         enqueuePendingNewSessionTask(chat, prompt);
