@@ -190,7 +190,7 @@ provider/model-id
 Examples:
 
 ```text
-openai-codex/gpt-5.5
+openai-codex/gpt-6-astra
 openrouter/openai/gpt-5.4-mini
 openrouter/moonshotai/kimi-k2.6
 ```

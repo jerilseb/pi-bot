@@ -57,7 +57,7 @@ export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
 export const BACKGROUND_MODEL = 'openai-codex/gpt-5.6-terra';
 /** Chat models offered by /models. Must contain CHAT_MODEL and the active model. */
 export const ALLOWED_MODELS: readonly string[] = [
-  'openai-codex/gpt-5.5',
+  'openai-codex/gpt-6-astra',
   'openai-codex/gpt-5.6-luna',
   'openai-codex/gpt-5.6-sol',
   'openrouter/moonshotai/kimi-k2.6',
