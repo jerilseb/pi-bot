@@ -42,10 +42,18 @@ export function startTyping(): { stop(): void } {
   return { stop: () => clearInterval(timer) };
 }
 
-export async function sendTelegramMessage(text: string): Promise<void> {
+export interface SendMessageOptions {
+  /** Deliver without a push notification sound. */
+  silent?: boolean;
+}
+
+export async function sendTelegramMessage(
+  text: string,
+  options: SendMessageOptions = {},
+): Promise<void> {
   const chunks = splitTelegramMessage(text || '(empty)');
   for (const chunk of chunks) {
-    await sendTelegramHtmlMessage(chunk);
+    await sendTelegramHtmlMessage(chunk, options);
   }
 }
 
@@ -53,9 +61,11 @@ export async function sendTelegramInlineKeyboard(
   text: string,
   keyboard: InlineKeyboardButton[][],
 ): Promise<void> {
-  await postTelegramHtmlMessage(escapeTelegramHtml(text || '(empty)'), {
-    inline_keyboard: keyboard,
-  });
+  await postTelegramHtmlMessage(
+    escapeTelegramHtml(text || '(empty)'),
+    {},
+    { inline_keyboard: keyboard },
+  );
 }
 
 export async function answerTelegramCallbackQuery(
@@ -73,49 +83,85 @@ export async function answerTelegramCallbackQuery(
 }
 
 export async function editTelegramMessageText(messageId: number, text: string): Promise<void> {
-  await telegram('editMessageText', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: ALLOWED_CHAT_ID,
-      message_id: messageId,
-      text: escapeTelegramHtml(text || '(empty)'),
-      parse_mode: 'HTML',
-    }),
+  await editTelegramMessageHtml(messageId, escapeTelegramHtml(text || '(empty)'));
+}
+
+/**
+ * Replaces a sent message's HTML, degrading the markup on the same ladder as a
+ * send. Editing to identical content is a Telegram error rather than a change,
+ * so that one is treated as success.
+ */
+export async function editTelegramMessageHtml(messageId: number, html: string): Promise<void> {
+  await withHtmlParseFallback(html, async (candidate) => {
+    try {
+      await telegram('editMessageText', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: ALLOWED_CHAT_ID,
+          message_id: messageId,
+          text: candidate,
+          parse_mode: 'HTML',
+        }),
+      });
+    } catch (error) {
+      if (!isTelegramNotModifiedError(error)) throw error;
+    }
   });
 }
 
-/** Sends one chunk, degrading the markup rather than failing: raw → sanitized → escaped. */
-async function sendTelegramHtmlMessage(html: string): Promise<void> {
+/**
+ * Sends one chunk that is already known to fit in a single Telegram message and
+ * returns its ID, so the caller can edit it later.
+ */
+export async function sendTelegramHtmlMessage(
+  html: string,
+  options: SendMessageOptions = {},
+): Promise<number> {
+  return withHtmlParseFallback(html, (candidate) => postTelegramHtmlMessage(candidate, options));
+}
+
+/**
+ * Tries the HTML as written, then sanitized, then fully escaped. Only a Telegram
+ * entity-parse error moves on to the next attempt; anything else propagates.
+ */
+async function withHtmlParseFallback<T>(
+  html: string,
+  post: (candidate: string) => Promise<T>,
+): Promise<T> {
   try {
-    await postTelegramHtmlMessage(html);
-    return;
+    return await post(html);
   } catch (error) {
     if (!isTelegramHtmlParseError(error)) throw error;
   }
   try {
-    await postTelegramHtmlMessage(sanitizeTelegramHtml(html));
-    return;
+    return await post(sanitizeTelegramHtml(html));
   } catch (error) {
     if (!isTelegramHtmlParseError(error)) throw error;
   }
-  await postTelegramHtmlMessage(escapeTelegramHtml(html));
+  return post(escapeTelegramHtml(html));
 }
 
 async function postTelegramHtmlMessage(
   text: string,
+  options: SendMessageOptions = {},
   replyMarkup?: Record<string, unknown>,
-): Promise<void> {
-  await telegram('sendMessage', {
+): Promise<number> {
+  const response = await telegram<{ result?: { message_id?: number } }>('sendMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: ALLOWED_CHAT_ID,
       text,
       parse_mode: 'HTML',
+      ...(options.silent ? { disable_notification: true } : {}),
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
   });
+
+  const messageId = response.result?.message_id;
+  if (typeof messageId !== 'number') throw new Error('Telegram sendMessage returned no message_id');
+  return messageId;
 }
 
 export async function sendChatAction(): Promise<void> {
@@ -148,6 +194,10 @@ export async function telegram<T = unknown>(
 
 function isTelegramHtmlParseError(error: unknown): boolean {
   return errorMessage(error).toLowerCase().includes("can't parse entities");
+}
+
+function isTelegramNotModifiedError(error: unknown): boolean {
+  return errorMessage(error).toLowerCase().includes('message is not modified');
 }
 
 /** Reduces a thrown error to one escaped, length-capped line fit for the chat. */

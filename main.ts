@@ -35,12 +35,12 @@ import {
   PROJECT_EXTENSIONS_DIR,
   PROJECT_SKILLS_DIR,
   RESTART_EXIT_DELAY_MS,
-  SEND_TOOL_CALLS,
   SESSIONS_DIR,
   TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
   ensureBotSettingsFile,
   isAllowedTelegramChat,
+  toolCallMode,
 } from './src/config.ts';
 import { collectConfigProblems } from './src/config-validation.ts';
 import {
@@ -56,6 +56,7 @@ import { ingestTelegramMessage } from './src/inbound.ts';
 import { handleModelCallbackQuery } from './src/model-menu.ts';
 import { createPromptQueue } from './src/prompt-queue.ts';
 import { handleReasoningCallbackQuery } from './src/reasoning-menu.ts';
+import { handleToolCallCallbackQuery } from './src/tool-call-menu.ts';
 import {
   consumePostRestartTasks,
   ensurePostRestartTasksFile,
@@ -203,6 +204,7 @@ async function pollTelegram(): Promise<void> {
         if (update.callback_query) {
           await handleModelCallbackQuery(update.callback_query, chatSession);
           await handleReasoningCallbackQuery(update.callback_query, chatSession);
+          await handleToolCallCallbackQuery(update.callback_query);
           await handleTelegramMenuCallbackQuery(update.callback_query, handleIncoming);
           continue;
         }
@@ -229,7 +231,7 @@ function logStartupBanner(): void {
   console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(', ') : 'none'}`);
   console.log(`Voice note tool: ${voiceStatusText()}`);
   console.log(`Context gist: ${contextGistStatusText()}`);
-  console.log(`Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`);
+  console.log(`Tool call messages: ${toolCallMode()}`);
   console.log(heartbeatStatusText());
   console.log(cronStatusText());
   console.log(`Post-restart tasks: ${POST_RESTART_TASKS_PATH}`);

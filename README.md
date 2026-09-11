@@ -111,6 +111,7 @@ That means it can remember stable context without stuffing every temporary detai
 - Heartbeat loop for proactive monitoring instructions (off by default).
 - Long-term memory plus daily/session notes.
 - Model switching with Telegram inline buttons.
+- Tool calls folded into one expandable message per prompt, or streamed, or off.
 - Usage commands for OpenAI Codex and ElevenLabs.
 - Pi skills for browser automation, image generation, HTML visualizations, email via Himalaya, and PDF work.
 - Graceful self-restart through `/restart` or an explicit natural-language restart request.
@@ -173,7 +174,21 @@ Both default to **off** — only a literal `true` enables either. Both are read 
 - `heartbeat` — the hourly heartbeat run. Ticks also need `files/heartbeat.md` to hold instructions beyond its `# Heartbeat` heading; with the switch on but the file empty, every tick is a silent no-op.
 - `cronJobs` — the scheduled-task scheduler *and* the `create_schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` / `update_scheduled_task` tools. The tools are withheld when it is off, so the agent cannot queue jobs that would never fire; existing entries in `files/cron-jobs.json` are left in place, just not run.
 
-`files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`.
+The same file also holds how tool calls reach the chat, switched from Telegram with `/toolcalls`:
+
+```json
+{
+  "toolCalls": "collapsed"
+}
+```
+
+- `collapsed` (default) — one silent message per prompt, edited in place as calls arrive, with the calls folded inside an expandable blockquote. Lines past the size budget are counted in the header rather than shown.
+- `stream` — a new message per batch.
+- `off` — nothing is sent.
+
+Unlike `heartbeat` and `cronJobs`, this one is read fresh at the start of every prompt, so a switch applies from the next prompt and needs no restart.
+
+`files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`. Writes from `/toolcalls` merge the same way.
 
 The file is gitignored, but `files/settings.json.example` is checked in and shows the defaults the bot writes on first start. You do not need to copy it — startup creates `files/settings.json` if it is missing — it is there to document the shape.
 
@@ -232,7 +247,7 @@ Useful non-secret settings in `src/config.ts` include:
 - `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
 - `IDLE_TIMEOUT_MINUTES` and `MAX_QUEUE_PER_CHAT`
-- `SEND_TOOL_CALLS`, `TOOL_CALL_BATCH_MS`, and `TOOL_CALL_BATCH_MAX_ITEMS`
+- `TOOL_CALL_BATCH_MS`, `TOOL_CALL_BATCH_MAX_ITEMS`, and `TOOL_CALL_COLLAPSED_MAX_CHARS` (whether and how tool calls are shown at all is the `toolCalls` setting in `files/settings.json` — see below)
 - `SEND_LOCAL_IMAGES`, `LOCAL_IMAGE_UPLOAD_DIRS`, `SEND_LOCAL_DOCUMENTS`, `LOCAL_DOCUMENT_UPLOAD_DIRS`, and `DOCUMENT_UPLOAD_EXTS`
 - `HEARTBEAT_INTERVAL_SECONDS` (whether the heartbeat runs at all is a `files/settings.json` setting — see below)
 - `BACKGROUND_BASH_MAX_RUNNING` and `BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS`
@@ -248,6 +263,7 @@ Inside Telegram:
 | `/status` | Show the current chat session status |
 | `/models` | Choose an allowed chat model |
 | `/reasoning` | Choose the chat reasoning level |
+| `/toolcalls` | Choose how tool calls are shown: collapsed, stream, or off |
 | `/openaiusage` | Show OpenAI Codex usage windows and reset times |
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
 | `/abort` | Stop the current response and clear the queue |
@@ -317,7 +333,7 @@ files/heartbeat.md               Standing heartbeat instructions
 files/heartbeat-state.md         Durable heartbeat state
 files/cron-jobs.json             Scheduled tasks
 files/post-restart-tasks.json    Tasks queued to run after a restart
-files/settings.json              Active chat model, reasoning level, heartbeat/cron switches
+files/settings.json              Active chat model, reasoning level, heartbeat/cron switches, tool-call mode
 files/settings.json.example      Checked-in reference copy of the above defaults
 ```
 

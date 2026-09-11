@@ -1,11 +1,12 @@
 import type { SessionStats } from '@earendil-works/pi-coding-agent';
 import type { ChatSession, ChatState } from './chat-session.ts';
-import { ELEVENLABS_API_KEY, SEND_TOOL_CALLS } from './config.ts';
+import { ELEVENLABS_API_KEY, toolCallMode } from './config.ts';
 import { cronStatusText } from './cron.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
 import { heartbeatStatusText } from './heartbeat.ts';
 import { buildModelInlineKeyboard } from './model-menu.ts';
 import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
+import { buildToolCallInlineKeyboard, describeToolCallMode } from './tool-call-menu.ts';
 import {
   buildOpenAIUsageTelegramHtml,
   fetchOpenAIUsage,
@@ -130,7 +131,7 @@ const BOT_COMMANDS: BotCommand[] = [
           `- Background queue: ${background?.queue.length ?? 0}`,
           `- Background model: ${getBackgroundModelName()}`,
           `- Voice note tool: ${voiceStatusText()}`,
-          `- Tool call messages: ${SEND_TOOL_CALLS ? 'on' : 'off'}`,
+          `- Tool call messages: ${toolCallMode()}`,
           `- ${heartbeatStatusText()}`,
           `- ${cronStatusText()}`,
         ].join('\n'),
@@ -177,6 +178,21 @@ const BOT_COMMANDS: BotCommand[] = [
           'Choose a reasoning level:',
         ].join('\n'),
         buildReasoningInlineKeyboard(thinking.availableLevels),
+      );
+    },
+  },
+
+  {
+    name: 'toolcalls',
+    description: 'Choose how tool calls are shown',
+    help: 'choose how Pi’s tool calls are shown in the chat',
+    handler: async () => {
+      await sendTelegramInlineKeyboard(
+        [
+          `Current: ${describeToolCallMode(toolCallMode())}`,
+          'Choose how tool calls are shown:',
+        ].join('\n'),
+        buildToolCallInlineKeyboard(),
       );
     },
   },

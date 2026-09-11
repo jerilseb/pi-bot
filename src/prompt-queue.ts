@@ -1,10 +1,10 @@
 import type { ChatSession, ChatState } from './chat-session.ts';
 import { handleCommand } from './commands.ts';
-import { MAX_QUEUED_PROMPTS, SEND_TOOL_CALLS } from './config.ts';
+import { MAX_QUEUED_PROMPTS } from './config.ts';
 import { cleanupAttachments } from './inbound.ts';
 import { sendPiResponse } from './outbound.ts';
 import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
-import { flushToolNotifications, notifyToolCall } from './tool-notification-batch.ts';
+import { createToolNotifications } from './tool-notification-batch.ts';
 import type { IncomingPrompt } from './types.ts';
 import { errorMessage, isBackgroundSource } from './util.ts';
 
@@ -107,17 +107,17 @@ export function createPromptQueue(options: {
 
       // Background runs have no user watching, so no typing indicator.
       const typing = isBackgroundSource(prompt.source) ? { stop: () => undefined } : startTyping();
+      // Own state per prompt: background and foreground sessions can overlap.
+      const toolNotifications = createToolNotifications(prompt.source);
       try {
         const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
         console.log(`${logLabel}: ${prompt.text.slice(0, 120)}`);
         const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
-          onToolCall: SEND_TOOL_CALLS
-            ? (notification) => notifyToolCall(notification, prompt.source)
-            : undefined,
+          onToolCall: toolNotifications.notify,
         });
         // Flush before the response so notifications cannot arrive after the
         // answer they describe.
-        await flushToolNotifications();
+        await toolNotifications.finish();
         await sendPiResponse(response, {
           suppressNoop: prompt.suppressNoop,
           source: prompt.source,
@@ -127,7 +127,7 @@ export function createPromptQueue(options: {
       } catch (error) {
         const message = errorMessage(error);
         console.error('error:', message);
-        await flushToolNotifications();
+        await toolNotifications.finish();
         try {
           await sendTelegramMessage(`❌ ${sanitizeError(message)}`);
         } catch (notificationError) {

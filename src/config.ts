@@ -74,6 +74,7 @@ interface BotSettings {
   defaultModel?: unknown;
   heartbeat?: unknown;
   cronJobs?: unknown;
+  toolCalls?: unknown;
 }
 
 function readBotSettings(): BotSettings {
@@ -83,6 +84,20 @@ function readBotSettings(): BotSettings {
     throw new Error(`${BOT_SETTINGS_PATH} must contain a JSON object`);
   }
   return parsed as BotSettings;
+}
+
+/**
+ * Merges one bot-only key into settings.json without touching the rest, the
+ * same contract Pi's SettingsManager honours in the other direction.
+ */
+function updateBotSettings(patch: Partial<Record<keyof BotSettings, unknown>>): void {
+  const current = readBotSettings();
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+  fs.writeFileSync(
+    BOT_SETTINGS_PATH,
+    `${JSON.stringify({ ...current, ...patch }, null, 2)}\n`,
+    'utf8',
+  );
 }
 
 const BOT_SETTINGS = readBotSettings();
@@ -106,6 +121,7 @@ export function ensureBotSettingsFile(): void {
         defaultThinkingLevel: 'high',
         heartbeat: false,
         cronJobs: false,
+        toolCalls: DEFAULT_TOOL_CALL_MODE,
       },
       null,
       2,
@@ -138,9 +154,44 @@ export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 const IDLE_TIMEOUT_MINUTES = 120;
 export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60_000;
 export const MAX_QUEUED_PROMPTS = 5;
-export const SEND_TOOL_CALLS = true;
-export const TOOL_CALL_BATCH_MS = 5000;
+
+/**
+ * How tool calls reach the chat. `stream` sends a new message per batch,
+ * `collapsed` keeps one expandable message per prompt and edits it in place,
+ * `off` sends nothing. Persisted in files/settings.json as `toolCalls` and
+ * switched from Telegram with /toolcalls, so it is read fresh rather than
+ * frozen at startup like `heartbeat` and `cronJobs`.
+ */
+export const TOOL_CALL_MODES = ['stream', 'collapsed', 'off'] as const;
+export type ToolCallMode = (typeof TOOL_CALL_MODES)[number];
+export const DEFAULT_TOOL_CALL_MODE: ToolCallMode = 'collapsed';
+
+export function isToolCallMode(value: unknown): value is ToolCallMode {
+  return typeof value === 'string' && TOOL_CALL_MODES.some((mode) => mode === value);
+}
+
+/** The mode as settings.json currently holds it. Read at the start of a prompt. */
+export function toolCallMode(): ToolCallMode {
+  try {
+    const { toolCalls } = readBotSettings();
+    return isToolCallMode(toolCalls) ? toolCalls : DEFAULT_TOOL_CALL_MODE;
+  } catch (error) {
+    console.error('failed to read the tool call mode:', error);
+    return DEFAULT_TOOL_CALL_MODE;
+  }
+}
+
+export function setToolCallMode(mode: ToolCallMode): void {
+  updateBotSettings({ toolCalls: mode });
+}
+
+export const TOOL_CALL_BATCH_MS = 10_000;
 export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
+/**
+ * Budget for the collapsed message body. Well under TELEGRAM_MAX_MESSAGE so the
+ * header and blockquote tags always fit; lines past it are counted, not shown.
+ */
+export const TOOL_CALL_COLLAPSED_MAX_CHARS = 3_500;
 
 // ---------------------------------------------------------------------------
 // Restart lifecycle

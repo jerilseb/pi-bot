@@ -9,7 +9,7 @@ test('adds a scheduled report header only to cron responses', async (t) => {
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
     const payload = JSON.parse(String(init?.body)) as { text: string };
     messages.push(payload.text);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, result: { message_id: messages.length } });
   });
 
   const body = '<b>News</b> &amp; updates';

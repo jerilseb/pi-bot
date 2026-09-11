@@ -15,6 +15,30 @@ type ToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_executio
 
 const MAX_TOOL_NOTIFICATION_DISPLAY_CHARS = 34;
 
+/**
+ * Renders one prompt's tool calls as a single collapsed message: a one-line
+ * header Telegram shows while the quote is folded, then the calls themselves
+ * inside an expandable blockquote. Each line's leading icon is dropped — the
+ * header already carries one, and in a folded list the text says what the icon
+ * would. `hidden` counts lines left out for size and is reported, not shown.
+ */
+export function renderCollapsedToolCalls(lines: string[], hidden = 0): string {
+  const total = lines.length + hidden;
+  const header =
+    `🛠 <b>${total} tool ${total === 1 ? 'call' : 'calls'}</b>` +
+    (hidden > 0 ? ` <i>(${hidden} not shown)</i>` : '');
+  if (lines.length === 0) return header;
+
+  const body = lines.map(stripLeadingIcon).join('\n');
+  return `${header}\n<blockquote expandable>${body}</blockquote>`;
+}
+
+const LEADING_ICON_RE = /^\p{Extended_Pictographic}\uFE0F?\s+/u;
+
+function stripLeadingIcon(line: string): string {
+  return line.replace(LEADING_ICON_RE, '');
+}
+
 export function formatToolStartNotification(
   event: ToolExecutionStartEvent,
   session: AgentSession,

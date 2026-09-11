@@ -10,14 +10,14 @@ Key files:
 
 - `main.ts` — entrypoint/orchestrator: constructs the runtimes and sessions, wires the modules together, owns the polling loop, startup banner, post-restart tasks, and shutdown. Keep it to wiring and lifecycle; new behavior belongs in a module.
 - `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the worker that drains it. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report.
-- `src/tool-notification-batch.ts` — coalesces tool-call notifications into one Telegram message; `src/tool-notifications.ts` — formats a single event (pure).
+- `src/tool-notification-batch.ts` — coalesces tool-call notifications and delivers them in the `toolCalls` mode (`collapsed` edits one expandable message per prompt, `stream` sends one per batch, `off` drops them); `src/tool-notifications.ts` — formats a single event and renders the collapsed block (pure).
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
 - `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection).
 - `src/chat-session.ts` — the single chat's state and idle-session disposal.
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
-- `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/model-menu.ts`, `src/reasoning-menu.ts` — their inline keyboards.
+- `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/model-menu.ts`, `src/reasoning-menu.ts`, `src/tool-call-menu.ts` — their inline keyboards.
 - `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks.
 - `src/background-bash.ts` — background shell sessions. `src/job-registry.ts` — its lifecycle bookkeeping.
