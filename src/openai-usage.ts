@@ -179,9 +179,14 @@ function parseUsagePayload(response: Response, body: string): OpenAIUsage {
     for (const additional of payload.additional_rate_limits) {
       if (!isRecord(additional) || !isRecord(additional.rate_limit)) continue;
       const name =
-        parseString(additional.limit_name) ?? parseString(additional.metered_feature) ?? 'Additional';
+        parseString(additional.limit_name) ??
+        parseString(additional.metered_feature) ??
+        'Additional';
       const primary = parseUsageWindow(additional.rate_limit.primary_window, `${name} primary`);
-      const secondary = parseUsageWindow(additional.rate_limit.secondary_window, `${name} secondary`);
+      const secondary = parseUsageWindow(
+        additional.rate_limit.secondary_window,
+        `${name} secondary`,
+      );
       if (primary) windows.push(primary);
       if (secondary) windows.push(secondary);
     }

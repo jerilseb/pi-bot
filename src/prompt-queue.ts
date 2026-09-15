@@ -34,15 +34,10 @@ export interface PromptQueue {
 export function createPromptQueue(options: {
   chatSession: ChatSession;
   backgroundSession: ChatSession;
-  /** Model name reported by /status when no background session exists yet. */
-  backgroundModelFallback: string;
   restart: () => Promise<void>;
   isRunning: () => boolean;
 }): PromptQueue {
   const { chatSession, backgroundSession, isRunning } = options;
-
-  const getBackgroundModelName = (): string =>
-    backgroundSession.existing()?.pi.modelName ?? options.backgroundModelFallback;
 
   const handleIncoming = async (prompt: IncomingPrompt): Promise<void> => {
     const session = isBackgroundSource(prompt.source) ? backgroundSession : chatSession;
@@ -55,7 +50,6 @@ export function createPromptQueue(options: {
           chat,
           session: chatSession,
           backgroundSession,
-          getBackgroundModelName,
           restart: options.restart,
         },
         trimmed,
@@ -112,6 +106,7 @@ export function createPromptQueue(options: {
       try {
         const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
         console.log(`${logLabel}: ${prompt.text.slice(0, 120)}`);
+        if (prompt.model) await chat.pi.useModel(prompt.model);
         const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
           onToolCall: toolNotifications.notify,
         });

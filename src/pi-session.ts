@@ -34,13 +34,24 @@ import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
 import { telegramMenuExtension } from './telegram-menu.ts';
 import { telegramVoiceNoteExtension } from './voice.ts';
 
+/** Stands in for the model name on a session whose prompts each carry their own. */
+export const NO_MODEL_NAME = 'per-prompt';
+
 export interface PiRunPromptOptions {
   onToolCall?: (notification: string) => void;
 }
 
 export interface PiRuntime {
-  modelName: string;
-  model: Model<Api>;
+  /**
+   * The session's default model, as provider/model, or null when every prompt
+   * must name its own. SdkPiSession resolves it against the catalogue on first
+   * use rather than here, so a runtime can exist before a model is chosen — the
+   * background runtime has no default, since heartbeat and cron each carry one.
+   *
+   * setModel writes back here so a /models switch outlives the idle timer
+   * disposing the chat's SdkPiSession; useModel deliberately does not.
+   */
+  modelName: string | null;
   modelRuntime: ModelRuntime;
   settingsManager: ReturnType<typeof SettingsManager.create>;
   cwd: string;
@@ -55,7 +66,8 @@ export interface PiRuntime {
 
 export async function createPiRuntime(options: {
   cwd: string;
-  model: string;
+  /** Default model as provider/model, or null when every prompt names its own. */
+  model: string | null;
   sessionPrefix: string;
   getExtensionPaths: () => string[];
   getSkillPaths: () => string[];
@@ -71,16 +83,16 @@ export async function createPiRuntime(options: {
     await modelRuntime.setRuntimeApiKey('openai-codex', OPENAI_CODEX_API_KEY);
   }
 
-  const selectedModelRef = parseModelRef(options.model);
-  const model = resolveModel(modelRuntime, selectedModelRef);
-  ensureConfiguredAuth(modelRuntime, selectedModelRef);
+  // Normalised, not resolved: whether the model exists and has auth is asserted
+  // separately at startup (assertModelUsable), so that check stays explicit
+  // rather than being a side effect of constructing a runtime.
+  const defaultModelName = options.model ? formatModelRef(parseModelRef(options.model)) : null;
   // Keep Telegram model/reasoning preferences isolated from ~/.pi/agent/settings.json.
   // ModelRuntime still uses Pi's normal agent directory, so provider logins remain shared.
   const settingsManager = SettingsManager.create(options.cwd, FILES_DIR);
 
   return {
-    modelName: formatModelRef(selectedModelRef),
-    model,
+    modelName: defaultModelName,
     modelRuntime,
     settingsManager,
     cwd: options.cwd,
@@ -92,6 +104,13 @@ export async function createPiRuntime(options: {
     extensionFactories: options.extensionFactories ?? [],
     ...(options.requestRestart ? { requestRestart: options.requestRestart } : {}),
   };
+}
+
+/** Throws unless the model exists in Pi's catalogue and its provider has auth. */
+export function assertModelUsable(modelRuntime: ModelRuntime, modelName: string): void {
+  const modelRef = parseModelRef(modelName);
+  resolveModel(modelRuntime, modelRef);
+  ensureConfiguredAuth(modelRuntime, modelRef);
 }
 
 function resolveModel(modelRuntime: ModelRuntime, modelRef: ModelRef): Model<Api> {
@@ -112,20 +131,20 @@ export class SdkPiSession {
   private session: AgentSession | null = null;
   private starting: Promise<AgentSession> | null = null;
   private runtime: PiRuntime;
-  private selectedModelRef: ModelRef;
-  private selectedModel: Model<Api>;
+  private selectedModelRef: ModelRef | null;
+  private selectedModel: Model<Api> | null = null;
   private forceNewSessionOnNextStart = false;
   private pendingNewSessionRequest = false;
   private pendingNewSessionTask: string | null = null;
 
   constructor(runtime: PiRuntime) {
     this.runtime = runtime;
-    this.selectedModelRef = parseModelRef(runtime.modelName);
-    this.selectedModel = resolveModel(runtime.modelRuntime, this.selectedModelRef);
+    this.selectedModelRef = runtime.modelName ? parseModelRef(runtime.modelName) : null;
   }
 
+  /** The selected model, or NO_MODEL_NAME until a prompt names one. */
   get modelName(): string {
-    return formatModelRef(this.selectedModelRef);
+    return this.selectedModelRef ? formatModelRef(this.selectedModelRef) : NO_MODEL_NAME;
   }
 
   async getThinkingState(): Promise<{
@@ -161,9 +180,33 @@ export class SdkPiSession {
 
     await session.setModel(model);
 
-    const formatted = formatModelRef(modelRef);
-    this.runtime.modelName = formatted;
-    this.runtime.model = model;
+    // Written back so a /models switch survives the idle timer disposing this
+    // SdkPiSession: the replacement reads its default from the runtime.
+    this.runtime.modelName = formatModelRef(modelRef);
+    this.selectedModelRef = modelRef;
+    this.selectedModel = model;
+  }
+
+  /**
+   * Switches the model for the prompts that follow without recording it as the
+   * bot's default. setModel goes through the SDK, which persists the choice to
+   * files/settings.json — right for /models on the chat session, wrong for a
+   * background run that borrows a model for one task. So this disposes the
+   * live AgentSession and lets the next start() reopen the same transcript with
+   * the new model. A no-op when the model is already active.
+   */
+  async useModel(modelName: string): Promise<void> {
+    const modelRef = parseModelRef(modelName);
+    if (formatModelRef(modelRef) === this.modelName) return;
+    if (this.session?.isStreaming) {
+      throw new Error('Cannot switch models while Pi is responding');
+    }
+
+    await this.runtime.modelRuntime.refresh();
+    const model = resolveModel(this.runtime.modelRuntime, modelRef);
+    ensureConfiguredAuth(this.runtime.modelRuntime, modelRef);
+
+    this.cleanup();
     this.selectedModelRef = modelRef;
     this.selectedModel = model;
   }
@@ -250,6 +293,25 @@ export class SdkPiSession {
     this.starting = null;
   }
 
+  /**
+   * Resolves the selected ref against the catalogue, lazily, so a runtime with no
+   * default model is legal right up until something tries to run on it without
+   * naming one.
+   */
+  private resolveSelectedModel(): Model<Api> {
+    if (!this.selectedModelRef) {
+      throw new Error(
+        'No model is configured for this Pi session; the prompt must name one. ' +
+          'Check HEARTBEAT_MODEL and SCHEDULED_TASK_MODEL in .env.',
+      );
+    }
+    if (!this.selectedModel) {
+      this.selectedModel = resolveModel(this.runtime.modelRuntime, this.selectedModelRef);
+      ensureConfiguredAuth(this.runtime.modelRuntime, this.selectedModelRef);
+    }
+    return this.selectedModel;
+  }
+
   private applyPendingNewSession(): void {
     if (!this.pendingNewSessionRequest) return;
 
@@ -302,7 +364,7 @@ export class SdkPiSession {
     const sessionManager = await this.createSessionManager();
     const { session } = await createAgentSession({
       cwd: this.runtime.cwd,
-      model: this.selectedModel,
+      model: this.resolveSelectedModel(),
       modelRuntime: this.runtime.modelRuntime,
       resourceLoader,
       sessionManager,

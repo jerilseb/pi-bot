@@ -27,7 +27,6 @@ export interface CommandContext {
   chat: ChatState;
   session: ChatSession;
   backgroundSession: ChatSession;
-  getBackgroundModelName(): string;
   /** Shuts the bot down and exits so systemd brings it back up. */
   restart(): Promise<void>;
 }
@@ -113,7 +112,7 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'status',
     description: 'Show chat session status',
     help: 'show this chat session status',
-    handler: async ({ chat, backgroundSession, getBackgroundModelName }) => {
+    handler: async ({ chat, backgroundSession }) => {
       const uptimeSeconds = Math.floor((Date.now() - chat.startedAt) / 1000);
       const background = backgroundSession.existing();
       const thinking = await chat.pi.getThinkingState();
@@ -129,7 +128,7 @@ const BOT_COMMANDS: BotCommand[] = [
           `- Session tokens: ${formatSessionTokens(chat.pi.getSessionStats())}`,
           `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
           `- Background queue: ${background?.queue.length ?? 0}`,
-          `- Background model: ${getBackgroundModelName()}`,
+          `- Background model: ${background?.pi.modelName ?? 'idle'}`,
           `- Voice note tool: ${voiceStatusText()}`,
           `- Tool call messages: ${toolCallMode()}`,
           `- ${heartbeatStatusText()}`,

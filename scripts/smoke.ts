@@ -3,18 +3,19 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
-  BACKGROUND_MODEL,
+  HEARTBEAT_MODEL,
   MODEL,
   PI_AGENT_SKILLS_DIR,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   PROJECT_SKILLS_DIR,
+  SCHEDULED_TASK_MODEL,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
 import { contextGistSystemPromptExtension } from '../src/context-gist.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts';
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
-import { createPiRuntime } from '../src/pi-session.ts';
+import { assertModelUsable, createPiRuntime } from '../src/pi-session.ts';
 import { scheduledTasksExtension } from '../src/scheduled-tasks.ts';
 import { isRecord } from '../src/util.ts';
 import {
@@ -132,7 +133,11 @@ async function importAndRegisterExtensions(extensionPaths: string[]): Promise<nu
   return registeredTools;
 }
 
-/** Asserts by construction: both runtimes resolve their model, auth, and paths. */
+/**
+ * Asserts that both runtimes build, and that every configured model resolves with
+ * auth. The runtimes no longer resolve a model themselves, so these checks are
+ * explicit — they mirror validateModels() in main.ts.
+ */
 async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Promise<void> {
   const common = {
     cwd: process.cwd(),
@@ -147,17 +152,21 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
     ],
   };
 
-  await createPiRuntime({
+  const chat = await createPiRuntime({
     ...common,
     model: MODEL,
     sessionPrefix: 'smoke-chat',
   });
+  assertModelUsable(chat.modelRuntime, MODEL);
 
-  await createPiRuntime({
+  const background = await createPiRuntime({
     ...common,
-    model: BACKGROUND_MODEL,
+    model: null,
     sessionPrefix: 'smoke-background',
   });
+  for (const model of [HEARTBEAT_MODEL, SCHEDULED_TASK_MODEL]) {
+    if (model) assertModelUsable(background.modelRuntime, model);
+  }
 }
 
 function verifyScheduledTaskTools(): number {

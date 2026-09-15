@@ -1,5 +1,6 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import { SCHEDULED_TASK_MODEL } from './config.ts';
 import {
   addCronJob,
   cancelCronJob,
@@ -9,6 +10,10 @@ import {
   type CronJobKind,
 } from './cron-store.ts';
 import { textResult } from './tool-result.ts';
+import { formatModelRef, parseModelRef } from './util.ts';
+
+/** Passing this as `model` to update_scheduled_task clears the task's model override. */
+const DEFAULT_MODEL_KEYWORD = 'default';
 
 const JobKind = Type.Union([Type.Literal('once'), Type.Literal('interval'), Type.Literal('cron')]);
 
@@ -19,6 +24,11 @@ const ScheduleTaskParams = Type.Object({
     minLength: 1,
   }),
   title: Type.Optional(Type.String({ description: 'Short human-readable title for the task.' })),
+  model: Type.Optional(
+    Type.String({
+      description: `Model to run this task on, as provider/model (e.g. openai-codex/gpt-5.6-terra or openrouter/moonshotai/kimi-k2.6). Only set it when the user asks for a specific model; otherwise the default scheduled-task model (${SCHEDULED_TASK_MODEL}) is used.`,
+    }),
+  ),
   run_at: Type.Optional(
     Type.String({
       description: 'ISO timestamp for one-time tasks, e.g. 2026-05-29T09:00:00+05:30.',
@@ -58,6 +68,11 @@ const UpdateScheduledTaskParams = Type.Object({
   kind: Type.Optional(JobKind),
   prompt: Type.Optional(Type.String({ minLength: 1 })),
   title: Type.Optional(Type.String()),
+  model: Type.Optional(
+    Type.String({
+      description: `Model to run this task on, as provider/model. Pass '${DEFAULT_MODEL_KEYWORD}' to clear a per-task model and go back to the default scheduled-task model (${SCHEDULED_TASK_MODEL}).`,
+    }),
+  ),
   run_at: Type.Optional(Type.String()),
   interval_minutes: Type.Optional(Type.Integer({ minimum: 1 })),
   schedule: Type.Optional(Type.String()),
@@ -78,10 +93,12 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
       'If the user gives a relative time like tomorrow or next week, get the current time with bash date before scheduling.',
       'Prefer timezone-aware ISO timestamps for one-time tasks and IANA timezones for cron tasks.',
       'Keep the scheduled prompt self-contained; include what to check and when to notify the user.',
+      `Scheduled tasks run on ${SCHEDULED_TASK_MODEL} unless the user asks for a specific model for that task, in which case pass it as model.`,
     ],
     parameters: ScheduleTaskParams,
-    async execute(_toolCallId, params: ScheduleTaskParamsType) {
+    async execute(_toolCallId, params: ScheduleTaskParamsType, _signal, _onUpdate, ctx) {
       const input = toCreateInput(params);
+      if (input.model) input.model = resolveTaskModel(ctx, input.model);
       const job = addCronJob(input);
       return textResult(`Scheduled task created:\n${formatCronJob(job)}`);
     },
@@ -119,12 +136,13 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
       'Update a scheduled task. Provide only fields that should change. Changing schedule fields recomputes the next run time.',
     promptSnippet: 'Update scheduled Telegram assistant tasks.',
     parameters: UpdateScheduledTaskParams,
-    async execute(_toolCallId, params: UpdateScheduledTaskParamsType) {
+    async execute(_toolCallId, params: UpdateScheduledTaskParamsType, _signal, _onUpdate, ctx) {
       const job = updateCronJob(params.id, {
         ...(params.enabled === undefined ? {} : { enabled: params.enabled }),
         ...(params.kind ? { kind: params.kind as CronJobKind } : {}),
         ...(params.prompt ? { prompt: params.prompt } : {}),
         ...(params.title ? { title: params.title } : {}),
+        ...(params.model ? { model: toUpdateModel(ctx, params.model) } : {}),
         ...(params.run_at ? { runAt: params.run_at } : {}),
         ...(params.interval_minutes ? { intervalMs: params.interval_minutes * 60_000 } : {}),
         ...(params.schedule ? { schedule: params.schedule } : {}),
@@ -135,10 +153,42 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
   });
 }
 
+/**
+ * Checks a requested task model against the live model catalogue so a typo or a
+ * provider without auth fails at creation, not silently when the task fires.
+ * Returns the normalised provider/model ref.
+ */
+function resolveTaskModel(ctx: ExtensionContext, requested: string): string {
+  const ref = parseModelRef(requested);
+  const model = ctx.modelRegistry.find(ref.provider, ref.model);
+  if (!model) {
+    throw new Error(`Unknown model ${formatModelRef(ref)}. Available: ${availableModelList(ctx)}`);
+  }
+  if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+    throw new Error(`No auth configured for ${formatModelRef(ref)}.`);
+  }
+  return formatModelRef(ref);
+}
+
+function toUpdateModel(ctx: ExtensionContext, requested: string): string | null {
+  return requested.trim().toLowerCase() === DEFAULT_MODEL_KEYWORD
+    ? null
+    : resolveTaskModel(ctx, requested);
+}
+
+function availableModelList(ctx: ExtensionContext): string {
+  const names = ctx.modelRegistry
+    .getAvailable()
+    .map((model) => `${model.provider}/${model.id}`)
+    .sort();
+  return names.length ? names.join(', ') : 'none';
+}
+
 function toCreateInput(params: ScheduleTaskParamsType): {
   kind: CronJobKind;
   prompt: string;
   title?: string;
+  model?: string;
   runAt?: string;
   intervalMs?: number;
   schedule?: string;
@@ -158,6 +208,7 @@ function toCreateInput(params: ScheduleTaskParamsType): {
     kind: params.kind,
     prompt: params.prompt,
     ...(params.title ? { title: params.title } : {}),
+    ...(params.model ? { model: params.model } : {}),
     ...(params.run_at ? { runAt: params.run_at } : {}),
     ...(params.interval_minutes ? { intervalMs: params.interval_minutes * 60_000 } : {}),
     ...(params.schedule ? { schedule: params.schedule } : {}),

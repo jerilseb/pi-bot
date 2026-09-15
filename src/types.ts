@@ -64,6 +64,12 @@ export interface IncomingPrompt {
   attachments: Attachment[];
   source?: 'telegram' | 'heartbeat' | 'cron' | 'background-bash-report';
   suppressNoop?: boolean;
+  /**
+   * Model to run this prompt on, as provider/model. Set by heartbeat and cron so
+   * each background run uses its own model regardless of what ran before it;
+   * Telegram prompts leave it unset and use the chat's current model.
+   */
+  model?: string;
 }
 
 export interface PiPromptResult {

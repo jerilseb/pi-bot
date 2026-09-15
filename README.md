@@ -134,7 +134,7 @@ TELEGRAM_ALLOWED_CHAT_ID=123456789
 OPENROUTER_API_KEY=sk-or-your-key
 ```
 
-Secrets and deployment-specific values live in `.env`. `TELEGRAM_ALLOWED_CHAT_ID` is the single Telegram chat allowed to use the bot — messages from any other chat are ignored, and the value is read once at startup, so changing it requires a restart. Your own chat ID is a positive number; you can get it by messaging [@userinfobot](https://t.me/userinfobot).
+Secrets and deployment-specific values live in `.env`; see `.env.example` for the optional ones, including `SCHEDULED_TASK_MODEL`. `TELEGRAM_ALLOWED_CHAT_ID` is the single Telegram chat allowed to use the bot — messages from any other chat are ignored, and the value is read once at startup, so changing it requires a restart. Your own chat ID is a positive number; you can get it by messaging [@userinfobot](https://t.me/userinfobot).
 
 ### 3. Run locally
 
@@ -192,7 +192,7 @@ Unlike `heartbeat` and `cronJobs`, this one is read fresh at the start of every 
 
 The file is gitignored, but `files/settings.json.example` is checked in and shows the defaults the bot writes on first start. You do not need to copy it — startup creates `files/settings.json` if it is missing — it is there to document the shape.
 
-Background heartbeat and cron prompts use `BACKGROUND_MODEL` in `src/config.ts`. The background model is intentionally separate from the chat model and cannot be changed from Telegram.
+The two unattended features take their models from `.env`: `HEARTBEAT_MODEL` for heartbeat runs and `SCHEDULED_TASK_MODEL` for scheduled tasks. There is no default and no fallback between them — an unset model means that feature does not run, and turning a feature on in `files/settings.json` without setting its model is a startup error rather than a schedule that quietly never fires. A single task can also be given its own model when it is created ("schedule this with kimi-k2.6"), which the agent validates against Pi's catalogue at creation time, so a typo or a provider without auth fails there rather than when the task fires. Both are separate from the chat model and neither can be changed from Telegram; `/status` shows the current values.
 
 Skills are discovered from both the project `skills/` directory and Pi's global `~/.pi/agent/skills/` directory. The latter follows `PI_CODING_AGENT_DIR` when that environment variable overrides Pi's agent directory. Symlinked skill directories and root Markdown skill files are followed, with cycles and duplicate targets ignored.
 
@@ -243,7 +243,7 @@ The URL must be the raw one naming a single file. The fileless `/raw` serves whi
 
 Useful non-secret settings in `src/config.ts` include:
 
-- `CHAT_MODEL`, `BACKGROUND_MODEL`, and `ALLOWED_MODELS`
+- `CHAT_MODEL` and `ALLOWED_MODELS` (the unattended models are `HEARTBEAT_MODEL` and `SCHEDULED_TASK_MODEL` in `.env`)
 - `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
 - `IDLE_TIMEOUT_MINUTES` and `MAX_QUEUE_PER_CHAT`

@@ -53,8 +53,22 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 /** Default chat model. files/settings.json overrides it; see MODEL below. */
 export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
-/** Model for heartbeat and cron prompts. Not changeable from Telegram. */
-export const BACKGROUND_MODEL = 'openai-codex/gpt-5.6-terra';
+/**
+ * Models for the two unattended features, as provider/model. Both live in .env
+ * rather than here because which model an unprompted run may use is a deployment
+ * choice that tracks the provider keys available, not a product default.
+ *
+ * There is no fallback between them and no shared default: unset means the
+ * feature does not run. Enabling a feature in files/settings.json without
+ * setting its model is a startup error rather than a silent no-op, so a
+ * half-configured schedule cannot look healthy until the moment it fails to
+ * fire. Neither is changeable from Telegram.
+ *
+ * A scheduled task may name its own model when it is created, which overrides
+ * SCHEDULED_TASK_MODEL for that task.
+ */
+export const HEARTBEAT_MODEL = process.env.HEARTBEAT_MODEL?.trim() ?? '';
+export const SCHEDULED_TASK_MODEL = process.env.SCHEDULED_TASK_MODEL?.trim() ?? '';
 /** Chat models offered by /models. Must contain CHAT_MODEL and the active model. */
 export const ALLOWED_MODELS: readonly string[] = [
   'openai-codex/gpt-6-astra',

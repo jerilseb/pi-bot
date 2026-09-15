@@ -28,13 +28,14 @@ import { createChatSession } from './src/chat-session.ts';
 import { telegramCommandMenu } from './src/commands.ts';
 import {
   ALLOWED_CHAT_ID,
-  BACKGROUND_MODEL,
+  HEARTBEAT_MODEL,
   MODEL,
   PI_AGENT_SKILLS_DIR,
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_SKILLS_DIR,
   RESTART_EXIT_DELAY_MS,
+  SCHEDULED_TASK_MODEL,
   SESSIONS_DIR,
   TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
@@ -64,7 +65,12 @@ import {
   type PostRestartTask,
 } from './src/post-restart-tasks.ts';
 import { handleTelegramMenuCallbackQuery } from './src/telegram-menu.ts';
-import { createPiRuntime, type PiRuntime } from './src/pi-session.ts';
+import {
+  assertModelUsable,
+  createPiRuntime,
+  NO_MODEL_NAME,
+  type PiRuntime,
+} from './src/pi-session.ts';
 import {
   activeModelSystemPromptExtension,
   ensureMemoryFile,
@@ -99,9 +105,11 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   requestRestart: restart,
 });
 
+// No default model: heartbeat and cron each name their own on every prompt, so
+// there is nothing sensible to run here without one.
 const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
-  model: BACKGROUND_MODEL,
+  model: null,
   sessionPrefix: 'telegram-background',
   getExtensionPaths: () => EXTENSION_PATHS,
   getSkillPaths: () => SKILL_PATHS,
@@ -113,6 +121,8 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
     protectedEnvToolAccessExtension,
   ],
 });
+
+validateModels();
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -127,7 +137,6 @@ let running = true;
 const { handleIncoming, isAssistantBusy } = createPromptQueue({
   chatSession,
   backgroundSession,
-  backgroundModelFallback: BACKGROUND_PI_RUNTIME.modelName,
   restart,
   isRunning: () => running,
 });
@@ -164,6 +173,40 @@ function validateConfiguration(): void {
     console.error(problem);
   }
   process.exit(1);
+}
+
+/**
+ * Resolving a model is no longer a side effect of building a runtime, so each
+ * configured model is checked here instead. Unattended runs switch models at run
+ * time, which is the worst moment to discover a typo or a missing login.
+ */
+function validateModels(): void {
+  const configured: Array<{ label: string; runtime: PiRuntime; model: string }> = [
+    { label: 'Active chat model', runtime: CHAT_PI_RUNTIME, model: MODEL },
+  ];
+  if (HEARTBEAT_MODEL) {
+    configured.push({
+      label: 'HEARTBEAT_MODEL in .env',
+      runtime: BACKGROUND_PI_RUNTIME,
+      model: HEARTBEAT_MODEL,
+    });
+  }
+  if (SCHEDULED_TASK_MODEL) {
+    configured.push({
+      label: 'SCHEDULED_TASK_MODEL in .env',
+      runtime: BACKGROUND_PI_RUNTIME,
+      model: SCHEDULED_TASK_MODEL,
+    });
+  }
+
+  for (const { label, runtime, model } of configured) {
+    try {
+      assertModelUsable(runtime.modelRuntime, model);
+    } catch (error) {
+      console.error(`${label} (${model}) is not usable: ${errorMessage(error)}`);
+      process.exit(1);
+    }
+  }
 }
 
 /** Shuts the bot down and exits so systemd brings the process back up. */
@@ -224,8 +267,7 @@ async function pollTelegram(): Promise<void> {
 function logStartupBanner(): void {
   console.log('Telegram → Pi bridge started');
   console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
-  console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName}`);
-  console.log(`Background model: ${BACKGROUND_PI_RUNTIME.modelName}`);
+  console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName ?? NO_MODEL_NAME}`);
   console.log('Pi runtime: SDK');
   console.log(`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(', ') : 'none'}`);
   console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(', ') : 'none'}`);
