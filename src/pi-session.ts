@@ -24,6 +24,11 @@ import {
   SESSIONS_DIR,
 } from './config.ts';
 import { backgroundBashExtension } from './background-bash.ts';
+import {
+  appendSessionEvent,
+  lastSessionEventKind,
+  type SessionEventKind,
+} from './session-notes.ts';
 import { formatToolStartNotification } from './tool-notifications.ts';
 import type { Attachment, PiPromptResult } from './types.ts';
 import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
@@ -178,11 +183,20 @@ export class SdkPiSession {
       throw new Error('Cannot switch models while Pi is responding');
     }
 
+    const previous = this.modelName;
     await session.setModel(model);
+
+    const next = formatModelRef(modelRef);
+    if (previous !== next) {
+      // The SDK records a model_change entry, but that only sets the session's
+      // model — it never reaches the context, so Pi would carry on unaware that
+      // it is a different model than it was a turn ago.
+      await this.noteEvent('model', `The chat model was changed from ${previous} to ${next}.`);
+    }
 
     // Written back so a /models switch survives the idle timer disposing this
     // SdkPiSession: the replacement reads its default from the runtime.
-    this.runtime.modelName = formatModelRef(modelRef);
+    this.runtime.modelName = next;
     this.selectedModelRef = modelRef;
     this.selectedModel = model;
   }
@@ -278,6 +292,48 @@ export class SdkPiSession {
 
   abort(): void {
     void this.session?.abort();
+  }
+
+  /**
+   * Write a note about the bot into this chat's session file.
+   *
+   * Prefers the live session: a second SessionManager over the same file would
+   * carry its own leaf pointer, and appending through it would branch the tree
+   * away from where the running agent is writing. With no live session there is
+   * nothing to desynchronise, so the file is opened just long enough to append.
+   * A chat that has never had a session has nothing to annotate.
+   */
+  async noteEvent(kind: SessionEventKind, text: string): Promise<void> {
+    try {
+      const manager = this.session?.sessionManager ?? (await this.openStoredSessionManager());
+      if (!manager) return;
+      appendSessionEvent(manager, kind, text);
+    } catch (error) {
+      // A missing note must never take down the command that recorded it.
+      console.error('Failed to write session note:', error);
+    }
+  }
+
+  /** The kind of the last note in the stored session, for unclean-exit detection. */
+  async lastNoteKind(): Promise<SessionEventKind | null> {
+    try {
+      const manager = this.session?.sessionManager ?? (await this.openStoredSessionManager());
+      return manager ? lastSessionEventKind(manager) : null;
+    } catch (error) {
+      console.error('Failed to read session notes:', error);
+      return null;
+    }
+  }
+
+  /** Opens this chat's most recent session file without starting an agent. */
+  private async openStoredSessionManager(): Promise<SessionManager | null> {
+    const existing = await findMostRecentSessionForId(
+      this.runtime.cwd,
+      this.runtime.sessionDir,
+      buildTelegramSessionId(this.runtime.sessionPrefix),
+    );
+    if (!existing) return null;
+    return SessionManager.open(existing.path, this.runtime.sessionDir, this.runtime.cwd);
   }
 
   reset(): void {

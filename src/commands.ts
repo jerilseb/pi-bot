@@ -254,7 +254,13 @@ const BOT_COMMANDS: BotCommand[] = [
     handler: async ({ chat }) => {
       discardPendingIngestion();
       chat.queue.length = 0;
+      const wasRunning = chat.processing;
       chat.pi.abort();
+      if (wasRunning) {
+        // Without this the transcript just stops mid-thought, with no way to
+        // tell an interruption from a turn that chose to end there.
+        await chat.pi.noteEvent('abort', 'The user aborted your previous turn before it finished.');
+      }
       await sendTelegramMessage('⏹ Aborting current prompt and clearing queue...');
     },
   },

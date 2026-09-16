@@ -211,14 +211,43 @@ function validateModels(): void {
 
 /** Shuts the bot down and exits so systemd brings the process back up. */
 async function restart(): Promise<void> {
+  // Written before the session is disposed, and the single seam both the
+  // /restart command and the restart_bot tool pass through. Its absence at the
+  // next startup is what identifies an exit nobody asked for.
+  await chatSession
+    .get()
+    .pi.noteEvent(
+      'restart',
+      'The bot process was restarted deliberately. This session resumed, but any in-flight work was dropped.',
+    );
   await shutdown();
   setTimeout(() => process.exit(0), RESTART_EXIT_DELAY_MS);
+}
+
+/**
+ * Record an exit nobody announced.
+ *
+ * A deliberate restart leaves its note as the session's last entry, so finding
+ * anything else there means the previous run ended some other way — a crash, or
+ * a stop and start. Either way the conversation is about to continue as if
+ * nothing happened, which is the confusion worth heading off.
+ */
+async function noteUncleanExit(): Promise<void> {
+  const last = await chatSession.get().pi.lastNoteKind();
+  if (last === 'restart' || last === 'restart-unclean') return;
+  await chatSession
+    .get()
+    .pi.noteEvent(
+      'restart-unclean',
+      'The bot process restarted without a recorded restart command — it crashed or was stopped. Anything it was working on was interrupted.',
+    );
 }
 
 async function pollTelegram(): Promise<void> {
   logStartupBanner();
 
   await registerBotCommands(telegramCommandMenu());
+  await noteUncleanExit();
   heartbeat.start();
   cron.start();
   await notifyAppStarted();
