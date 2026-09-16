@@ -74,7 +74,7 @@ export const ALLOWED_MODELS: readonly string[] = [
   'openai-codex/gpt-6-astra',
   'openai-codex/gpt-5.6-luna',
   'openai-codex/gpt-5.6-sol',
-  'openrouter/moonshotai/kimi-k2.6',
+  'openrouter/deepseek/deepseek-v4.1-flash',
 ];
 
 /**
