@@ -1,12 +1,13 @@
 import type { SessionStats } from '@earendil-works/pi-coding-agent';
 import type { ChatSession, ChatState } from './chat-session.ts';
-import { ELEVENLABS_API_KEY, toolCallMode } from './config.ts';
+import { ELEVENLABS_API_KEY, showTranscriptsEnabled, toolCallMode } from './config.ts';
 import { cronStatusText } from './cron.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
 import { heartbeatStatusText } from './heartbeat.ts';
 import { buildModelInlineKeyboard } from './model-menu.ts';
 import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
 import { buildToolCallInlineKeyboard, describeToolCallMode } from './tool-call-menu.ts';
+import { buildTranscriptInlineKeyboard, describeTranscriptSetting } from './transcript-menu.ts';
 import {
   buildOpenAIUsageTelegramHtml,
   fetchOpenAIUsage,
@@ -131,6 +132,7 @@ const BOT_COMMANDS: BotCommand[] = [
           `- Background model: ${background?.pi.modelName ?? 'idle'}`,
           `- Voice note tool: ${voiceStatusText()}`,
           `- Tool call messages: ${toolCallMode()}`,
+          `- Voice transcripts: ${describeTranscriptSetting(showTranscriptsEnabled())}`,
           `- ${heartbeatStatusText()}`,
           `- ${cronStatusText()}`,
         ].join('\n'),
@@ -192,6 +194,21 @@ const BOT_COMMANDS: BotCommand[] = [
           'Choose how tool calls are shown:',
         ].join('\n'),
         buildToolCallInlineKeyboard(),
+      );
+    },
+  },
+
+  {
+    name: 'transcripts',
+    description: 'Choose whether voice transcripts are sent back',
+    help: 'choose whether a voice note transcript is sent back to the chat',
+    handler: async () => {
+      await sendTelegramInlineKeyboard(
+        [
+          `Current: ${describeTranscriptSetting(showTranscriptsEnabled())}`,
+          'Send the voice note transcript back to the chat?',
+        ].join('\n'),
+        buildTranscriptInlineKeyboard(),
       );
     },
   },

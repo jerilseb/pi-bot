@@ -89,6 +89,7 @@ interface BotSettings {
   heartbeat?: unknown;
   cronJobs?: unknown;
   toolCalls?: unknown;
+  showTranscripts?: unknown;
 }
 
 function readBotSettings(): BotSettings {
@@ -136,6 +137,7 @@ export function ensureBotSettingsFile(): void {
         heartbeat: false,
         cronJobs: false,
         toolCalls: DEFAULT_TOOL_CALL_MODE,
+        showTranscripts: false,
       },
       null,
       2,
@@ -197,6 +199,25 @@ export function toolCallMode(): ToolCallMode {
 
 export function setToolCallMode(mode: ToolCallMode): void {
   updateBotSettings({ toolCalls: mode });
+}
+
+/**
+ * Whether a voice note's speech-to-text transcript is echoed back to the
+ * chat. Persisted in files/settings.json as `showTranscripts` and switched
+ * from Telegram with /transcripts, so it is read fresh rather than frozen at
+ * startup like `heartbeat` and `cronJobs`.
+ */
+export function showTranscriptsEnabled(): boolean {
+  try {
+    return readBotSettings().showTranscripts === true;
+  } catch (error) {
+    console.error('failed to read the transcript setting:', error);
+    return false;
+  }
+}
+
+export function setShowTranscripts(enabled: boolean): void {
+  updateBotSettings({ showTranscripts: enabled });
 }
 
 export const TOOL_CALL_BATCH_MS = 10_000;

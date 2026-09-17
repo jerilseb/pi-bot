@@ -58,6 +58,7 @@ import { handleModelCallbackQuery } from './src/model-menu.ts';
 import { createPromptQueue } from './src/prompt-queue.ts';
 import { handleReasoningCallbackQuery } from './src/reasoning-menu.ts';
 import { handleToolCallCallbackQuery } from './src/tool-call-menu.ts';
+import { handleTranscriptCallbackQuery } from './src/transcript-menu.ts';
 import {
   consumePostRestartTasks,
   ensurePostRestartTasksFile,
@@ -277,6 +278,7 @@ async function pollTelegram(): Promise<void> {
           await handleModelCallbackQuery(update.callback_query, chatSession);
           await handleReasoningCallbackQuery(update.callback_query, chatSession);
           await handleToolCallCallbackQuery(update.callback_query);
+          await handleTranscriptCallbackQuery(update.callback_query);
           await handleTelegramMenuCallbackQuery(update.callback_query, handleIncoming);
           continue;
         }

@@ -6,9 +6,11 @@ import {
   TELEGRAM_MEDIA_TIMEOUT_MS,
   TMP_DIR,
   isAllowedTelegramChat,
+  showTranscriptsEnabled,
 } from './config.ts';
 import { transcribeAudio } from './speech.ts';
-import { sendChatAction, telegram } from './telegram.ts';
+import { sendChatAction, sendTelegramMessage, telegram } from './telegram.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
 import type { IncomingPrompt, TelegramMessage } from './types.ts';
 import { errorMessage } from './util.ts';
 
@@ -116,6 +118,9 @@ async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPromp
         deleteLocalFile(downloaded.localPath);
         const label = message.voice ? '🎤 Voice message' : `🎵 Audio: ${filename}`;
         const prefix = caption ? `${caption}\n\n` : '';
+        if (showTranscriptsEnabled()) {
+          await sendTelegramMessage(`🎤 <i>${escapeTelegramHtml(transcription.text)}</i>`);
+        }
         return {
           text: `${prefix}${label}: ${transcription.text}`,
           attachments: [],
