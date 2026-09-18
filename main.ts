@@ -130,8 +130,8 @@ fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
 ensurePostRestartTasksFile();
 
-const chatSession = createChatSession(CHAT_PI_RUNTIME, 'chat');
-const backgroundSession = createChatSession(BACKGROUND_PI_RUNTIME, 'background');
+const chatSession = createChatSession(CHAT_PI_RUNTIME);
+const backgroundSession = createChatSession(BACKGROUND_PI_RUNTIME);
 let offset = 0;
 let running = true;
 

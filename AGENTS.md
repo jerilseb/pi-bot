@@ -13,7 +13,7 @@ Key files:
 - `src/tool-notification-batch.ts` — coalesces tool-call notifications and delivers them in the `toolCalls` mode (`collapsed` edits one expandable message per prompt, `stream` sends one per batch, `off` drops them); `src/tool-notifications.ts` — formats a single event and renders the collapsed block (pure).
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
 - `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection).
-- `src/chat-session.ts` — the single chat's state and idle-session disposal.
+- `src/chat-session.ts` — the single chat's state and explicit session disposal (no idle timeout).
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.

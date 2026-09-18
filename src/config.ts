@@ -167,8 +167,6 @@ export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 // Queueing and response behavior
 // ---------------------------------------------------------------------------
 
-const IDLE_TIMEOUT_MINUTES = 120;
-export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60_000;
 export const MAX_QUEUED_PROMPTS = 5;
 
 /**

@@ -53,8 +53,8 @@ export interface PiRuntime {
    * use rather than here, so a runtime can exist before a model is chosen — the
    * background runtime has no default, since heartbeat and cron each carry one.
    *
-   * setModel writes back here so a /models switch outlives the idle timer
-   * disposing the chat's SdkPiSession; useModel deliberately does not.
+   * setModel writes back here so any replacement SdkPiSession uses the selected
+   * chat model; useModel deliberately does not change the runtime default.
    */
   modelName: string | null;
   modelRuntime: ModelRuntime;
@@ -194,8 +194,7 @@ export class SdkPiSession {
       await this.noteEvent('model', `The chat model was changed from ${previous} to ${next}.`);
     }
 
-    // Written back so a /models switch survives the idle timer disposing this
-    // SdkPiSession: the replacement reads its default from the runtime.
+    // Keep the runtime default in sync for any replacement SdkPiSession.
     this.runtime.modelName = next;
     this.selectedModelRef = modelRef;
     this.selectedModel = model;

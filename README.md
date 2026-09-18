@@ -246,11 +246,13 @@ Useful non-secret settings in `src/config.ts` include:
 - `CHAT_MODEL` and `ALLOWED_MODELS` (the unattended models are `HEARTBEAT_MODEL` and `SCHEDULED_TASK_MODEL` in `.env`)
 - `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
-- `IDLE_TIMEOUT_MINUTES` and `MAX_QUEUE_PER_CHAT`
+- `MAX_QUEUED_PROMPTS`
 - `TOOL_CALL_BATCH_MS`, `TOOL_CALL_BATCH_MAX_ITEMS`, and `TOOL_CALL_COLLAPSED_MAX_CHARS` (whether and how tool calls are shown at all is the `toolCalls` setting in `files/settings.json` — see below)
 - `SEND_LOCAL_IMAGES`, `LOCAL_IMAGE_UPLOAD_DIRS`, `SEND_LOCAL_DOCUMENTS`, `LOCAL_DOCUMENT_UPLOAD_DIRS`, and `DOCUMENT_UPLOAD_EXTS`
 - `HEARTBEAT_INTERVAL_SECONDS` (whether the heartbeat runs at all is a `files/settings.json` setting — see below)
 - `BACKGROUND_BASH_MAX_RUNNING` and `BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS`
+
+Chat and background session state stays loaded between prompts; there is no idle timeout. Conversation resets and bot shutdown/restart still dispose the underlying Pi sessions.
 
 ## Telegram commands
 

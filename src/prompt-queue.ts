@@ -72,32 +72,31 @@ export function createPromptQueue(options: {
 
     chat.queue.push(prompt);
     chat.messageCount++;
-    startQueueProcessing(chat, session);
+    startQueueProcessing(chat);
   };
 
   /**
    * Starts the worker if it is not already draining. A crash here must not leave
    * queued prompts stranded, so the worker is restarted while work remains.
    */
-  function startQueueProcessing(chat: ChatState, session: ChatSession): void {
-    void processQueue(chat, session).catch((error) => {
+  function startQueueProcessing(chat: ChatState): void {
+    void processQueue(chat).catch((error) => {
       console.error('queue worker failed unexpectedly:', errorMessage(error));
       chat.processing = false;
 
       if (isRunning() && chat.queue.length > 0) {
-        setTimeout(() => startQueueProcessing(chat, session), WORKER_RESTART_DELAY_MS);
+        setTimeout(() => startQueueProcessing(chat), WORKER_RESTART_DELAY_MS);
       }
     });
   }
 
-  async function processQueue(chat: ChatState, session: ChatSession): Promise<void> {
+  async function processQueue(chat: ChatState): Promise<void> {
     if (chat.processing) return;
 
     while (chat.queue.length > 0 && isRunning()) {
       const prompt = chat.queue.shift();
       if (!prompt) break;
       chat.processing = true;
-      session.resetIdleTimer(chat);
 
       // Background runs have no user watching, so no typing indicator.
       const typing = isBackgroundSource(prompt.source) ? { stop: () => undefined } : startTyping();
@@ -134,7 +133,6 @@ export function createPromptQueue(options: {
       } finally {
         typing.stop();
         chat.processing = false;
-        session.resetIdleTimer(chat);
       }
     }
   }

@@ -1,4 +1,3 @@
-import { IDLE_TIMEOUT_MS } from './config.ts';
 import { type PiRuntime, SdkPiSession } from './pi-session.ts';
 import type { IncomingPrompt } from './types.ts';
 
@@ -8,13 +7,13 @@ export interface ChatState {
   pi: SdkPiSession;
   messageCount: number;
   startedAt: number;
-  idleTimer?: ReturnType<typeof setTimeout>;
 }
 
 /**
  * Holds the single chat's state for one Pi runtime. The bot serves exactly one
  * Telegram chat (TELEGRAM_ALLOWED_CHAT_ID), so this is a lazily created
- * singleton rather than a registry.
+ * singleton rather than a registry. State stays loaded until explicitly cleared;
+ * elapsed time must never dispose a session that may still be doing work.
  */
 export interface ChatSession {
   /** Returns the chat's state, creating a Pi session on first use. */
@@ -23,23 +22,12 @@ export interface ChatSession {
   existing(): ChatState | null;
   /** True while a prompt is being processed or queued. */
   isBusy(): boolean;
-  /** (Re)starts the idle timer that disposes an unused session. */
-  resetIdleTimer(chat: ChatState): void;
   /** Disposes the session and forgets the tracked state. */
   clear(): void;
 }
 
-export function createChatSession(runtime: PiRuntime, label: string): ChatSession {
+export function createChatSession(runtime: PiRuntime): ChatSession {
   let chat: ChatState | null = null;
-
-  const resetIdleTimer = (state: ChatState): void => {
-    if (state.idleTimer) clearTimeout(state.idleTimer);
-    state.idleTimer = setTimeout(() => {
-      console.log(`idle timeout; stopping ${label} Pi SDK session`);
-      state.pi.cleanup();
-      if (chat === state) chat = null;
-    }, IDLE_TIMEOUT_MS);
-  };
 
   return {
     get(): ChatState {
@@ -52,7 +40,6 @@ export function createChatSession(runtime: PiRuntime, label: string): ChatSessio
           startedAt: Date.now(),
         };
       }
-      resetIdleTimer(chat);
       return chat;
     },
 
@@ -64,11 +51,8 @@ export function createChatSession(runtime: PiRuntime, label: string): ChatSessio
       return Boolean(chat?.processing || (chat?.queue.length ?? 0) > 0);
     },
 
-    resetIdleTimer,
-
     clear(): void {
       if (!chat) return;
-      if (chat.idleTimer) clearTimeout(chat.idleTimer);
       chat.pi.cleanup();
       chat = null;
     },
