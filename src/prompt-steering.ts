@@ -30,6 +30,15 @@ export class PromptSteering {
     return this.entries.filter((entry) => !entry.delivered).length;
   }
 
+  get isCancelled(): boolean {
+    return this.cancelled;
+  }
+
+  /** Reopens steering for a fresh continuation after a terminal transport error. */
+  resume(): void {
+    if (!this.cancelled) this.accepting = true;
+  }
+
   async trySteer(
     prompt: IncomingPrompt,
     prepared: { message: string; images?: ImageContent[] },

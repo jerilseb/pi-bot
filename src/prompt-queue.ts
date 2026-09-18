@@ -121,8 +121,9 @@ export function createPromptQueue(options: {
       if (!prompt) break;
       chat.processing = true;
 
+      const isBackground = isBackgroundSource(prompt.source);
       // Background runs have no user watching, so no typing indicator.
-      const typing = isBackgroundSource(prompt.source) ? { stop: () => undefined } : startTyping();
+      const typing = isBackground ? { stop: () => undefined } : startTyping();
       // Own state per prompt: background and foreground sessions can overlap.
       const toolNotifications = createToolNotifications(prompt.source);
       let deferredSteers = 0;
@@ -132,6 +133,13 @@ export function createPromptQueue(options: {
         if (prompt.model) await chat.pi.useModel(prompt.model);
         const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
           onToolCall: toolNotifications.notify,
+          ...(!isBackground
+            ? {
+                recoverTransportErrors: true,
+                onAutoRecovery: () =>
+                  sendTelegramMessage('🔄 Temporary model error. Continuing automatically...'),
+              }
+            : {}),
           onSteeringSettled: (steered, disposition) => {
             if (disposition === 'deferred') {
               // Requeue immediately so /abort during response delivery can still

@@ -65,11 +65,17 @@ function setup(t: TestContext) {
   );
   const steer = t.mock.method(chat.pi, 'trySteer', async () => true);
   const backgroundRuns: string[] = [];
-  t.mock.method(background.pi, 'runPrompt', async (text: string) => {
-    backgroundRuns.push(text);
-    await gate.promise;
-    return { text: 'background answer' };
-  });
+  let backgroundOptions: PiRunPromptOptions | undefined;
+  t.mock.method(
+    background.pi,
+    'runPrompt',
+    async (text: string, _attachments: Attachment[], opts?: PiRunPromptOptions) => {
+      backgroundRuns.push(text);
+      backgroundOptions = opts;
+      await gate.promise;
+      return { text: 'background answer' };
+    },
+  );
   const backgroundSteer = t.mock.method(background.pi, 'trySteer', async () => true);
   const abort = t.mock.method(chat.pi, 'abort', () => {});
   t.mock.method(chat.pi, 'noteEvent', async () => {});
@@ -99,6 +105,7 @@ function setup(t: TestContext) {
     abort,
     messages,
     options: () => options,
+    backgroundOptions: () => backgroundOptions,
   };
 }
 
@@ -114,11 +121,15 @@ test('ordinary messages steer an active run instead of starting a second respons
   assert.ok(f.messages.includes('↪️ Steering current task.'));
 });
 
-test('idle messages use the normal prompt worker', async (t) => {
+test('idle messages use the normal prompt worker with foreground recovery', async (t) => {
   const f = setup(t);
   await f.send('first');
   assert.equal(f.steer.mock.callCount(), 0);
   assert.deepEqual(f.runs, ['first']);
+  assert.equal(f.options()?.recoverTransportErrors, true);
+  f.options()?.onAutoRecovery?.('WebSocket error');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.ok(f.messages.includes('🔄 Temporary model error. Continuing automatically...'));
 });
 
 test('startup and finish races fall back to FIFO exactly once', async (t) => {
@@ -148,6 +159,8 @@ test('background jobs and completion reports never steer', async (t) => {
     ['shell done'],
   );
   assert.deepEqual(f.backgroundRuns, ['cron task']);
+  assert.equal(f.backgroundOptions()?.recoverTransportErrors, undefined);
+  assert.equal(f.backgroundOptions()?.onAutoRecovery, undefined);
   assert.deepEqual(
     f.background.queue.map((prompt) => prompt.text),
     ['heartbeat task'],

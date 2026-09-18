@@ -22,6 +22,8 @@ import {
   SEND_LOCAL_DOCUMENTS,
   SEND_LOCAL_IMAGES,
   SESSIONS_DIR,
+  TRANSPORT_RECOVERY_DELAY_MS,
+  TRANSPORT_RECOVERY_MAX_CONTINUATIONS,
 } from './config.ts';
 import { backgroundBashExtension } from './background-bash.ts';
 import {
@@ -32,7 +34,17 @@ import {
 import { formatToolStartNotification } from './tool-notifications.ts';
 import type { Attachment, IncomingPrompt, PiPromptResult } from './types.ts';
 import { PromptSteering, type SteeringDisposition } from './prompt-steering.ts';
-import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
+import {
+  isTransientTransportError,
+  TRANSPORT_RECOVERY_PROMPT,
+  waitForTransportRecovery,
+} from './transport-recovery.ts';
+import {
+  errorMessage as getErrorMessage,
+  formatModelRef,
+  parseModelRef,
+  type ModelRef,
+} from './util.ts';
 import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
 import { telegramRestartToolExtension } from './restart-tool.ts';
 import { scheduledTasksExtension } from './scheduled-tasks.ts';
@@ -46,6 +58,10 @@ export const NO_MODEL_NAME = 'per-prompt';
 export interface PiRunPromptOptions {
   onToolCall?: (notification: string) => void;
   onSteeringSettled?: (prompt: IncomingPrompt, disposition: SteeringDisposition) => void;
+  /** Enables one fresh continuation after the SDK exhausts its transient retries. */
+  recoverTransportErrors?: boolean;
+  /** Called once when either SDK retry or fallback continuation begins. */
+  onAutoRecovery?: (error: string) => void | Promise<void>;
 }
 
 export interface PiRuntime {
@@ -144,6 +160,7 @@ export class SdkPiSession {
   private pendingNewSessionRequest = false;
   private pendingNewSessionTask: string | null = null;
   private steering: PromptSteering | null = null;
+  private transportRecoveryAbortController: AbortController | null = null;
 
   constructor(runtime: PiRuntime) {
     this.runtime = runtime;
@@ -241,36 +258,99 @@ export class SdkPiSession {
       options.onSteeringSettled?.(prompt, disposition);
     });
     this.steering = steering;
-    const chunks: string[] = [];
-    let errorMessage = '';
+    let chunks: string[] = [];
+    let promptError = '';
+    let recoveryNotified = false;
+    let recoveryAttempts = 0;
+    let recoveryNotification = Promise.resolve();
+    const notifyRecovery = (message: string): void => {
+      if (recoveryNotified) return;
+      recoveryNotified = true;
+      try {
+        recoveryNotification = Promise.resolve(options.onAutoRecovery?.(message)).catch((error) => {
+          console.error('Automatic recovery callback failed:', getErrorMessage(error));
+        });
+      } catch (error) {
+        console.error('Automatic recovery callback failed:', getErrorMessage(error));
+      }
+    };
     const unsubscribe = session.subscribe((event) => {
       steering.observe(event);
+      if (event.type === 'auto_retry_start') {
+        // Discard partial text and the superseded error before the SDK retries.
+        chunks = [];
+        promptError = '';
+        notifyRecovery(event.errorMessage);
+      }
       this.collectPromptEvent(
         event,
         session,
         chunks,
         (message) => {
-          errorMessage = message;
+          promptError = message;
         },
         options.onToolCall,
       );
     });
 
     try {
-      const prompt = buildPiPrompt(text, attachments);
-      await session.prompt(prompt.message, {
-        ...(prompt.images?.length ? { images: prompt.images } : {}),
-      });
+      let nextText = text;
+      let nextAttachments = attachments;
+      while (true) {
+        promptError = '';
+        const prompt = buildPiPrompt(nextText, nextAttachments);
+        try {
+          await session.prompt(prompt.message, {
+            ...(prompt.images?.length ? { images: prompt.images } : {}),
+          });
+        } catch (error) {
+          promptError ||= getErrorMessage(error);
+        }
 
-      if (errorMessage) throw new Error(errorMessage);
+        if (!promptError) {
+          await recoveryNotification;
+          return { text: chunks.join('').trim() || '(no response)' };
+        }
 
-      return { text: chunks.join('').trim() || '(no response)' };
+        const canRecover =
+          options.recoverTransportErrors === true &&
+          recoveryAttempts < TRANSPORT_RECOVERY_MAX_CONTINUATIONS &&
+          isTransientTransportError(promptError) &&
+          !this.pendingNewSessionRequest &&
+          !steering.isCancelled &&
+          steering.pendingCount === 0;
+        if (!canRecover) {
+          await recoveryNotification;
+          throw new Error(promptError);
+        }
+
+        recoveryAttempts++;
+        notifyRecovery(promptError);
+        chunks = [];
+        const recoveryController = new AbortController();
+        this.transportRecoveryAbortController = recoveryController;
+        try {
+          await waitForTransportRecovery(TRANSPORT_RECOVERY_DELAY_MS, recoveryController.signal);
+        } catch {
+          throw new Error(promptError);
+        } finally {
+          if (this.transportRecoveryAbortController === recoveryController) {
+            this.transportRecoveryAbortController = null;
+          }
+        }
+        if (this.pendingNewSessionRequest || steering.isCancelled) throw new Error(promptError);
+
+        steering.resume();
+        nextText = TRANSPORT_RECOVERY_PROMPT;
+        nextAttachments = [];
+      }
     } finally {
       unsubscribe();
       try {
         await steering.finish();
       } finally {
         this.steering = null;
+        this.transportRecoveryAbortController = null;
         this.applyPendingNewSession();
       }
     }
@@ -313,6 +393,7 @@ export class SdkPiSession {
   }
 
   abort(): void {
+    this.transportRecoveryAbortController?.abort();
     this.steering?.cancel();
     this.session?.clearQueue();
     void this.session?.abort();
@@ -368,6 +449,8 @@ export class SdkPiSession {
   }
 
   cleanup(): void {
+    this.transportRecoveryAbortController?.abort();
+    this.transportRecoveryAbortController = null;
     this.session?.dispose();
     this.session = null;
     this.starting = null;
@@ -496,12 +579,16 @@ export class SdkPiSession {
     }
 
     if (event.type === 'agent_end') {
-      const failed = event.messages.find(
-        (message) => message.role === 'assistant' && message.errorMessage,
-      );
-      if (failed?.role === 'assistant' && failed.errorMessage) {
-        setError(failed.errorMessage);
+      // agent_end is emitted for each low-level attempt. A retrying failure is
+      // superseded, and a later successful attempt must clear its stale error.
+      let lastAssistantError = '';
+      for (let index = event.messages.length - 1; index >= 0; index--) {
+        const message = event.messages[index];
+        if (message.role !== 'assistant') continue;
+        lastAssistantError = message.errorMessage ?? '';
+        break;
       }
+      setError(event.willRetry ? '' : lastAssistantError);
     }
   }
 }

@@ -246,7 +246,7 @@ Useful non-secret settings in `src/config.ts` include:
 - `CHAT_MODEL` and `ALLOWED_MODELS` (the unattended models are `HEARTBEAT_MODEL` and `SCHEDULED_TASK_MODEL` in `.env`)
 - `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
-- `MAX_QUEUED_PROMPTS`
+- `MAX_QUEUED_PROMPTS`, `TRANSPORT_RECOVERY_MAX_CONTINUATIONS`, and `TRANSPORT_RECOVERY_DELAY_MS`
 - `TOOL_CALL_BATCH_MS`, `TOOL_CALL_BATCH_MAX_ITEMS`, and `TOOL_CALL_COLLAPSED_MAX_CHARS` (whether and how tool calls are shown at all is the `toolCalls` setting in `files/settings.json` — see below)
 - `SEND_LOCAL_IMAGES`, `LOCAL_IMAGE_UPLOAD_DIRS`, `SEND_LOCAL_DOCUMENTS`, `LOCAL_DOCUMENT_UPLOAD_DIRS`, and `DOCUMENT_UPLOAD_EXTS`
 - `HEARTBEAT_INTERVAL_SECONDS` (whether the heartbeat runs at all is a `files/settings.json` setting — see below)
@@ -255,6 +255,8 @@ Useful non-secret settings in `src/config.ts` include:
 Chat and background session state stays loaded between prompts; there is no idle timeout. Conversation resets and bot shutdown/restart still dispose the underlying Pi sessions.
 
 Ordinary Telegram messages sent while the chat agent is running **steer the current task** via the Pi SDK. The bot acknowledges them with “↪️ Steering current task.” They are delivered after the current assistant turn finishes its tool calls, before the next model call; running tools are not cancelled. Text, transcribed voice, and attachments use the same route. Messages arriving during startup or after the run stops accepting steering fall back to the serial queue, as do background jobs and completion reports. There is no explicit queue command. The pending limit includes both queued and undelivered steering messages. `/abort` and `/new` discard both kinds of pending work.
+
+The Pi SDK automatically retries transient provider and transport failures. The bot keeps only the final attempt's text/error, announces recovery once, and—if the SDK exhausts its retry budget on a foreground transport failure—starts one fresh continuation turn after a short delay. That continuation uses the saved conversation/tool results and explicitly avoids blindly replaying completed side effects. It does not run for authentication, quota, rate-limit, context, tool, abort, or background-task failures. `/abort` and `/new` cancel the recovery delay.
 
 ## Telegram commands
 

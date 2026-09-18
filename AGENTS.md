@@ -12,7 +12,7 @@ Key files:
 - `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the serial worker. Ordinary Telegram messages steer an active chat run; background work and startup/finishing races queue normally. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report. `src/prompt-steering.ts` owns accepted steering messages through delivery, cancellation, or safe deferral, retaining their attachments until the run finishes.
 - `src/tool-notification-batch.ts` — coalesces tool-call notifications and delivers them in the `toolCalls` mode (`collapsed` edits one expandable message per prompt, `stream` sends one per batch, `off` drops them); `src/tool-notifications.ts` — formats a single event and renders the collapsed block (pure).
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
-- `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection).
+- `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection); `src/transport-recovery.ts` classifies the narrow transport failures eligible for one post-SDK continuation.
 - `src/chat-session.ts` — the single chat's state and explicit session disposal (no idle timeout).
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.

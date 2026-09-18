@@ -168,6 +168,11 @@ export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 export const MAX_QUEUED_PROMPTS = 5;
+// The Pi SDK already retries transient failures (3 attempts by default). After
+// that budget is exhausted, the foreground chat gets one fresh continuation
+// turn rather than replaying the original user prompt and its tool side effects.
+export const TRANSPORT_RECOVERY_MAX_CONTINUATIONS = 1;
+export const TRANSPORT_RECOVERY_DELAY_MS = 1_000;
 
 /**
  * How tool calls reach the chat. `stream` sends a new message per batch,
