@@ -9,7 +9,7 @@ Guidance for AI coding agents working in this repository.
 Key files:
 
 - `main.ts` — entrypoint/orchestrator: constructs the runtimes and sessions, wires the modules together, owns the polling loop, startup banner, post-restart tasks, and shutdown. Keep it to wiring and lifecycle; new behavior belongs in a module.
-- `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the worker that drains it. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report.
+- `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the serial worker. Ordinary Telegram messages steer an active chat run; background work and startup/finishing races queue normally. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report. `src/prompt-steering.ts` owns accepted steering messages through delivery, cancellation, or safe deferral, retaining their attachments until the run finishes.
 - `src/tool-notification-batch.ts` — coalesces tool-call notifications and delivers them in the `toolCalls` mode (`collapsed` edits one expandable message per prompt, `stream` sends one per batch, `off` drops them); `src/tool-notifications.ts` — formats a single event and renders the collapsed block (pure).
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
 - `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection).

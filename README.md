@@ -254,6 +254,8 @@ Useful non-secret settings in `src/config.ts` include:
 
 Chat and background session state stays loaded between prompts; there is no idle timeout. Conversation resets and bot shutdown/restart still dispose the underlying Pi sessions.
 
+Ordinary Telegram messages sent while the chat agent is running **steer the current task** via the Pi SDK. The bot acknowledges them with “↪️ Steering current task.” They are delivered after the current assistant turn finishes its tool calls, before the next model call; running tools are not cancelled. Text, transcribed voice, and attachments use the same route. Messages arriving during startup or after the run stops accepting steering fall back to the serial queue, as do background jobs and completion reports. There is no explicit queue command. The pending limit includes both queued and undelivered steering messages. `/abort` and `/new` discard both kinds of pending work.
+
 ## Telegram commands
 
 Inside Telegram:
@@ -268,7 +270,7 @@ Inside Telegram:
 | `/toolcalls` | Choose how tool calls are shown: collapsed, stream, or off |
 | `/openaiusage` | Show OpenAI Codex usage windows and reset times |
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
-| `/abort` | Stop the current response and clear the queue |
+| `/abort` | Stop the current response and clear queued/steering messages |
 | `/new` | Reset the Pi conversation for this chat |
 | `/restart` | Restart the bot process |
 

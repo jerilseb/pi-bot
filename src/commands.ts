@@ -13,7 +13,7 @@ import {
   fetchOpenAIUsage,
   OPENAI_CODEX_PROVIDER,
 } from './openai-usage.ts';
-import { discardPendingIngestion } from './inbound.ts';
+import { cleanupAttachments, discardPendingIngestion } from './inbound.ts';
 import { runRestartGate } from './restart-flow.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
 import {
@@ -123,6 +123,7 @@ const BOT_COMMANDS: BotCommand[] = [
           `- Chat state: ${chat.processing ? 'processing' : 'idle'}`,
           `- Chat messages: ${chat.messageCount}`,
           `- Chat queue: ${chat.queue.length}`,
+          `- Pending steering: ${chat.pi.pendingSteeringCount}`,
           `- Chat uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
           `- Chat model: ${chat.pi.modelName}`,
           `- Chat reasoning: ${thinking.level}`,
@@ -267,10 +268,10 @@ const BOT_COMMANDS: BotCommand[] = [
   {
     name: 'abort',
     description: 'Stop the current Pi response',
-    help: 'abort the current Pi response',
+    help: 'abort the current Pi response and clear pending messages',
     handler: async ({ chat }) => {
       discardPendingIngestion();
-      chat.queue.length = 0;
+      for (const prompt of chat.queue.splice(0)) cleanupAttachments(prompt);
       const wasRunning = chat.processing;
       chat.pi.abort();
       if (wasRunning) {
@@ -278,7 +279,9 @@ const BOT_COMMANDS: BotCommand[] = [
         // tell an interruption from a turn that chose to end there.
         await chat.pi.noteEvent('abort', 'The user aborted your previous turn before it finished.');
       }
-      await sendTelegramMessage('⏹ Aborting current prompt and clearing queue...');
+      await sendTelegramMessage(
+        '⏹ Aborting current prompt and clearing queued/steering messages...',
+      );
     },
   },
 
@@ -288,7 +291,7 @@ const BOT_COMMANDS: BotCommand[] = [
     help: "clear this chat's Pi conversation",
     handler: async ({ chat }) => {
       discardPendingIngestion();
-      chat.queue.length = 0;
+      for (const prompt of chat.queue.splice(0)) cleanupAttachments(prompt);
       // Never force chat.processing or dispose a streaming session here: abort the
       // in-flight response and queue the session swap, which runPrompt applies in
       // its finally. When the chat is idle there is no finally coming, so apply

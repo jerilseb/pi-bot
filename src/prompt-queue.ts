@@ -16,9 +16,9 @@ import { errorMessage, isBackgroundSource } from './util.ts';
  * report — so this is the one place that decides which session handles a prompt,
  * whether it is a slash command, and whether the queue has room for it.
  *
- * Prompts run one at a time per session. Serialising them is the point: two
- * concurrent prompts against one Pi session would interleave their streamed
- * output into the same Telegram chat.
+ * Runs are serial per session. Ordinary Telegram messages steer the active run;
+ * startup/finishing races and background work use the FIFO queue. Steering uses
+ * the existing run's subscription, never a second concurrent response collector.
  */
 
 /** How long to wait before retrying a queue worker that crashed. */
@@ -60,7 +60,10 @@ export function createPromptQueue(options: {
     // A completion report is the tail of work the agent already started, so it is
     // delivered even when the queue is full.
     const bypassQueueLimit = prompt.source === 'background-bash-report';
-    if (!bypassQueueLimit && chat.queue.length >= MAX_QUEUED_PROMPTS) {
+    if (
+      !bypassQueueLimit &&
+      chat.queue.length + chat.pi.pendingSteeringCount >= MAX_QUEUED_PROMPTS
+    ) {
       cleanupAttachments(prompt);
       if (!isBackgroundSource(prompt.source)) {
         await sendTelegramMessage(
@@ -68,6 +71,26 @@ export function createPromptQueue(options: {
         );
       }
       return;
+    }
+
+    const isTelegram = !prompt.source || prompt.source === 'telegram';
+    if (isTelegram && chat.processing && !trimmed.startsWith('/')) {
+      let steered: boolean;
+      try {
+        steered = await chat.pi.trySteer(prompt);
+      } catch (error) {
+        cleanupAttachments(prompt);
+        await sendTelegramMessage(`❌ ${sanitizeError(errorMessage(error))}`);
+        return;
+      }
+      if (steered) {
+        chat.messageCount++;
+        // A failed acknowledgement must not retry or discard accepted work.
+        await sendTelegramMessage('↪️ Steering current task.').catch((error) => {
+          console.error('failed to acknowledge steering:', errorMessage(error));
+        });
+        return;
+      }
     }
 
     chat.queue.push(prompt);
@@ -102,12 +125,20 @@ export function createPromptQueue(options: {
       const typing = isBackgroundSource(prompt.source) ? { stop: () => undefined } : startTyping();
       // Own state per prompt: background and foreground sessions can overlap.
       const toolNotifications = createToolNotifications(prompt.source);
+      let deferredSteers = 0;
       try {
         const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
         console.log(`${logLabel}: ${prompt.text.slice(0, 120)}`);
         if (prompt.model) await chat.pi.useModel(prompt.model);
         const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
           onToolCall: toolNotifications.notify,
+          onSteeringSettled: (steered, disposition) => {
+            if (disposition === 'deferred') {
+              // Requeue immediately so /abort during response delivery can still
+              // discard these. They precede messages queued during shutdown.
+              chat.queue.splice(deferredSteers++, 0, steered);
+            } else cleanupAttachments(steered);
+          },
         });
         // Flush before the response so notifications cannot arrive after the
         // answer they describe.
@@ -116,7 +147,6 @@ export function createPromptQueue(options: {
           suppressNoop: prompt.suppressNoop,
           source: prompt.source,
         });
-        cleanupAttachments(prompt);
         enqueuePendingNewSessionTask(chat, prompt);
       } catch (error) {
         const message = errorMessage(error);
@@ -131,6 +161,7 @@ export function createPromptQueue(options: {
           );
         }
       } finally {
+        cleanupAttachments(prompt);
         typing.stop();
         chat.processing = false;
       }

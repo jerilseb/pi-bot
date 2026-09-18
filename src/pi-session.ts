@@ -30,7 +30,8 @@ import {
   type SessionEventKind,
 } from './session-notes.ts';
 import { formatToolStartNotification } from './tool-notifications.ts';
-import type { Attachment, PiPromptResult } from './types.ts';
+import type { Attachment, IncomingPrompt, PiPromptResult } from './types.ts';
+import { PromptSteering, type SteeringDisposition } from './prompt-steering.ts';
 import { formatModelRef, parseModelRef, type ModelRef } from './util.ts';
 import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
 import { telegramRestartToolExtension } from './restart-tool.ts';
@@ -44,6 +45,7 @@ export const NO_MODEL_NAME = 'per-prompt';
 
 export interface PiRunPromptOptions {
   onToolCall?: (notification: string) => void;
+  onSteeringSettled?: (prompt: IncomingPrompt, disposition: SteeringDisposition) => void;
 }
 
 export interface PiRuntime {
@@ -141,6 +143,7 @@ export class SdkPiSession {
   private forceNewSessionOnNextStart = false;
   private pendingNewSessionRequest = false;
   private pendingNewSessionTask: string | null = null;
+  private steering: PromptSteering | null = null;
 
   constructor(runtime: PiRuntime) {
     this.runtime = runtime;
@@ -234,9 +237,14 @@ export class SdkPiSession {
       throw new Error('Pi SDK session is already processing a prompt');
     }
 
+    const steering = new PromptSteering(session, (prompt, disposition) => {
+      options.onSteeringSettled?.(prompt, disposition);
+    });
+    this.steering = steering;
     const chunks: string[] = [];
     let errorMessage = '';
     const unsubscribe = session.subscribe((event) => {
+      steering.observe(event);
       this.collectPromptEvent(
         event,
         session,
@@ -259,8 +267,23 @@ export class SdkPiSession {
       return { text: chunks.join('').trim() || '(no response)' };
     } finally {
       unsubscribe();
-      this.applyPendingNewSession();
+      try {
+        await steering.finish();
+      } finally {
+        this.steering = null;
+        this.applyPendingNewSession();
+      }
     }
+  }
+
+  get pendingSteeringCount(): number {
+    return this.steering?.pendingCount ?? 0;
+  }
+
+  /** False during startup, shutdown, or a pending reset: the caller queues instead. */
+  async trySteer(prompt: IncomingPrompt): Promise<boolean> {
+    if (!this.steering || this.pendingNewSessionRequest) return false;
+    return this.steering.trySteer(prompt, buildPiPrompt(prompt.text, prompt.attachments));
   }
 
   async requestNewSession(task?: string): Promise<string> {
@@ -290,6 +313,8 @@ export class SdkPiSession {
   }
 
   abort(): void {
+    this.steering?.cancel();
+    this.session?.clearQueue();
     void this.session?.abort();
   }
 
