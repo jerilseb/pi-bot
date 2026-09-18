@@ -299,7 +299,7 @@ const BOT_COMMANDS: BotCommand[] = [
       chat.messageCount = 0;
       chat.startedAt = Date.now();
       await sendTelegramMessage(
-        `🔄 Started a new conversation using ${chat.pi.modelName}.`,
+        `🔄 Started a new conversation using <code>${escapeTelegramHtml(chat.pi.modelName)}</code>.`,
       );
     },
   },
