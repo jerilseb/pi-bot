@@ -188,7 +188,8 @@ export class SdkPiSession {
     if (session.isStreaming) {
       throw new Error('Cannot switch reasoning level while Pi is responding');
     }
-    session.setThinkingLevel(level);
+    session.setThinkingLevel(level, { persist: true });
+    await this.runtime.settingsManager.flush();
     return session.thinkingLevel;
   }
 
@@ -204,7 +205,8 @@ export class SdkPiSession {
     }
 
     const previous = this.modelName;
-    await session.setModel(model);
+    await session.setModel(model, { persist: true });
+    await this.runtime.settingsManager.flush();
 
     const next = formatModelRef(modelRef);
     if (previous !== next) {
@@ -222,7 +224,7 @@ export class SdkPiSession {
 
   /**
    * Switches the model for the prompts that follow without recording it as the
-   * bot's default. setModel goes through the SDK, which persists the choice to
+   * bot's default. Our setModel explicitly opts into SDK persistence to
    * files/settings.json — right for /models on the chat session, wrong for a
    * background run that borrows a model for one task. So this disposes the
    * live AgentSession and lets the next start() reopen the same transcript with
