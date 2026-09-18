@@ -268,8 +268,8 @@ export class SdkPiSession {
     this.pendingNewSessionRequest = true;
     this.pendingNewSessionTask = task?.trim() || null;
     return this.pendingNewSessionTask
-      ? 'Fresh session queued. The provided task will run automatically in the new Pi conversation after the current response finishes.'
-      : 'Fresh session queued. The next user message will start a new Pi conversation.';
+      ? `Fresh session queued using ${this.modelName}. The provided task will run automatically in the new Pi conversation after the current response finishes.`
+      : `Fresh session queued using ${this.modelName}. The next user message will start a new Pi conversation.`;
   }
 
   consumePendingNewSessionTask(): string | null {

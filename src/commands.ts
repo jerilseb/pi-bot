@@ -298,7 +298,9 @@ const BOT_COMMANDS: BotCommand[] = [
       if (!chat.processing) chat.pi.reset();
       chat.messageCount = 0;
       chat.startedAt = Date.now();
-      await sendTelegramMessage('🔄 Started a fresh Pi conversation for this chat.');
+      await sendTelegramMessage(
+        `🔄 Started a fresh Pi conversation for this chat.\nModel: ${chat.pi.modelName}`,
+      );
     },
   },
 
