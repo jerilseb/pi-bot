@@ -1,18 +1,18 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
-import { SCHEDULED_TASK_MODEL } from './config.ts';
 import {
   addCronJob,
   cancelCronJob,
   formatCronJob,
   readCronJobs,
   updateCronJob,
+  type CreateCronJobInput,
   type CronJobKind,
 } from './cron-store.ts';
 import { textResult } from './tool-result.ts';
 import { formatModelRef, parseModelRef } from './util.ts';
 
-/** Passing this as `model` to update_scheduled_task clears the task's model override. */
+/** Passing this as `model` to update_scheduled_task re-pins the task to the current chat model. */
 const DEFAULT_MODEL_KEYWORD = 'default';
 
 const JobKind = Type.Union([Type.Literal('once'), Type.Literal('interval'), Type.Literal('cron')]);
@@ -26,7 +26,8 @@ const ScheduleTaskParams = Type.Object({
   title: Type.Optional(Type.String({ description: 'Short human-readable title for the task.' })),
   model: Type.Optional(
     Type.String({
-      description: `Model to run this task on, as provider/model (e.g. openai-codex/gpt-5.6-terra or openrouter/moonshotai/kimi-k2.6). Only set it when the user asks for a specific model; otherwise the default scheduled-task model (${SCHEDULED_TASK_MODEL}) is used.`,
+      description:
+        'Model to run this task on, as provider/model (e.g. openai-codex/gpt-5.6-terra or openrouter/moonshotai/kimi-k2.6). Only set it when the user asks for a specific model; otherwise the task is pinned to the chat model active right now.',
     }),
   ),
   run_at: Type.Optional(
@@ -70,7 +71,7 @@ const UpdateScheduledTaskParams = Type.Object({
   title: Type.Optional(Type.String()),
   model: Type.Optional(
     Type.String({
-      description: `Model to run this task on, as provider/model. Pass '${DEFAULT_MODEL_KEYWORD}' to clear a per-task model and go back to the default scheduled-task model (${SCHEDULED_TASK_MODEL}).`,
+      description: `Model to run this task on, as provider/model. Pass '${DEFAULT_MODEL_KEYWORD}' to re-pin the task to the chat model active right now.`,
     }),
   ),
   run_at: Type.Optional(Type.String()),
@@ -93,13 +94,12 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
       'If the user gives a relative time like tomorrow or next week, get the current time with bash date before scheduling.',
       'Prefer timezone-aware ISO timestamps for one-time tasks and IANA timezones for cron tasks.',
       'Keep the scheduled prompt self-contained; include what to check and when to notify the user.',
-      `Scheduled tasks run on ${SCHEDULED_TASK_MODEL} unless the user asks for a specific model for that task, in which case pass it as model.`,
+      'A scheduled task is pinned to the chat model active when it is created; later /models switches do not affect it. Pass model only when the user asks for a specific model for that task.',
     ],
     parameters: ScheduleTaskParams,
     async execute(_toolCallId, params: ScheduleTaskParamsType, _signal, _onUpdate, ctx) {
-      const input = toCreateInput(params);
-      if (input.model) input.model = resolveTaskModel(ctx, input.model);
-      const job = addCronJob(input);
+      const model = params.model ? resolveTaskModel(ctx, params.model) : currentChatModel(ctx);
+      const job = addCronJob(toCreateInput(params, model));
       return textResult(`Scheduled task created:\n${formatCronJob(job)}`);
     },
   });
@@ -154,6 +154,18 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
 }
 
 /**
+ * The model the chat is on right now, as provider/model. The tools run inside
+ * the chat's Pi session, so this is the /models selection at the moment of the
+ * call. Every task without an explicit model is pinned to it.
+ */
+function currentChatModel(ctx: ExtensionContext): string {
+  if (!ctx.model) {
+    throw new Error('No chat model is active; pass model explicitly.');
+  }
+  return formatModelRef({ provider: ctx.model.provider, model: ctx.model.id });
+}
+
+/**
  * Checks a requested task model against the live model catalogue so a typo or a
  * provider without auth fails at creation, not silently when the task fires.
  * Returns the normalised provider/model ref.
@@ -170,9 +182,9 @@ function resolveTaskModel(ctx: ExtensionContext, requested: string): string {
   return formatModelRef(ref);
 }
 
-function toUpdateModel(ctx: ExtensionContext, requested: string): string | null {
+function toUpdateModel(ctx: ExtensionContext, requested: string): string {
   return requested.trim().toLowerCase() === DEFAULT_MODEL_KEYWORD
-    ? null
+    ? currentChatModel(ctx)
     : resolveTaskModel(ctx, requested);
 }
 
@@ -184,16 +196,7 @@ function availableModelList(ctx: ExtensionContext): string {
   return names.length ? names.join(', ') : 'none';
 }
 
-function toCreateInput(params: ScheduleTaskParamsType): {
-  kind: CronJobKind;
-  prompt: string;
-  title?: string;
-  model?: string;
-  runAt?: string;
-  intervalMs?: number;
-  schedule?: string;
-  timezone?: string;
-} {
+function toCreateInput(params: ScheduleTaskParamsType, model: string): CreateCronJobInput {
   if (params.kind === 'once' && !params.run_at) {
     throw new Error("kind='once' requires run_at");
   }
@@ -207,8 +210,8 @@ function toCreateInput(params: ScheduleTaskParamsType): {
   return {
     kind: params.kind,
     prompt: params.prompt,
+    model,
     ...(params.title ? { title: params.title } : {}),
-    ...(params.model ? { model: params.model } : {}),
     ...(params.run_at ? { runAt: params.run_at } : {}),
     ...(params.interval_minutes ? { intervalMs: params.interval_minutes * 60_000 } : {}),
     ...(params.schedule ? { schedule: params.schedule } : {}),

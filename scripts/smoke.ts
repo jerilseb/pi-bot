@@ -9,7 +9,6 @@ import {
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   PROJECT_SKILLS_DIR,
-  SCHEDULED_TASK_MODEL,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
 import { contextGistSystemPromptExtension } from '../src/context-gist.ts';
@@ -164,9 +163,8 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
     model: null,
     sessionPrefix: 'smoke-background',
   });
-  for (const model of [HEARTBEAT_MODEL, SCHEDULED_TASK_MODEL]) {
-    if (model) assertModelUsable(background.modelRuntime, model);
-  }
+  // Scheduled tasks fall back to the chat model, already checked above.
+  if (HEARTBEAT_MODEL) assertModelUsable(background.modelRuntime, HEARTBEAT_MODEL);
 }
 
 function verifyScheduledTaskTools(): number {

@@ -5,7 +5,6 @@ import {
   CRON_JOBS_PATH,
   CRON_NOOP,
   isAllowedTelegramChat,
-  SCHEDULED_TASK_MODEL,
 } from './config.ts';
 import {
   computeNextRunAt,
@@ -100,14 +99,13 @@ export function createCronController(options: {
         continue;
       }
 
-      const model = job.model ?? SCHEDULED_TASK_MODEL;
-      console.log(`cron ${job.id} due on ${model}: ${job.title ?? job.prompt.slice(0, 80)}`);
+      console.log(`cron ${job.id} due on ${job.model}: ${job.title ?? job.prompt.slice(0, 80)}`);
       await options.handleIncoming({
         text: buildCronPrompt(job),
         attachments: [],
         source: 'cron',
         suppressNoop: true,
-        model,
+        model: job.model,
         label: job.title ?? job.id,
       });
 
@@ -121,9 +119,7 @@ export function createCronController(options: {
 
   return {
     start(): void {
-      // SCHEDULED_TASK_MODEL is guaranteed non-empty here by collectConfigProblems;
-      // the check keeps the controller safe to call on its own.
-      if (!CRON_JOBS_ENABLED || !SCHEDULED_TASK_MODEL || started) return;
+      if (!CRON_JOBS_ENABLED || started) return;
       started = true;
       ensureCronJobsFile();
       unsubscribe = onCronJobsChanged(scheduleNext);
@@ -145,14 +141,11 @@ export function cronStatusText(): string {
   if (!CRON_JOBS_ENABLED) {
     return `Cron: off (set "cronJobs": true in ${BOT_SETTINGS_PATH})`;
   }
-  if (!SCHEDULED_TASK_MODEL) {
-    return 'Cron: off (set SCHEDULED_TASK_MODEL in .env)';
-  }
 
   try {
     const jobs = readCronJobs();
     const enabled = jobs.filter((job) => job.enabled).length;
-    return `Cron: ${enabled}/${jobs.length} enabled, default model ${SCHEDULED_TASK_MODEL} (${CRON_JOBS_PATH})`;
+    return `Cron: ${enabled}/${jobs.length} enabled (${CRON_JOBS_PATH})`;
   } catch (error) {
     return `Cron: error reading ${CRON_JOBS_PATH}: ${errorMessage(error)}`;
   }

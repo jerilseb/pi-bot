@@ -15,8 +15,8 @@ export interface CronJob {
   kind: CronJobKind;
   title?: string;
   prompt: string;
-  /** Model this task runs on, as provider/model. Unset means SCHEDULED_TASK_MODEL. */
-  model?: string;
+  /** Model this task runs on, as provider/model. Pinned when the task is created. */
+  model: string;
   runAt?: string;
   intervalMs?: number;
   schedule?: string;
@@ -31,7 +31,7 @@ export interface CreateCronJobInput {
   kind: CronJobKind;
   prompt: string;
   title?: string;
-  model?: string;
+  model: string;
   runAt?: string;
   intervalMs?: number;
   schedule?: string;
@@ -44,8 +44,7 @@ export interface UpdateCronJobInput {
   kind?: CronJobKind;
   prompt?: string;
   title?: string;
-  /** A string sets the task's model; null clears it back to SCHEDULED_TASK_MODEL. */
-  model?: string | null;
+  model?: string;
   runAt?: string;
   intervalMs?: number;
   schedule?: string;
@@ -91,7 +90,7 @@ function createCronJob(input: CreateCronJobInput): CronJob {
     kind: input.kind,
     ...(input.title ? { title: input.title } : {}),
     prompt: input.prompt,
-    ...(input.model ? { model: input.model } : {}),
+    model: input.model,
     ...(input.runAt ? { runAt: input.runAt } : {}),
     ...(input.intervalMs ? { intervalMs: input.intervalMs } : {}),
     ...(input.schedule ? { schedule: input.schedule } : {}),
@@ -121,13 +120,9 @@ export function updateCronJob(id: string, input: UpdateCronJobInput): CronJob {
   const index = jobs.findIndex((job) => job.id === id);
   if (index < 0) throw new Error(`No scheduled task found with id ${id}`);
 
-  const existing = jobs[index];
-  const { model, ...changes } = definedOnly(input);
-  const merged: Partial<CronJob> = { ...existing, ...changes };
-  if (model === null) delete merged.model;
-  else if (model) merged.model = model;
   const updated = normalizeCronJob({
-    ...merged,
+    ...jobs[index],
+    ...definedOnly(input),
     updatedAt: new Date().toISOString(),
   });
   updated.nextRunAt = updated.enabled ? computeNextRunAt(updated) : null;
@@ -207,8 +202,7 @@ export function deferCronJob(job: CronJob, delayMs: number, fromDate: Date = new
 export function formatCronJob(job: CronJob): string {
   const title = job.title ? `${job.title} ` : '';
   const schedule = formatCronSchedule(job);
-  const model = job.model ? `, model: ${job.model}` : '';
-  return `${job.id} — ${title}${job.enabled ? 'enabled' : 'disabled'}, ${schedule}${model}, next: ${job.nextRunAt ?? 'none'}`;
+  return `${job.id} — ${title}${job.enabled ? 'enabled' : 'disabled'}, ${schedule}, model: ${job.model}, next: ${job.nextRunAt ?? 'none'}`;
 }
 
 function formatCronSchedule(job: CronJob): string {
@@ -240,6 +234,9 @@ function normalizeCronJob(value: unknown): CronJob {
   if (!chatId) {
     throw new Error(`Scheduled task ${record.id} requires chatId`);
   }
+  if (!record.model || typeof record.model !== 'string') {
+    throw new Error(`Scheduled task ${record.id} requires model`);
+  }
 
   const job: CronJob = {
     id: record.id,
@@ -248,7 +245,7 @@ function normalizeCronJob(value: unknown): CronJob {
     kind: record.kind,
     ...(record.title ? { title: String(record.title) } : {}),
     prompt: record.prompt,
-    ...(record.model ? { model: formatModelRef(parseModelRef(String(record.model))) } : {}),
+    model: formatModelRef(parseModelRef(record.model)),
     ...(record.runAt ? { runAt: requireValidDate(record.runAt, 'runAt').toISOString() } : {}),
     ...(record.intervalMs ? { intervalMs: Number(record.intervalMs) } : {}),
     ...(record.schedule ? { schedule: String(record.schedule) } : {}),

@@ -8,6 +8,7 @@ const base: CronJob = {
   enabled: true,
   kind: 'interval',
   prompt: 'check',
+  model: 'openai-codex/gpt-5.6-luna',
   intervalMs: 120_000,
   nextRunAt: '2026-09-15T10:00:00.000Z',
   lastRunAt: null,
@@ -15,14 +16,14 @@ const base: CronJob = {
   updatedAt: '2026-09-15T09:00:00.000Z',
 };
 
-test('formatCronJob omits the model when the task uses the default', () => {
+test('formatCronJob always shows the pinned model', () => {
   assert.equal(
     formatCronJob(base),
-    'job_1 — enabled, every 2 minutes, next: 2026-09-15T10:00:00.000Z',
+    'job_1 — enabled, every 2 minutes, model: openai-codex/gpt-5.6-luna, next: 2026-09-15T10:00:00.000Z',
   );
 });
 
-test('formatCronJob shows a per-task model', () => {
+test('formatCronJob includes the title and a per-task model', () => {
   assert.equal(
     formatCronJob({ ...base, title: 'Mail', model: 'openrouter/moonshotai/kimi-k2.6' }),
     'job_1 — Mail enabled, every 2 minutes, model: openrouter/moonshotai/kimi-k2.6, next: 2026-09-15T10:00:00.000Z',

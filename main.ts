@@ -35,7 +35,6 @@ import {
   PROJECT_EXTENSIONS_DIR,
   PROJECT_SKILLS_DIR,
   RESTART_EXIT_DELAY_MS,
-  SCHEDULED_TASK_MODEL,
   SESSIONS_DIR,
   TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
@@ -106,7 +105,8 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   requestRestart: restart,
 });
 
-// No default model: heartbeat and cron each name their own on every prompt, so
+// No default model: heartbeat and cron each name their own on every prompt (the
+// heartbeat from .env, each scheduled task from the model pinned to it), so
 // there is nothing sensible to run here without one.
 const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
@@ -190,13 +190,6 @@ function validateModels(): void {
       label: 'HEARTBEAT_MODEL in .env',
       runtime: BACKGROUND_PI_RUNTIME,
       model: HEARTBEAT_MODEL,
-    });
-  }
-  if (SCHEDULED_TASK_MODEL) {
-    configured.push({
-      label: 'SCHEDULED_TASK_MODEL in .env',
-      runtime: BACKGROUND_PI_RUNTIME,
-      model: SCHEDULED_TASK_MODEL,
     });
   }
 

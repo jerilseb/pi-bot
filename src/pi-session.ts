@@ -467,7 +467,7 @@ export class SdkPiSession {
     if (!this.selectedModelRef) {
       throw new Error(
         'No model is configured for this Pi session; the prompt must name one. ' +
-          'Check HEARTBEAT_MODEL and SCHEDULED_TASK_MODEL in .env.',
+          'Check HEARTBEAT_MODEL in .env, or the chat model for scheduled tasks.',
       );
     }
     if (!this.selectedModel) {
