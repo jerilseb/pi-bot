@@ -80,6 +80,8 @@ Open this site and test the login flow.
 
 Ask it to do something later, once, repeatedly, or on a cron-like schedule. Requires `"cronJobs": true` in `files/settings.json` — see [Configuration](#configuration).
 
+Scheduled tasks run in a separate background session so they cannot disturb your conversation, but every report they send you is also noted in the chat session. Asking "what did this morning's report say?" works without the chat agent having to go and read files.
+
 Examples:
 
 ```text

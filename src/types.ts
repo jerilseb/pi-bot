@@ -70,6 +70,11 @@ export interface IncomingPrompt {
    * Telegram prompts leave it unset and use the chat's current model.
    */
   model?: string;
+  /**
+   * Short human-readable name for an internal run, e.g. a scheduled task's
+   * title. Used when its delivered output is noted in the chat session.
+   */
+  label?: string;
 }
 
 export interface PiPromptResult {

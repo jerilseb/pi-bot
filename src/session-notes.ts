@@ -16,12 +16,21 @@ import type { SessionManager } from '@earendil-works/pi-coding-agent';
  *
  * Only record what changes Pi's picture of the world. Every note is context it
  * pays for on every subsequent turn, so `/status` and `/help` stay out.
+ *
+ * Scheduled-task reports count: they run in the background session, so without
+ * a note the chat agent has no idea the user was just sent one and cannot
+ * answer "what did this morning's report say?".
  */
 
 /** Marks our entries in the session file so they can be found on reload. */
 export const SESSION_EVENT_TYPE = 'telegram-bot-event';
 
-export type SessionEventKind = 'restart' | 'restart-unclean' | 'model' | 'abort';
+export type SessionEventKind =
+  | 'restart'
+  | 'restart-unclean'
+  | 'model'
+  | 'abort'
+  | 'scheduled-task';
 
 export interface SessionEventDetails {
   kind: SessionEventKind;
@@ -49,6 +58,25 @@ export function formatSessionEvent(text: string): string {
     'Automatic note about this bot, not user input:',
     text,
     '</bot-event>',
+  ].join('\n');
+}
+
+/**
+ * The note recorded in the chat session when a scheduled task sends the user a
+ * report. Quotes the report so the chat agent can refer back to it.
+ */
+export function formatScheduledTaskNote(options: {
+  label?: string;
+  model?: string;
+  report: string;
+}): string {
+  const label = options.label?.trim() ? ` "${options.label.trim()}"` : '';
+  const model = options.model ? ` on ${options.model}` : '';
+  return [
+    `A scheduled task${label} ran${model} in a separate background session and sent this report to the user:`,
+    '<scheduled_task_report>',
+    options.report.trim(),
+    '</scheduled_task_report>',
   ].join('\n');
 }
 

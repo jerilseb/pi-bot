@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { createChatSession } from '../src/chat-session.ts';
-import { MAX_QUEUED_PROMPTS } from '../src/config.ts';
+import { CRON_NOOP, MAX_QUEUED_PROMPTS } from '../src/config.ts';
 import type { PiRunPromptOptions, PiRuntime } from '../src/pi-session.ts';
 import { createPromptQueue } from '../src/prompt-queue.ts';
 import type { Attachment, IncomingPrompt } from '../src/types.ts';
@@ -78,7 +78,7 @@ function setup(t: TestContext) {
   );
   const backgroundSteer = t.mock.method(background.pi, 'trySteer', async () => true);
   const abort = t.mock.method(chat.pi, 'abort', () => {});
-  t.mock.method(chat.pi, 'noteEvent', async () => {});
+  const note = t.mock.method(chat.pi, 'noteEvent', async () => {});
   t.mock.method(chat.pi, 'requestNewSession', async () => 'reset');
   const queue = createPromptQueue({
     chatSession,
@@ -103,6 +103,7 @@ function setup(t: TestContext) {
     steer,
     backgroundSteer,
     abort,
+    note,
     messages,
     options: () => options,
     backgroundOptions: () => backgroundOptions,
@@ -215,4 +216,64 @@ test('rejected steering reports an error without retrying it as a new prompt', a
   assert.deepEqual(f.chat.queue, []);
   assert.equal(f.chat.messageCount, 1);
   assert.ok(f.messages.some((text) => text.includes('steer rejected')));
+});
+
+test('a delivered scheduled-task report is noted in the chat session', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  const useModel = t.mock.method(f.background.pi, 'useModel', async () => {});
+  await f.queue.handleIncoming({
+    text: 'run the check',
+    attachments: [],
+    source: 'cron',
+    suppressNoop: true,
+    model: 'test/cron-model',
+    label: 'Morning check',
+  });
+  await until(() => !f.queue.isAssistantBusy());
+
+  assert.equal(f.backgroundRuns.length, 1);
+  assert.equal(useModel.mock.calls[0]?.arguments[0], 'test/cron-model');
+  assert.equal(f.note.mock.callCount(), 1);
+  const [kind, text] = f.note.mock.calls[0]?.arguments as [string, string];
+  assert.equal(kind, 'scheduled-task');
+  assert.match(text, /"Morning check"/);
+  assert.match(text, /test\/cron-model/);
+  assert.match(text, /background answer/);
+  // The report still reaches Telegram as before.
+  assert.ok(f.messages.some((message) => message.includes('background answer')));
+});
+
+test('a scheduled task that reports nothing leaves no note in the chat session', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  t.mock.method(f.background.pi, 'runPrompt', async () => ({ text: CRON_NOOP }));
+  await f.queue.handleIncoming({
+    text: 'run the check',
+    attachments: [],
+    source: 'cron',
+    suppressNoop: true,
+    label: 'Quiet check',
+  });
+  await until(() => !f.queue.isAssistantBusy());
+
+  assert.equal(f.note.mock.callCount(), 0);
+  assert.equal(f.messages.length, 0);
+});
+
+test('a scheduled task with a blank reply sends nothing and leaves no note', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  t.mock.method(f.background.pi, 'runPrompt', async () => ({ text: '  \n' }));
+  await f.queue.handleIncoming({
+    text: 'run the check',
+    attachments: [],
+    source: 'cron',
+    suppressNoop: true,
+    label: 'Blank check',
+  });
+  await until(() => !f.queue.isAssistantBusy());
+
+  assert.equal(f.note.mock.callCount(), 0);
+  assert.equal(f.messages.length, 0);
 });

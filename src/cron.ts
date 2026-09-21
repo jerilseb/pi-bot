@@ -108,6 +108,7 @@ export function createCronController(options: {
         source: 'cron',
         suppressNoop: true,
         model,
+        label: job.title ?? job.id,
       });
 
       jobs[index] = markCronJobRan(job);

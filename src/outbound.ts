@@ -2,13 +2,20 @@ import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP } from './config.ts';
 import { sendTelegramMessage } from './telegram.ts';
 import type { IncomingPrompt, PiPromptResult } from './types.ts';
 
+/**
+ * Deliver a Pi response to the Telegram chat. Resolves true when a message was
+ * sent, false when the response was a noop sentinel or blank and nothing reached
+ * the user.
+ */
 export async function sendPiResponse(
   response: PiPromptResult,
   options: { suppressNoop?: boolean; source?: IncomingPrompt['source'] } = {},
-): Promise<void> {
-  if (options.suppressNoop && isNoopResponse(response.text)) {
+): Promise<boolean> {
+  // A blank reply from an unattended run is nothing to report, same as the
+  // sentinel: sending "(empty)" would only tell the user the model said nothing.
+  if (options.suppressNoop && (!response.text.trim() || isNoopResponse(response.text))) {
     console.log('background task completed with no user-visible update');
-    return;
+    return false;
   }
 
   const text =
@@ -16,6 +23,7 @@ export async function sendPiResponse(
       ? `⏰ <b>Scheduled report</b>\n\n${response.text || '(empty)'}`
       : response.text;
   await sendTelegramMessage(text);
+  return true;
 }
 
 // Match on the bare sentinel name (wrapping underscores stripped) so a model that

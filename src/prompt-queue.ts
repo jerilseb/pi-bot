@@ -3,6 +3,7 @@ import { handleCommand } from './commands.ts';
 import { MAX_QUEUED_PROMPTS } from './config.ts';
 import { cleanupAttachments } from './inbound.ts';
 import { sendPiResponse } from './outbound.ts';
+import { formatScheduledTaskNote } from './session-notes.ts';
 import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
 import { createToolNotifications } from './tool-notification-batch.ts';
 import type { IncomingPrompt } from './types.ts';
@@ -151,10 +152,24 @@ export function createPromptQueue(options: {
         // Flush before the response so notifications cannot arrive after the
         // answer they describe.
         await toolNotifications.finish();
-        await sendPiResponse(response, {
+        const delivered = await sendPiResponse(response, {
           suppressNoop: prompt.suppressNoop,
           source: prompt.source,
         });
+        // A scheduled task runs in the background session, so the chat agent
+        // never sees its report. Note it in the chat session so the next chat
+        // turn knows what the user was just sent. Skipped during shutdown so a
+        // late report cannot land after the restart note that marks a clean exit.
+        if (delivered && prompt.source === 'cron' && isRunning()) {
+          await chatSession.get().pi.noteEvent(
+            'scheduled-task',
+            formatScheduledTaskNote({
+              ...(prompt.label ? { label: prompt.label } : {}),
+              ...(prompt.model ? { model: prompt.model } : {}),
+              report: response.text,
+            }),
+          );
+        }
         enqueuePendingNewSessionTask(chat, prompt);
       } catch (error) {
         const message = errorMessage(error);
