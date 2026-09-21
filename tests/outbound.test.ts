@@ -36,3 +36,35 @@ test('suppresses cron noop responses without sending a header', async (t) => {
 
   assert.equal(fetchMock.mock.callCount(), 0);
 });
+
+test('a sentinel wrapped in fences, backticks, bold, or a full stop is still a noop', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: true }));
+
+  for (const text of [
+    `\`\`\`text\n${CRON_NOOP}\n\`\`\``,
+    `\`${CRON_NOOP}\``,
+    `**${CRON_NOOP}**`,
+    `${CRON_NOOP}.`,
+    CRON_NOOP.replace(/^_+|_+$/g, ''),
+    '   ',
+  ]) {
+    await sendPiResponse({ text }, { source: 'cron', suppressNoop: true });
+  }
+
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+test('a report that merely mentions a sentinel is delivered', async (t) => {
+  const messages: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const payload = JSON.parse(String(init?.body)) as { text: string };
+    messages.push(payload.text);
+    return Response.json({ ok: true, result: { message_id: messages.length } });
+  });
+
+  const body = `Disk is 95% full on /data. (I would reply ${CRON_NOOP} otherwise.)`;
+  await sendPiResponse({ text: body }, { source: 'cron', suppressNoop: true });
+
+  assert.equal(messages.length, 1);
+  assert.ok(messages[0].endsWith(body));
+});

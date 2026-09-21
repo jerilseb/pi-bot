@@ -111,19 +111,28 @@ export async function editTelegramMessageHtml(messageId: number, html: string): 
 }
 
 /**
- * Sends one chunk that is already known to fit in a single Telegram message and
- * returns its ID, so the caller can edit it later.
+ * Sends one chunk that fits in a single Telegram message and returns its ID, so
+ * the caller can edit it later. A degraded fallback (sanitized or escaped) can
+ * grow past the limit — escaping turns every `<` into four characters — so each
+ * rung is re-split and the ID of the last piece is returned.
  */
 export async function sendTelegramHtmlMessage(
   html: string,
   options: SendMessageOptions = {},
 ): Promise<number> {
-  return withHtmlParseFallback(html, (candidate) => postTelegramHtmlMessage(candidate, options));
+  return withHtmlParseFallback(html, async (candidate) => {
+    let messageId = 0;
+    for (const piece of splitTelegramMessage(candidate)) {
+      messageId = await postTelegramHtmlMessage(piece, options);
+    }
+    return messageId;
+  });
 }
 
 /**
  * Tries the HTML as written, then sanitized, then fully escaped. Only a Telegram
  * entity-parse error moves on to the next attempt; anything else propagates.
+ * Escaped text has no entities to reject, so the last rung is final.
  */
 async function withHtmlParseFallback<T>(
   html: string,

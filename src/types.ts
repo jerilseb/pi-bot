@@ -65,7 +65,11 @@ export type SessionKind = 'chat' | 'background';
 export interface IncomingPrompt {
   text: string;
   attachments: Attachment[];
-  source?: 'telegram' | 'heartbeat' | 'cron' | 'background-bash-report';
+  /**
+   * Where the prompt came from. Only `telegram` (or unset) may steer an active
+   * chat run; every internal origin is queued so two of them cannot merge.
+   */
+  source?: 'telegram' | 'heartbeat' | 'cron' | 'post-restart' | 'background-bash-report';
   /**
    * Session that runs this prompt. Unset, it follows from source: heartbeat and
    * cron run in the background session, everything else in the chat session. A

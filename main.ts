@@ -330,10 +330,13 @@ async function enqueuePostRestartTasks(): Promise<void> {
       await sendTelegramMessage(
         `🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`,
       );
+      // Not 'telegram': a Telegram-sourced prompt steers a run already in
+      // progress, so a second task would be folded into the first one's turn
+      // instead of getting its own.
       await handleIncoming({
         text: buildPostRestartPrompt(task),
         attachments: [],
-        source: 'telegram',
+        source: 'post-restart',
       });
     } catch (error) {
       console.error(`failed to enqueue post-restart task ${task.id}:`, errorMessage(error));

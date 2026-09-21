@@ -356,3 +356,14 @@ test('a scheduled task with a blank reply sends nothing and leaves no note', asy
   assert.equal(f.note.mock.callCount(), 0);
   assert.equal(f.messages.length, 0);
 });
+
+test('post-restart tasks queue behind an active run instead of steering it', async (t) => {
+  const f = setup(t);
+  await f.send('first task', 'post-restart');
+  await f.send('second task', 'post-restart');
+  assert.equal(f.steer.mock.callCount(), 0);
+  assert.equal(f.chat.queue.length, 1);
+  f.gate.resolve();
+  await until(() => !f.queue.isAssistantBusy());
+  assert.deepEqual(f.runs, ['first task', 'second task']);
+});
