@@ -20,7 +20,7 @@
 import * as fs from 'node:fs';
 import { buildAgentEnvelope } from './src/agent-envelope.ts';
 import {
-  formatBackgroundBashReportPrompt,
+  backgroundBashReportPrompt,
   setBackgroundBashReportHandler,
   stopAllBackgroundSessions,
 } from './src/background-bash.ts';
@@ -93,6 +93,7 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: MODEL,
   sessionPrefix: 'telegram-chat',
+  sessionKind: 'chat',
   getExtensionPaths: () => EXTENSION_PATHS,
   getSkillPaths: () => SKILL_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
@@ -112,6 +113,7 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: null,
   sessionPrefix: 'telegram-background',
+  sessionKind: 'background',
   getExtensionPaths: () => EXTENSION_PATHS,
   getSkillPaths: () => SKILL_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
@@ -154,16 +156,11 @@ const cron = createCronController({
   isRunning: () => running,
 });
 
-// Backgrounded bash sessions report back to the main chat agent as internal
-// background-bash-report prompts that go through the normal prompt queue,
-// rather than sending direct Telegram messages.
+// Backgrounded bash sessions report back to the agent that started them as
+// internal background-bash-report prompts that go through the normal prompt
+// queue, rather than sending direct Telegram messages.
 setBackgroundBashReportHandler(async (report) => {
-  await handleIncoming({
-    text: formatBackgroundBashReportPrompt(report),
-    attachments: [],
-    source: 'background-bash-report',
-    suppressNoop: true,
-  });
+  await handleIncoming(backgroundBashReportPrompt(report));
 });
 
 function validateConfiguration(): void {

@@ -1,4 +1,4 @@
-import type { IncomingPrompt } from './types.ts';
+import type { IncomingPrompt, SessionKind } from './types.ts';
 
 export interface ModelRef {
   provider: string;
@@ -9,8 +9,19 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function isBackgroundSource(source: IncomingPrompt['source']): boolean {
+function isBackgroundSource(source: IncomingPrompt['source']): boolean {
   return source === 'heartbeat' || source === 'cron';
+}
+
+/** Which of the bot's two Pi sessions runs a prompt. An explicit session wins over source. */
+export function promptSessionKind(prompt: Pick<IncomingPrompt, 'source' | 'session'>): SessionKind {
+  if (prompt.session) return prompt.session;
+  return isBackgroundSource(prompt.source) ? 'background' : 'chat';
+}
+
+/** True for prompts that run unattended in the background session. */
+export function isBackgroundPrompt(prompt: Pick<IncomingPrompt, 'source' | 'session'>): boolean {
+  return promptSessionKind(prompt) === 'background';
 }
 
 export function parseModelRef(value: string): ModelRef {

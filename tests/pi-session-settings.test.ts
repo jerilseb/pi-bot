@@ -25,6 +25,7 @@ function fixture() {
     cwd: '/unused',
     sessionDir: '/unused',
     sessionPrefix: 'test',
+    sessionKind: 'chat',
     getExtensionPaths: () => [],
     getSkillPaths: () => [],
     systemPromptOverride: () => '',

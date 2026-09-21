@@ -155,6 +155,7 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
     ...common,
     model: MODEL,
     sessionPrefix: 'smoke-chat',
+    sessionKind: 'chat',
   });
   assertModelUsable(chat.modelRuntime, MODEL);
 
@@ -162,6 +163,7 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
     ...common,
     model: null,
     sessionPrefix: 'smoke-background',
+    sessionKind: 'background',
   });
   // Scheduled tasks fall back to the chat model, already checked above.
   if (HEARTBEAT_MODEL) assertModelUsable(background.modelRuntime, HEARTBEAT_MODEL);

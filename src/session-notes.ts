@@ -1,4 +1,5 @@
 import type { SessionManager } from '@earendil-works/pi-coding-agent';
+import type { IncomingPrompt } from './types.ts';
 
 /**
  * Notes about the bot itself, written straight into the Pi session file.
@@ -17,9 +18,10 @@ import type { SessionManager } from '@earendil-works/pi-coding-agent';
  * Only record what changes Pi's picture of the world. Every note is context it
  * pays for on every subsequent turn, so `/status` and `/help` stay out.
  *
- * Scheduled-task reports count: they run in the background session, so without
- * a note the chat agent has no idea the user was just sent one and cannot
- * answer "what did this morning's report say?".
+ * Messages sent from the background session count: scheduled tasks, heartbeat
+ * runs, and the completion reports of commands those started all run there, so
+ * without a note the chat agent has no idea the user was just sent one and
+ * cannot answer "what did this morning's report say?".
  */
 
 /** Marks our entries in the session file so they can be found on reload. */
@@ -30,7 +32,9 @@ export type SessionEventKind =
   | 'restart-unclean'
   | 'model'
   | 'abort'
-  | 'scheduled-task';
+  | 'scheduled-task'
+  | 'heartbeat'
+  | 'background-bash';
 
 export interface SessionEventDetails {
   kind: SessionEventKind;
@@ -62,22 +66,41 @@ export function formatSessionEvent(text: string): string {
 }
 
 /**
- * The note recorded in the chat session when a scheduled task sends the user a
- * report. Quotes the report so the chat agent can refer back to it.
+ * The note recorded in the chat session when a background-session run sends
+ * the user a message. Quotes the message so the chat agent can refer back to
+ * it. Null for sources that run in the chat session, which needs no note about
+ * its own replies.
  */
-export function formatScheduledTaskNote(options: {
+export function backgroundReportNote(options: {
+  source: IncomingPrompt['source'];
   label?: string;
   model?: string;
   report: string;
-}): string {
+}): { kind: SessionEventKind; text: string } | null {
   const label = options.label?.trim() ? ` "${options.label.trim()}"` : '';
   const model = options.model ? ` on ${options.model}` : '';
-  return [
-    `A scheduled task${label} ran${model} in a separate background session and sent this report to the user:`,
-    '<scheduled_task_report>',
-    options.report.trim(),
-    '</scheduled_task_report>',
-  ].join('\n');
+  let kind: SessionEventKind;
+  let intro: string;
+  switch (options.source) {
+    case 'cron':
+      kind = 'scheduled-task';
+      intro = `A scheduled task${label} ran${model} in a separate background session and sent this report to the user:`;
+      break;
+    case 'heartbeat':
+      kind = 'heartbeat';
+      intro = `A heartbeat run${model} in a separate background session sent this message to the user:`;
+      break;
+    case 'background-bash-report':
+      kind = 'background-bash';
+      intro = `A background command${label} started from the separate background session finished, and that session${model} sent this message to the user:`;
+      break;
+    default:
+      return null;
+  }
+  return {
+    kind,
+    text: [intro, '<background_report>', options.report.trim(), '</background_report>'].join('\n'),
+  };
 }
 
 /**

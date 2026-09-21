@@ -3,11 +3,11 @@ import { handleCommand } from './commands.ts';
 import { MAX_QUEUED_PROMPTS } from './config.ts';
 import { cleanupAttachments } from './inbound.ts';
 import { sendPiResponse } from './outbound.ts';
-import { formatScheduledTaskNote } from './session-notes.ts';
+import { backgroundReportNote } from './session-notes.ts';
 import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
 import { createToolNotifications } from './tool-notification-batch.ts';
 import type { IncomingPrompt } from './types.ts';
-import { errorMessage, isBackgroundSource } from './util.ts';
+import { errorMessage, isBackgroundPrompt } from './util.ts';
 
 /**
  * The bot's single entry point for work, and the worker that drains it.
@@ -41,7 +41,7 @@ export function createPromptQueue(options: {
   const { chatSession, backgroundSession, isRunning } = options;
 
   const handleIncoming = async (prompt: IncomingPrompt): Promise<void> => {
-    const session = isBackgroundSource(prompt.source) ? backgroundSession : chatSession;
+    const session = isBackgroundPrompt(prompt) ? backgroundSession : chatSession;
     const chat = session.get();
     const trimmed = prompt.text.trim();
 
@@ -66,7 +66,7 @@ export function createPromptQueue(options: {
       chat.queue.length + chat.pi.pendingSteeringCount >= MAX_QUEUED_PROMPTS
     ) {
       cleanupAttachments(prompt);
-      if (!isBackgroundSource(prompt.source)) {
+      if (!isBackgroundPrompt(prompt)) {
         await sendTelegramMessage(
           `⚠️ Queue full (${MAX_QUEUED_PROMPTS} pending). Wait or use /abort.`,
         );
@@ -122,11 +122,11 @@ export function createPromptQueue(options: {
       if (!prompt) break;
       chat.processing = true;
 
-      const isBackground = isBackgroundSource(prompt.source);
+      const isBackground = isBackgroundPrompt(prompt);
       // Background runs have no user watching, so no typing indicator.
       const typing = isBackground ? { stop: () => undefined } : startTyping();
       // Own state per prompt: background and foreground sessions can overlap.
-      const toolNotifications = createToolNotifications(prompt.source);
+      const toolNotifications = createToolNotifications(prompt);
       let deferredSteers = 0;
       try {
         const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
@@ -156,20 +156,20 @@ export function createPromptQueue(options: {
           suppressNoop: prompt.suppressNoop,
           source: prompt.source,
         });
-        // A scheduled task runs in the background session, so the chat agent
-        // never sees its report. Note it in the chat session so the next chat
-        // turn knows what the user was just sent. Skipped during shutdown so a
-        // late report cannot land after the restart note that marks a clean exit.
-        if (delivered && prompt.source === 'cron' && isRunning()) {
-          await chatSession.get().pi.noteEvent(
-            'scheduled-task',
-            formatScheduledTaskNote({
-              ...(prompt.label ? { label: prompt.label } : {}),
-              ...(prompt.model ? { model: prompt.model } : {}),
-              report: response.text,
-            }),
-          );
-        }
+        // A background-session run sends its message without the chat agent
+        // ever seeing it. Note it in the chat session so the next chat turn
+        // knows what the user was just sent. Skipped during shutdown so a late
+        // report cannot land after the restart note that marks a clean exit.
+        const note =
+          delivered && isBackground && isRunning()
+            ? backgroundReportNote({
+                source: prompt.source,
+                ...(prompt.label ? { label: prompt.label } : {}),
+                ...(prompt.model ? { model: prompt.model } : {}),
+                report: response.text,
+              })
+            : null;
+        if (note) await chatSession.get().pi.noteEvent(note.kind, note.text);
         enqueuePendingNewSessionTask(chat, prompt);
       } catch (error) {
         const message = errorMessage(error);
@@ -212,6 +212,7 @@ function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): 
     text: task,
     attachments: [],
     ...(prompt.source ? { source: prompt.source } : {}),
+    ...(prompt.session ? { session: prompt.session } : {}),
   });
   chat.messageCount++;
 }

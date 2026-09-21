@@ -18,6 +18,7 @@ function runtime(): PiRuntime {
     cwd: '/unused',
     sessionDir: '/unused',
     sessionPrefix: 'test',
+    sessionKind: 'chat',
     getExtensionPaths: () => [],
     getSkillPaths: () => [],
     systemPromptOverride: () => '',
@@ -242,6 +243,84 @@ test('a delivered scheduled-task report is noted in the chat session', async (t)
   assert.match(text, /background answer/);
   // The report still reaches Telegram as before.
   assert.ok(f.messages.some((message) => message.includes('background answer')));
+});
+
+test('a background-bash report returns to the session that started the command', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  const useModel = t.mock.method(f.background.pi, 'useModel', async () => {});
+  await f.queue.handleIncoming({
+    text: 'bg_1 finished',
+    attachments: [],
+    source: 'background-bash-report',
+    session: 'background',
+    suppressNoop: true,
+    model: 'test/job-model',
+  });
+  await until(() => !f.queue.isAssistantBusy());
+
+  assert.deepEqual(f.runs, []);
+  assert.deepEqual(f.backgroundRuns, ['bg_1 finished']);
+  assert.equal(useModel.mock.calls[0]?.arguments[0], 'test/job-model');
+  // Unattended: no foreground recovery.
+  assert.equal(f.backgroundOptions()?.recoverTransportErrors, undefined);
+  // The user got a message from the background session, so the chat is told.
+  assert.equal(f.note.mock.callCount(), 1);
+  const [kind, text] = f.note.mock.calls[0]?.arguments as [string, string];
+  assert.equal(kind, 'background-bash');
+  assert.match(text, /background command/);
+  assert.match(text, /test\/job-model/);
+  assert.match(text, /background answer/);
+});
+
+test('a background-bash report answered in the chat session leaves no note', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  await f.queue.handleIncoming({
+    text: 'bg_3 finished',
+    attachments: [],
+    source: 'background-bash-report',
+    session: 'chat',
+    suppressNoop: true,
+  });
+  await until(() => !f.queue.isAssistantBusy());
+  assert.ok(f.messages.some((message) => message.includes('bg_3 finished')));
+  assert.equal(f.note.mock.callCount(), 0);
+});
+
+test('a delivered heartbeat message is noted in the chat session', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  t.mock.method(f.background.pi, 'useModel', async () => {});
+  await f.queue.handleIncoming({
+    text: 'check things',
+    attachments: [],
+    source: 'heartbeat',
+    suppressNoop: true,
+    model: 'test/heartbeat-model',
+  });
+  await until(() => !f.queue.isAssistantBusy());
+  const [kind, text] = f.note.mock.calls[0]?.arguments as [string, string];
+  assert.equal(kind, 'heartbeat');
+  assert.match(text, /heartbeat run on test\/heartbeat-model/);
+  assert.match(text, /background answer/);
+});
+
+test('a background-bash report from the chat runs in the chat session', async (t) => {
+  const f = setup(t);
+  f.gate.resolve();
+  await f.queue.handleIncoming({
+    text: 'bg_2 finished',
+    attachments: [],
+    source: 'background-bash-report',
+    session: 'chat',
+    suppressNoop: true,
+  });
+  await until(() => !f.queue.isAssistantBusy());
+
+  assert.deepEqual(f.runs, ['bg_2 finished']);
+  assert.deepEqual(f.backgroundRuns, []);
+  assert.equal(f.options()?.recoverTransportErrors, true);
 });
 
 test('a scheduled task that reports nothing leaves no note in the chat session', async (t) => {

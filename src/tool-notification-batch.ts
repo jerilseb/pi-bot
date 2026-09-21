@@ -12,7 +12,7 @@ import {
 } from './telegram.ts';
 import { renderCollapsedToolCalls } from './tool-notifications.ts';
 import type { IncomingPrompt } from './types.ts';
-import { errorMessage, isBackgroundSource } from './util.ts';
+import { errorMessage, isBackgroundPrompt } from './util.ts';
 
 export interface ToolNotifications {
   notify(notification: string): void;
@@ -31,10 +31,10 @@ export interface ToolNotifications {
  * mode edits one silent expandable message; stream sends one per batch.
  */
 export function createToolNotifications(
-  source: IncomingPrompt['source'],
+  prompt: Pick<IncomingPrompt, 'source' | 'session'>,
   mode: ToolCallMode = toolCallMode(),
 ): ToolNotifications {
-  const enabled = !isBackgroundSource(source) && mode !== 'off';
+  const enabled = !isBackgroundPrompt(prompt) && mode !== 'off';
   const notifications: string[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   let sending: Promise<void> | null = null;

@@ -59,10 +59,20 @@ export interface Attachment {
   size?: number;
 }
 
+/** The bot's two Pi sessions: the Telegram chat and the unattended background one. */
+export type SessionKind = 'chat' | 'background';
+
 export interface IncomingPrompt {
   text: string;
   attachments: Attachment[];
   source?: 'telegram' | 'heartbeat' | 'cron' | 'background-bash-report';
+  /**
+   * Session that runs this prompt. Unset, it follows from source: heartbeat and
+   * cron run in the background session, everything else in the chat session. A
+   * background-bash report sets it so the result returns to the session that
+   * started the command rather than always landing in the chat.
+   */
+  session?: SessionKind;
   suppressNoop?: boolean;
   /**
    * Model to run this prompt on, as provider/model. Set by heartbeat and cron so

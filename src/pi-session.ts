@@ -32,7 +32,7 @@ import {
   type SessionEventKind,
 } from './session-notes.ts';
 import { formatToolStartNotification } from './tool-notifications.ts';
-import type { Attachment, IncomingPrompt, PiPromptResult } from './types.ts';
+import type { Attachment, IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
 import { PromptSteering, type SteeringDisposition } from './prompt-steering.ts';
 import {
   isTransientTransportError,
@@ -80,6 +80,11 @@ export interface PiRuntime {
   cwd: string;
   sessionDir: string;
   sessionPrefix: string;
+  /**
+   * Which of the bot's two sessions this runtime backs. Recorded on background
+   * work started from it, so a completion report returns to the same session.
+   */
+  sessionKind: SessionKind;
   getExtensionPaths: () => string[];
   getSkillPaths: () => string[];
   systemPromptOverride: () => string;
@@ -92,6 +97,7 @@ export async function createPiRuntime(options: {
   /** Default model as provider/model, or null when every prompt names its own. */
   model: string | null;
   sessionPrefix: string;
+  sessionKind: SessionKind;
   getExtensionPaths: () => string[];
   getSkillPaths: () => string[];
   systemPromptOverride: () => string;
@@ -121,6 +127,7 @@ export async function createPiRuntime(options: {
     cwd: options.cwd,
     sessionDir: SESSIONS_DIR,
     sessionPrefix: options.sessionPrefix,
+    sessionKind: options.sessionKind,
     getExtensionPaths: options.getExtensionPaths,
     getSkillPaths: options.getSkillPaths,
     systemPromptOverride: options.systemPromptOverride,
@@ -518,7 +525,7 @@ export class SdkPiSession {
         ...(CRON_JOBS_ENABLED ? [scheduledTasksExtension] : []),
         telegramMenuExtension,
         telegramVoiceNoteExtension,
-        backgroundBashExtension,
+        backgroundBashExtension(this.runtime.sessionKind),
         ...(SEND_LOCAL_IMAGES ? [telegramImageExtension] : []),
         ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension] : []),
       ],

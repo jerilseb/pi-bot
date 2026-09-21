@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  backgroundReportNote,
   formatSessionEvent,
   lastSessionEventKind,
   SESSION_EVENT_TYPE,
@@ -40,6 +41,42 @@ describe('formatSessionEvent', () => {
     assert.match(text, /\n<\/bot-event>$/);
     assert.match(text, /not user input/i);
     assert.match(text, /The bot restarted\./);
+  });
+});
+
+describe('backgroundReportNote', () => {
+  it('names a scheduled task, its model, and quotes the report', () => {
+    const note = backgroundReportNote({
+      source: 'cron',
+      label: 'Morning check',
+      model: 'test/m',
+      report: ' all good ',
+    });
+    assert.equal(note?.kind, 'scheduled-task');
+    assert.match(note?.text ?? '', /scheduled task "Morning check" ran on test\/m/);
+    assert.match(note?.text ?? '', /<background_report>\nall good\n<\/background_report>/);
+  });
+
+  it('describes a heartbeat message', () => {
+    const note = backgroundReportNote({ source: 'heartbeat', model: 'test/m', report: 'hi' });
+    assert.equal(note?.kind, 'heartbeat');
+    assert.match(note?.text ?? '', /heartbeat run on test\/m/);
+  });
+
+  it('names the command a background-bash report came from', () => {
+    const note = backgroundReportNote({
+      source: 'background-bash-report',
+      label: 'npm test',
+      report: 'tests failed',
+    });
+    assert.equal(note?.kind, 'background-bash');
+    assert.match(note?.text ?? '', /background command "npm test"/);
+    assert.match(note?.text ?? '', /tests failed/);
+  });
+
+  it('has nothing to say about chat-session replies', () => {
+    assert.equal(backgroundReportNote({ source: 'telegram', report: 'x' }), null);
+    assert.equal(backgroundReportNote({ source: undefined, report: 'x' }), null);
   });
 });
 

@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import {
   createLocalBashOperations,
   type ExtensionAPI,
+  type ExtensionContext,
   formatSize,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
@@ -18,9 +19,10 @@ import {
   BACKGROUND_BASH_STOP_WAIT_MS,
 } from './config.ts';
 import { type Job, JobRegistry } from './job-registry.ts';
-import { BoundedOutputBuffer } from './output-buffer.ts';
+import { BoundedOutputBuffer, type OutputSnapshot } from './output-buffer.ts';
 import { textResult } from './tool-result.ts';
-import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
+import type { IncomingPrompt, SessionKind } from './types.ts';
+import { clamp, errorMessage, formatDuration, formatModelRef, sleep } from './util.ts';
 
 /**
  * Background bash sessions for the Pi agent: start long-running shell commands
@@ -32,6 +34,11 @@ import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
  * extensions under extensions/ get fresh module state per Pi session and cannot
  * own running child processes.
  *
+ * Both Pi sessions can start commands, so each session records which one did
+ * and the model it was on. The completion report is routed back there: a
+ * command a scheduled task started reports to the background session that
+ * remembers starting it, not to the chat.
+ *
  * Lifecycle bookkeeping (IDs, pruning, stopping, report delivery) lives in
  * src/job-registry.ts. Tuning knobs live in src/config.ts under
  * "Background work".
@@ -39,9 +46,17 @@ import { clamp, errorMessage, formatDuration, sleep } from './util.ts';
 
 type BackgroundBashTerminalStatus = 'exited' | 'stopped' | 'failed';
 
+/** Where a command was started from, so its report can find its way back. */
+interface BackgroundBashOrigin {
+  session: SessionKind;
+  /** Model the starting turn ran on, as provider/model, when the SDK exposed one. */
+  model?: string;
+}
+
 interface BackgroundBashSession extends Job<BackgroundBashTerminalStatus> {
   command: string;
   cwd: string;
+  origin: BackgroundBashOrigin;
   output: BoundedOutputBuffer;
   abort: AbortController;
   exitCode: number | null;
@@ -51,6 +66,7 @@ export interface BackgroundBashReport {
   sessionId: string;
   command: string;
   cwd: string;
+  origin: BackgroundBashOrigin;
   outcome: string;
   output: string;
 }
@@ -73,8 +89,9 @@ const registry = new JobRegistry<
     sessionId: session.id,
     command: session.command,
     cwd: session.cwd,
+    origin: session.origin,
     outcome: describeReportOutcome(session),
-    output: formatOutputReportPreview(session),
+    output: formatReportOutput(session.output.snapshot(), session.id),
   }),
 });
 
@@ -120,7 +137,15 @@ const ListParams = Type.Object({});
 
 const StopAllParams = Type.Object({});
 
-export function backgroundBashExtension(pi: ExtensionAPI): void {
+/**
+ * Registers the background bash tools for one of the bot's sessions. `session`
+ * names which one, so every command started here reports back to it.
+ */
+export function backgroundBashExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+  return (pi) => registerBackgroundBashTools(pi, session);
+}
+
+function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKind): void {
   pi.registerTool({
     name: 'background_bash_start',
     label: 'Background Bash',
@@ -136,7 +161,7 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
     ],
     parameters: StartParams,
 
-    async execute(_toolCallId, params: Static<typeof StartParams>) {
+    async execute(_toolCallId, params: Static<typeof StartParams>, _signal, _onUpdate, ctx) {
       const runningCount = registry.runningCount();
       if (runningCount >= BACKGROUND_BASH_MAX_RUNNING) {
         return textResult(
@@ -156,7 +181,11 @@ export function backgroundBashExtension(pi: ExtensionAPI): void {
         BACKGROUND_BASH_MAX_YIELD_MS,
       );
 
-      const session = startSession(params.command, cwd, maxRuntimeMs);
+      const model = currentModel(ctx);
+      const session = startSession(params.command, cwd, maxRuntimeMs, {
+        session: originSession,
+        ...(model ? { model } : {}),
+      });
       await Promise.race([session.done, sleep(yieldTimeMs)]);
 
       if (session.status !== 'running') {
@@ -265,11 +294,24 @@ export async function stopAllBackgroundSessions(): Promise<void> {
   await registry.cancelAll();
 }
 
-function startSession(command: string, cwd: string, maxRuntimeMs: number): BackgroundBashSession {
+/** The model the starting turn is on, as provider/model, or undefined when the SDK has none. */
+function currentModel(ctx: ExtensionContext): string | undefined {
+  return ctx.model
+    ? formatModelRef({ provider: ctx.model.provider, model: ctx.model.id })
+    : undefined;
+}
+
+function startSession(
+  command: string,
+  cwd: string,
+  maxRuntimeMs: number,
+  origin: BackgroundBashOrigin,
+): BackgroundBashSession {
   const session: BackgroundBashSession = {
     id: registry.allocateId(),
     command,
     cwd,
+    origin,
     startedAt: Date.now(),
     endedAt: null,
     output: new BoundedOutputBuffer('pi-background-bash'),
@@ -366,7 +408,37 @@ function formatOutputSnapshot(session: BackgroundBashSession): string {
   return `${text}\n\n${notice}`;
 }
 
-export function formatBackgroundBashReportPrompt(report: BackgroundBashReport): string {
+/**
+ * The prompt that delivers a completion report, addressed to the session that
+ * started the command. A report bound for the background session also pins the
+ * model that session was on when it started the command, since that session has
+ * no default model and a later scheduled task may have moved it elsewhere. The
+ * chat session keeps whatever model the user has selected since.
+ */
+export function backgroundBashReportPrompt(report: BackgroundBashReport): IncomingPrompt {
+  const { session, model } = report.origin;
+  return {
+    text: formatBackgroundBashReportPrompt(report),
+    attachments: [],
+    source: 'background-bash-report',
+    session,
+    suppressNoop: true,
+    label: shortCommand(report.command),
+    ...(session === 'background' && model ? { model } : {}),
+  };
+}
+
+const REPORT_LABEL_MAX_CHARS = 80;
+
+/** The command on one line, cut to fit a note that names it. */
+function shortCommand(command: string): string {
+  const oneLine = command.replace(/\s+/g, ' ').trim();
+  return oneLine.length <= REPORT_LABEL_MAX_CHARS
+    ? oneLine
+    : `${oneLine.slice(0, REPORT_LABEL_MAX_CHARS - 1)}…`;
+}
+
+function formatBackgroundBashReportPrompt(report: BackgroundBashReport): string {
   return buildAgentEnvelope({
     preamble: `[background-bash-report] Background bash ${report.sessionId} ${report.outcome}.`,
     sections: [
@@ -382,14 +454,50 @@ export function formatBackgroundBashReportPrompt(report: BackgroundBashReport): 
   });
 }
 
-function formatOutputReportPreview(session: BackgroundBashSession): string {
-  const snapshot = session.output.snapshot();
-  const output =
-    extractResultFromJsonOutput(snapshot.content.trimEnd()) ?? formatOutputSnapshot(session);
-  if (output.length <= BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS) return output;
+/**
+ * The output section of a completion report. Keeps the end of the output: a
+ * failed build or test run puts its error last, so the tail is what tells the
+ * agent what happened. Empty output is left to the envelope's fallback.
+ *
+ * The snapshot is already the buffer's bounded tail; the report clips it
+ * further to its own budget. Any cut is announced up front, before the agent
+ * reads a line that may start mid-way.
+ */
+export function formatReportOutput(snapshot: OutputSnapshot, sessionId: string): string {
+  const content = snapshot.content.trimEnd();
+  const output = extractResultFromJsonOutput(content) ?? content;
+  if (!output) return '';
 
-  const head = output.slice(0, BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS);
-  return `${head}\n[Truncated for report: showing first ${head.length} chars. Use background_bash_read with session_id "${session.id}" for more.]`;
+  const tail = tailChars(output, BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS);
+  const clipped = tail.length < output.length;
+  if (!clipped && !snapshot.truncated) return output;
+
+  const details: string[] = [];
+  if (clipped) details.push(`showing the last ${tail.length} of ${output.length} chars`);
+  if (snapshot.truncated) {
+    details.push(`${snapshot.totalLines} lines, ${formatSize(snapshot.totalBytes)} in total`);
+    if (snapshot.fullOutputPath) details.push(`full output: ${snapshot.fullOutputPath}`);
+  }
+  const notice = `[Truncated for report: ${details.join('; ')}. Use background_bash_read with session_id "${sessionId}" for more.]`;
+  return `${notice}\n${tail}`;
+}
+
+/**
+ * The last maxChars of text. Starts on a whole line when one begins within the
+ * first half of the window, so a partial first line is only kept for output
+ * that is one enormous line. Never splits a surrogate pair.
+ */
+function tailChars(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+
+  let start = text.length - maxChars;
+  const newline = text.indexOf('\n', start);
+  if (newline !== -1 && newline + 1 < text.length && newline - start < maxChars / 2) {
+    start = newline + 1;
+  }
+  const code = text.charCodeAt(start);
+  if (code >= 0xdc00 && code <= 0xdfff) start++;
+  return text.slice(start);
 }
 
 function extractResultFromJsonOutput(output: string): string | null {
