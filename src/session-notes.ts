@@ -126,3 +126,29 @@ export function lastSessionEventKind(manager: SessionManager): SessionEventKind 
   const details = last.details as Partial<SessionEventDetails> | undefined;
   return details?.kind ?? null;
 }
+
+/**
+ * Marks a transcript whose conversation was ended by /new or start_new_session.
+ * A plain custom entry rather than a note: it is for the bot, not the model, so
+ * it never enters the context.
+ *
+ * The replacement conversation lives only in memory until its first assistant
+ * message, which is when the SDK first writes a session file, and the request to
+ * start it lives only in memory too. A restart in between would otherwise resume
+ * the conversation that was just ended, since it is still the newest file on
+ * disk. The marker is what survives: a marked transcript is never resumed.
+ */
+export const CONVERSATION_CLEARED_TYPE = 'telegram-bot-conversation-cleared';
+
+/** Appends the cleared marker, once. */
+export function markConversationCleared(manager: SessionManager): void {
+  if (isConversationCleared(manager)) return;
+  manager.appendCustomEntry(CONVERSATION_CLEARED_TYPE, { clearedAt: new Date().toISOString() });
+}
+
+/** True when the transcript carries the cleared marker anywhere in its tree. */
+export function isConversationCleared(manager: Pick<SessionManager, 'getEntries'>): boolean {
+  return manager
+    .getEntries()
+    .some((entry) => entry.type === 'custom' && entry.customType === CONVERSATION_CLEARED_TYPE);
+}

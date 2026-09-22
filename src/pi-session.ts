@@ -29,7 +29,9 @@ import {
 import { backgroundBashExtension } from './background-bash.ts';
 import {
   appendSessionEvent,
+  isConversationCleared,
   lastSessionEventKind,
+  markConversationCleared,
   type SessionEventKind,
 } from './session-notes.ts';
 import { formatToolStartNotification } from './tool-notifications.ts';
@@ -535,6 +537,7 @@ export class SdkPiSession {
   async requestNewSession(task?: string): Promise<string> {
     this.pendingNewSessionRequest = true;
     this.pendingNewSessionTask = task?.trim() || null;
+    await this.markConversationCleared();
     return this.pendingNewSessionTask
       ? `Fresh session queued using ${this.modelName}. The provided task will run automatically in the new Pi conversation after the current response finishes.`
       : `Fresh session queued using ${this.modelName}. The next user message will start a new Pi conversation.`;
@@ -572,7 +575,8 @@ export class SdkPiSession {
    * carry its own leaf pointer, and appending through it would branch the tree
    * away from where the running agent is writing. With no live session there is
    * nothing to desynchronise, so the file is opened just long enough to append.
-   * A chat that has never had a session has nothing to annotate.
+   * A chat that has never had a session, or whose last conversation was cleared
+   * and whose next one has not started, has nothing to annotate.
    */
   async noteEvent(kind: SessionEventKind, text: string): Promise<void> {
     try {
@@ -596,7 +600,11 @@ export class SdkPiSession {
     }
   }
 
-  /** Opens this chat's most recent session file without starting an agent. */
+  /**
+   * Opens the conversation this chat would resume, without starting an agent:
+   * the most recent session file, unless /new or start_new_session marked it
+   * cleared. Null when there is nothing to resume.
+   */
   private async openStoredSessionManager(): Promise<SessionManager | null> {
     const existing = await findMostRecentSessionForId(
       this.runtime.cwd,
@@ -604,7 +612,23 @@ export class SdkPiSession {
       buildTelegramSessionId(this.runtime.sessionPrefix),
     );
     if (!existing) return null;
-    return SessionManager.open(existing.path, this.runtime.sessionDir, this.runtime.cwd);
+    const manager = SessionManager.open(existing.path, this.runtime.sessionDir, this.runtime.cwd);
+    return isConversationCleared(manager) ? null : manager;
+  }
+
+  /**
+   * Marks the conversation being replaced, so a restart before its successor
+   * reaches disk starts fresh instead of resuming it. Written when the swap is
+   * requested, not when it is applied: until then the request is only in memory.
+   */
+  private async markConversationCleared(): Promise<void> {
+    try {
+      const manager = this.session?.sessionManager ?? (await this.openStoredSessionManager());
+      if (manager) markConversationCleared(manager);
+    } catch (error) {
+      // /new must still work; only its survival across a restart is lost.
+      console.error('Failed to mark conversation cleared:', error);
+    }
   }
 
   reset(): void {
@@ -716,21 +740,13 @@ export class SdkPiSession {
   }
 
   private async createSessionManager(): Promise<SessionManager> {
-    const sessionId = buildTelegramSessionId(this.runtime.sessionPrefix);
-
     if (!this.forceNewSessionOnNextStart) {
-      const existingSession = await findMostRecentSessionForId(
-        this.runtime.cwd,
-        this.runtime.sessionDir,
-        sessionId,
-      );
-      if (existingSession) {
-        return SessionManager.open(existingSession.path, this.runtime.sessionDir, this.runtime.cwd);
-      }
+      const stored = await this.openStoredSessionManager();
+      if (stored) return stored;
     }
 
     return SessionManager.create(this.runtime.cwd, this.runtime.sessionDir, {
-      id: sessionId,
+      id: buildTelegramSessionId(this.runtime.sessionPrefix),
     });
   }
 

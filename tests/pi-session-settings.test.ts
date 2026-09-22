@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import { SettingsManager } from '@earendil-works/pi-coding-agent';
+import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { SdkPiSession, type PiRuntime } from '../src/pi-session.ts';
+import { isConversationCleared } from '../src/session-notes.ts';
 
 /** Exercise the bot/SDK boundary without credentials, filesystem writes, or network. */
 function fixture() {
@@ -135,4 +136,13 @@ test('temporary background model selection leaves chat defaults untouched', asyn
   assert.equal(f.settings.getDefaultModel(), 'old');
   assert.equal(f.settings.getDefaultThinkingLevel(), 'low');
   assert.deepEqual(f.calls, ['dispose']);
+});
+
+test('requesting a new session marks the live conversation cleared', async () => {
+  const { pi, session } = fixture();
+  const sessionManager = SessionManager.inMemory('/work');
+  Object.assign(session, { sessionManager });
+  await pi.requestNewSession('follow-up');
+  assert.equal(isConversationCleared(sessionManager), true);
+  assert.equal(pi.consumePendingNewSessionTask(), 'follow-up');
 });

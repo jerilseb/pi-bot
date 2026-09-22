@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 import {
+  appendSessionEvent,
   backgroundReportNote,
   formatSessionEvent,
+  isConversationCleared,
   lastSessionEventKind,
+  markConversationCleared,
   SESSION_EVENT_TYPE,
   type SessionEventKind,
 } from '../src/session-notes.ts';
@@ -113,5 +117,37 @@ describe('lastSessionEventKind', () => {
 
   it('treats an empty session as unmarked', () => {
     assert.equal(lastSessionEventKind(manager([])), null);
+  });
+});
+
+describe('conversation cleared marker', () => {
+  it('marks a transcript once, however often it is cleared', () => {
+    const sm = SessionManager.inMemory('/work');
+    assert.equal(isConversationCleared(sm), false);
+    markConversationCleared(sm);
+    markConversationCleared(sm);
+    assert.equal(isConversationCleared(sm), true);
+    assert.equal(sm.getEntries().filter((e) => e.type === 'custom').length, 1);
+  });
+
+  it('stays out of the model context', () => {
+    const sm = SessionManager.inMemory('/work');
+    markConversationCleared(sm);
+    assert.deepEqual(sm.buildSessionContext().messages, []);
+  });
+
+  it('is still found after notes written on top of it', () => {
+    const sm = SessionManager.inMemory('/work');
+    markConversationCleared(sm);
+    appendSessionEvent(sm, 'restart', 'The bot restarted.');
+    assert.equal(isConversationCleared(sm), true);
+    // The unclean-exit check reads the last entry, which is still the restart note.
+    assert.equal(lastSessionEventKind(sm), 'restart');
+  });
+
+  it('is not confused with a bot note', () => {
+    const sm = SessionManager.inMemory('/work');
+    appendSessionEvent(sm, 'abort', 'The user aborted.');
+    assert.equal(isConversationCleared(sm), false);
   });
 });
