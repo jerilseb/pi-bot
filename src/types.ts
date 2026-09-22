@@ -85,6 +85,12 @@ export interface IncomingPrompt {
   session?: SessionKind;
   suppressNoop?: boolean;
   /**
+   * Checked when the prompt reaches the front of its queue, not when it is
+   * queued; true drops it without a run. A completion report sets it so a result
+   * the agent read while the report waited is not delivered a second time.
+   */
+  isSuperseded?: () => boolean;
+  /**
    * Model to run this prompt on, as provider/model. Set by heartbeat and cron so
    * each background run uses its own model regardless of what ran before it;
    * Telegram prompts leave it unset and use the chat's current model.

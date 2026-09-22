@@ -186,9 +186,11 @@ test('a job still running after the yield is backgrounded and reports once when 
   assert.match(prompt.text, /^\[subagent-report\] Sub-agent job sub_/);
   assert.match(prompt.text, /<subagent_result>\nsecond result\n<\/subagent_result>/);
   assert.match(prompt.text, /__SUBAGENT_NOOP__/);
+  assert.equal(prompt.isSuperseded?.(), false, 'a read while running does not count');
 
   const done = await f.text(f.call('subagent_read', { job_id: jobId }));
   assert.match(done, /### Task 2 — succeeded/);
+  assert.equal(prompt.isSuperseded?.(), true, 'the queued report is no longer needed');
 });
 
 test('a report from the background session pins the model it started on', async (t) => {

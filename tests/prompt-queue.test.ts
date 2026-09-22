@@ -209,6 +209,27 @@ test('completion reports are admitted when the queue is full', async (t) => {
   assert.ok(!f.messages.some((text) => text.includes('Queue full')));
 });
 
+test('a queued report whose result was read meanwhile is dropped when its turn comes', async (t) => {
+  const f = setup(t);
+  await f.send('poll the command');
+  let read = false;
+  const report = (text: string, isSuperseded: () => boolean): Promise<void> =>
+    f.queue.handleIncoming({
+      text,
+      attachments: [],
+      source: 'background-bash-report',
+      suppressNoop: true,
+      isSuperseded,
+    });
+  await report('bg_1 finished', () => read);
+  await report('bg_2 finished', () => false);
+  // Queued before the agent read the result, so the check has to wait until now.
+  read = true;
+  f.gate.resolve();
+  await until(() => !f.queue.isAssistantBusy());
+  assert.deepEqual(f.runs, ['poll the command', 'bg_2 finished']);
+});
+
 test('late steering is replayed before fallback queued prompts', async (t) => {
   const f = setup(t);
   await f.send('first');

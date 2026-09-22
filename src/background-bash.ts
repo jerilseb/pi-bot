@@ -54,7 +54,6 @@ type BackgroundBashTerminalStatus = 'exited' | 'stopped' | 'failed';
 interface BackgroundBashSession extends Job<BackgroundBashTerminalStatus> {
   command: string;
   cwd: string;
-  origin: JobOrigin;
   output: BoundedOutputBuffer;
   abort: AbortController;
   exitCode: number | null;
@@ -153,7 +152,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
       'Run long-lived shell commands (dev servers, watchers, long builds) with background_bash_start instead of blocking bash.',
     promptGuidelines: [
       'Use the normal bash tool for short commands that complete quickly; use background_bash_start for dev servers, file watchers, long builds, tail -f, or when the user asks to run something in the background.',
-      'After starting a background command, keep the session ID and poll it with background_bash_read when you need progress or final output.',
+      'After starting a background command, keep the session ID and poll it with background_bash_read when you need progress or final output. Once a read has shown the finished result, no completion report follows.',
       'Background commands have no stdin: anything that might prompt must use non-interactive flags (--yes, CI=true, DEBIAN_FRONTEND=noninteractive) or it will fail fast on stdin EOF.',
       'Stop background sessions with background_bash_stop when they are no longer needed.',
     ],
@@ -199,7 +198,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
           `Command: ${session.command}`,
           `Cwd: ${session.cwd}`,
           `Status: running (max runtime ${formatDuration(maxRuntimeMs)})`,
-          `Poll with background_bash_read using session_id "${session.id}"; an internal [background-bash-report] message with the result is delivered to the chat agent when it finishes.`,
+          `Poll with background_bash_read using session_id "${session.id}"; an internal [background-bash-report] message with the result is delivered to you when it finishes, unless you have already read the finished result.`,
           'Output so far:',
           formatOutputSnapshot(session),
         ].join('\n'),
@@ -217,6 +216,8 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
     async execute(_toolCallId, params: Static<typeof ReadParams>) {
       const session = registry.get(params.session_id);
       if (!session) return textResult(registry.unknownJobMessage(params.session_id));
+      // The whole buffered tail is returned below, at least as much as a report carries.
+      registry.markResultRead(session, originSession);
 
       return textResult(
         [
@@ -310,6 +311,7 @@ function startSession(
     status: 'running',
     statusDetail: null,
     backgrounded: false,
+    resultRead: false,
     done: Promise.resolve(),
   };
 
@@ -404,6 +406,7 @@ export function backgroundBashReportPrompt(report: BackgroundBashReport): Incomi
     text: formatBackgroundBashReportPrompt(report),
     source: 'background-bash-report',
     label: oneLineLabel(report.command, REPORT_LABEL_MAX_CHARS),
+    isSuperseded: () => registry.isReportSuperseded(report.sessionId),
   });
 }
 

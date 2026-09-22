@@ -102,7 +102,6 @@ interface SubagentTask {
 }
 
 interface SubagentJob extends Job<SubagentTerminalStatus> {
-  origin: JobOrigin;
   tasks: SubagentTask[];
   abort: AbortController;
   maxRuntimeMs: number;
@@ -259,7 +258,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     promptGuidelines: [
       'Use subagent_run for work that splits into independent pieces, or for a long investigation whose details you do not need in this conversation. Do the work yourself when it is short or depends on back-and-forth with the user.',
       'Workers see only their task text. Put every fact, path, constraint, and the expected shape of the answer into each task; never assume a worker knows what the user said.',
-      'After a job is backgrounded, keep the job ID and poll it with subagent_read when you need results; an internal [subagent-report] message with the results is delivered to you when the job finishes.',
+      'After a job is backgrounded, keep the job ID and poll it with subagent_read when you need results; an internal [subagent-report] message with the results is delivered to you when the job finishes, unless a read has already shown them.',
       'Workers cannot contact the user and cannot start sub-agents of their own. Relay their results to the user yourself.',
       'Stop jobs you no longer need with subagent_stop.',
     ],
@@ -335,7 +334,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
             text: [
               `Started sub-agent job ${job.id} with ${job.tasks.length} task${job.tasks.length === 1 ? '' : 's'}; still running after ${formatDuration(yieldTimeMs)}.`,
               `Max runtime: ${formatDuration(maxRuntimeMs)}.`,
-              `Poll with subagent_read using job_id "${job.id}"; an internal [subagent-report] message with the results is delivered to you when it finishes.`,
+              `Poll with subagent_read using job_id "${job.id}"; an internal [subagent-report] message with the results is delivered to you when it finishes, unless you have already read the finished results.`,
               '',
               formatTaskStatusList(job),
             ].join('\n'),
@@ -356,11 +355,14 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     async execute(_toolCallId, params: Static<typeof JobIdParams>) {
       const job = registry.get(params.job_id);
       if (!job) return textResult(registry.unknownJobMessage(params.job_id));
-      return textResult(
-        job.status === 'running'
-          ? [`Job ${job.id}`, registry.statusLine(job), '', formatTaskStatusList(job)].join('\n')
-          : formatJobResult(job),
-      );
+      if (job.status === 'running') {
+        return textResult(
+          [`Job ${job.id}`, registry.statusLine(job), '', formatTaskStatusList(job)].join('\n'),
+        );
+      }
+      // The same clipped results the report would carry.
+      registry.markResultRead(job, origin);
+      return textResult(formatJobResult(job));
     },
   });
 
@@ -505,6 +507,7 @@ function startJob(
     status: 'running',
     statusDetail: null,
     backgrounded: false,
+    resultRead: false,
     done: Promise.resolve(),
   };
 
@@ -676,6 +679,7 @@ export function subagentReportPrompt(report: SubagentReport): IncomingPrompt {
     text: formatSubagentReportPrompt(report),
     source: 'subagent-report',
     label: reportLabel(report),
+    isSuperseded: () => registry.isReportSuperseded(report.jobId),
   });
 }
 

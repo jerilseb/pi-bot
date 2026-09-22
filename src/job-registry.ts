@@ -13,8 +13,9 @@ import { errorMessage, formatDuration, sleep } from './util.ts';
  *
  * This module owns the parts that are not specific to a kind of job — ID
  * allocation, the yield-then-background step, TTL pruning, cancellation, and
- * report delivery including where a report is routed — while the caller keeps
- * its own status vocabulary and user-facing wording.
+ * report delivery including where a report is routed and whether it is still
+ * needed — while the caller keeps its own status vocabulary and user-facing
+ * wording.
  *
  * A registry lives at module level in src/ (imported once by Node), so it is
  * shared for the lifetime of the bot process. Jobs do not survive bot restarts;
@@ -43,7 +44,13 @@ export function captureJobOrigin(ctx: ExtensionContext, session: SessionKind): J
  */
 export function jobReportPrompt(
   origin: JobOrigin,
-  report: { text: string; source: JobReportSource; label: string },
+  report: {
+    text: string;
+    source: JobReportSource;
+    label: string;
+    /** Whether the agent has already read the result, checked when the report is about to run. */
+    isSuperseded: () => boolean;
+  },
 ): IncomingPrompt {
   const { session, model } = origin;
   return {
@@ -53,6 +60,7 @@ export function jobReportPrompt(
     session,
     suppressNoop: true,
     label: report.label,
+    isSuperseded: report.isSuperseded,
     ...(session === 'background' && model ? { model } : {}),
   };
 }
@@ -62,12 +70,19 @@ export type JobStatus<TTerminal extends string> = 'running' | TTerminal;
 
 export interface Job<TTerminal extends string> {
   id: string;
+  origin: JobOrigin;
   status: JobStatus<TTerminal>;
   statusDetail: string | null;
   startedAt: number;
   endedAt: number | null;
   /** True once start returned an ID to the agent; gates the completion report. */
   backgrounded: boolean;
+  /**
+   * True once the session that started the job read its settled result. The
+   * completion report is then redundant: it would only repeat what the agent
+   * already acted on.
+   */
+  resultRead: boolean;
   done: Promise<void>;
 }
 
@@ -181,6 +196,25 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   cancelAll(): Promise<number> {
     return this.cancel([...this.jobs.values()]);
+  }
+
+  /**
+   * Records that `reader` saw the job's final result. Only a settled job counts,
+   * since a running one has no result yet, and only a read from the session the
+   * report is addressed to: a result the other session read is still news there.
+   */
+  markResultRead(job: TJob, reader: SessionKind): void {
+    if (job.status !== 'running' && reader === job.origin.session) job.resultRead = true;
+  }
+
+  /**
+   * True when a queued report for this job need not run. Asked when the report
+   * reaches the front of the queue rather than when it is sent: an agent polling
+   * in the same turn usually reads the result after the report was queued. A
+   * pruned job reads as false, so a report is only ever dropped on evidence.
+   */
+  isReportSuperseded(id: string): boolean {
+    return this.jobs.get(id)?.resultRead ?? false;
   }
 
   /** Delivers a settled job's report unless it was cancelled or never backgrounded. */

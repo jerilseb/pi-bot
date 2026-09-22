@@ -120,6 +120,11 @@ export function createPromptQueue(options: {
     while (chat.queue.length > 0 && isRunning()) {
       const prompt = chat.queue.shift();
       if (!prompt) break;
+      if (prompt.isSuperseded?.()) {
+        console.log(`${prompt.source ?? 'prompt'} skipped, already handled: ${prompt.label ?? ''}`);
+        cleanupAttachments(prompt);
+        continue;
+      }
       chat.processing = true;
 
       const isBackground = isBackgroundPrompt(prompt);
