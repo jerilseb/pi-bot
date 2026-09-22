@@ -76,6 +76,24 @@ export class BoundedOutputBuffer {
     };
   }
 
+  /**
+   * The last line of output with visible text, for a one-line progress display.
+   * A carriage return ends a line too, so a progress bar redrawn in place shows
+   * its latest state, and terminal escape codes are dropped. Empty when nothing
+   * visible has been printed yet.
+   */
+  lastLine(): string {
+    let end = this.tail.length;
+    while (end > 0) {
+      const start =
+        Math.max(this.tail.lastIndexOf('\n', end - 1), this.tail.lastIndexOf('\r', end - 1)) + 1;
+      const line = stripTerminalEscapes(this.tail.slice(start, end)).trim();
+      if (line) return line;
+      end = start - 1;
+    }
+    return '';
+  }
+
   private totalLines(): number {
     return this.completedLines + (this.hasOpenLine ? 1 : 0);
   }
@@ -149,4 +167,18 @@ function tailByBytes(text: string, maxBytes: number): string {
     while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++;
   }
   return buf.subarray(start).toString('utf8');
+}
+
+// ESC-introduced terminal sequences: CSI (colours, cursor moves) and OSC
+// (titles, hyperlinks, ended by BEL or ST). Built from strings because a regex
+// literal would have to spell the control characters out.
+const ESC = '\u001b';
+const BEL = '\u0007';
+const TERMINAL_ESCAPE = new RegExp(
+  `${ESC}\\[[0-?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)?`,
+  'g',
+);
+
+function stripTerminalEscapes(text: string): string {
+  return text.replace(TERMINAL_ESCAPE, '');
 }

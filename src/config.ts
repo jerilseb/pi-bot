@@ -323,6 +323,12 @@ export const BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS = 3_000;
 export const BACKGROUND_BASH_COMPLETED_TTL_MS = 30 * 60_000;
 /** How long background_bash_stop waits for a signalled session to settle. */
 export const BACKGROUND_BASH_STOP_WAIT_MS = 5_000;
+/**
+ * How often the progress message of a backgrounded job started from the chat is
+ * refreshed (src/job-progress.ts). Each refresh is at most one Telegram edit and
+ * no model call; the elapsed time it shows means most refreshes do edit.
+ */
+export const JOB_PROGRESS_UPDATE_MS = 20_000;
 
 /** Jobs (one subagent_run call each) that may be running at once. */
 export const SUBAGENT_MAX_RUNNING_JOBS = 8;

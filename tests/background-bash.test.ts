@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   type BackgroundBashReport,
   backgroundBashReportPrompt,
+  formatBackgroundBashProgress,
   formatReportOutput,
 } from '../src/background-bash.ts';
 import { BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS } from '../src/config.ts';
@@ -116,4 +117,46 @@ test('a buffer that already spilled to disk is announced even when the tail fits
 test('a JSON result field is reported on its own', () => {
   const content = JSON.stringify({ result: '  the answer  ', other: 1 });
   assert.equal(formatReportOutput(snapshot(content), 'bg_1'), 'the answer');
+});
+
+function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
+  return formatBackgroundBashProgress({
+    id: 'bg_1',
+    command: 'uv pip install\n  "vllm==0.16.0"',
+    status: 'running',
+    exitCode: null,
+    statusDetail: null,
+    startedAt: Date.now() - 372_000,
+    endedAt: null,
+    output: { lastLine: () => 'Downloading vllm (484.8MiB)' },
+    ...overrides,
+  });
+}
+
+test('the progress message shows status, runtime, the command on one line, and the latest output', () => {
+  const html = progressSession({});
+  const [header, command, output] = html.split('\n');
+  assert.equal(header, '⏳ <b>Background command</b> · running · 6m 12s');
+  assert.equal(command, '<code>bg_1</code> · <code>uv pip install "vllm==0.16.0"</code>');
+  assert.equal(output, '<i>Downloading vllm (484.8MiB)</i>');
+});
+
+test('the progress message ends on the outcome', () => {
+  const ended = { startedAt: 0, endedAt: 663_000 };
+  assert.match(
+    progressSession({ ...ended, status: 'exited', exitCode: 0 }),
+    /^✅ <b>Background command<\/b> · exited with code 0 · 11m 3s/,
+  );
+  assert.match(progressSession({ ...ended, status: 'exited', exitCode: 2 }), /^❌ .* code 2/);
+  assert.match(progressSession({ ...ended, status: 'stopped' }), /^⏹ .* stopped/);
+  assert.match(
+    progressSession({ ...ended, status: 'failed', statusDetail: 'spawn failed' }),
+    /^❌ .* failed \(spawn failed\)/,
+  );
+});
+
+test('output in the progress message is escaped, and absent until there is some', () => {
+  const html = progressSession({ output: { lastLine: () => '<b>1 < 2</b> & more' } });
+  assert.match(html, /<i>&lt;b&gt;1 &lt; 2&lt;\/b&gt; &amp; more<\/i>$/);
+  assert.equal(progressSession({ output: { lastLine: () => '' } }).split('\n').length, 2);
 });

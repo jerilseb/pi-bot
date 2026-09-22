@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { currentModel } from './extension-models.ts';
+import {
+  type ProgressMessage,
+  type ProgressMessageOptions,
+  startProgressMessage,
+} from './job-progress.ts';
 import type { IncomingPrompt, JobReportSource, SessionKind } from './types.ts';
 import { errorMessage, formatDuration, sleep } from './util.ts';
 
@@ -14,8 +19,8 @@ import { errorMessage, formatDuration, sleep } from './util.ts';
  * This module owns the parts that are not specific to a kind of job — ID
  * allocation, the yield-then-background step, TTL pruning, cancellation, and
  * report delivery including where a report is routed and whether it is still
- * needed — while the caller keeps its own status vocabulary and user-facing
- * wording.
+ * needed, and the live progress message of a backgrounded job — while the
+ * caller keeps its own status vocabulary and user-facing wording.
  *
  * A registry lives at module level in src/ (imported once by Node), so it is
  * shared for the lifetime of the bot process. Jobs do not survive bot restarts;
@@ -111,12 +116,20 @@ export interface JobRegistryOptions<
   describeStatus: (job: TJob) => string;
   /** Projects a settled job into the report delivered to the chat agent. */
   buildReport: (job: TJob) => TReport;
+  /**
+   * Renders the job's progress message as Telegram HTML, for both the running
+   * and the final state. Without it, backgrounded jobs show no progress.
+   */
+  renderProgress?: (job: TJob) => string;
+  /** Overrides the progress transport and refresh interval; for tests. */
+  progressOptions?: ProgressMessageOptions;
 }
 
 export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, TReport> {
   private readonly jobs = new Map<string, TJob>();
   private readonly options: JobRegistryOptions<TTerminal, TJob, TReport>;
   private reportHandler: ((report: TReport) => Promise<void>) | null = null;
+  private readonly progress = new Map<string, ProgressMessage>();
 
   constructor(options: JobRegistryOptions<TTerminal, TJob, TReport>) {
     this.options = options;
@@ -172,7 +185,42 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
       return false;
     }
     job.backgrounded = true;
+    this.startProgress(job);
     return true;
+  }
+
+  /**
+   * Called once when a job reaches its terminal status, from the runner's
+   * settle path: shows the final state in its progress message, then delivers
+   * the report. In that order, so the report's reply cannot land first.
+   */
+  async settled(job: TJob): Promise<void> {
+    await this.finishProgress([job]);
+    await this.reportEnd(job);
+  }
+
+  /**
+   * Progress is shown only for jobs the chat started. A job from the background
+   * session belongs to an unattended run whose own output is noted, not watched.
+   */
+  private startProgress(job: TJob): void {
+    const render = this.options.renderProgress;
+    if (!render || job.origin.session !== 'chat') return;
+    this.progress.set(
+      job.id,
+      startProgressMessage(() => render(job), this.options.progressOptions),
+    );
+  }
+
+  private async finishProgress(jobs: TJob[]): Promise<void> {
+    const pending: Promise<void>[] = [];
+    for (const job of jobs) {
+      const progress = this.progress.get(job.id);
+      if (!progress) continue;
+      this.progress.delete(job.id);
+      pending.push(progress.finish());
+    }
+    await Promise.all(pending);
   }
 
   /**
@@ -191,6 +239,10 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
         sleep(this.options.cancelWaitMs),
       ]);
     }
+    // Awaited here as well as on settle: at shutdown the process may exit
+    // before a runner's settle path runs, and a message left saying "running"
+    // would be wrong for good.
+    await this.finishProgress(running);
     return running.length;
   }
 
@@ -218,7 +270,7 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
   }
 
   /** Delivers a settled job's report unless it was cancelled or never backgrounded. */
-  async reportEnd(job: TJob): Promise<void> {
+  private async reportEnd(job: TJob): Promise<void> {
     if (!job.backgrounded || job.status === this.options.cancelledStatus) return;
 
     if (!this.reportHandler) {

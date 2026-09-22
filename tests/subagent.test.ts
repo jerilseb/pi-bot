@@ -94,6 +94,13 @@ function setup(t: TestContext, origin: SessionKind = 'chat') {
   setSubagentReportHandler(async (report) => {
     reports.push(report);
   });
+  // Backgrounded chat jobs keep a progress message; capture it instead of sending.
+  const telegram: Array<{ method: string; text: string }> = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    const payload = JSON.parse(String(init?.body ?? '{}')) as { text?: string };
+    telegram.push({ method: String(url).split('/').pop() ?? '', text: payload.text ?? '' });
+    return Response.json({ ok: true, result: { message_id: telegram.length } });
+  });
   t.after(() => stopAllSubagents());
 
   const call = (name: string, params: unknown, signal?: AbortSignal, context = ctx()) => {
@@ -103,7 +110,7 @@ function setup(t: TestContext, origin: SessionKind = 'chat') {
   };
   const text = async (result: Promise<{ content: Array<{ type: string; text?: string }> }>) =>
     (await result).content.map((c) => c.text ?? '').join('\n');
-  return { worker, reports, call, text, tools };
+  return { worker, reports, call, text, tools, telegram };
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -190,6 +197,16 @@ test('a job still running after the yield is backgrounded and reports once when 
 
   const done = await f.text(f.call('subagent_read', { job_id: jobId }));
   assert.match(done, /### Task 2 — succeeded/);
+
+  // One progress message, sent when the job was backgrounded and edited to the
+  // outcome before the report was delivered.
+  assert.deepEqual(
+    f.telegram.map((call) => call.method),
+    ['sendMessage', 'editMessageText'],
+  );
+  assert.match(f.telegram[0]?.text ?? '', /^⏳ <b>Sub-agents<\/b> · running \(0\/2 tasks done\)/);
+  assert.match(f.telegram[0]?.text ?? '', /<code>first task \(\+1 more\)<\/code>/);
+  assert.match(f.telegram[1]?.text ?? '', /^✅ <b>Sub-agents<\/b> · succeeded \(2\/2 tasks\)/);
   assert.equal(prompt.isSuperseded?.(), true, 'the queued report is no longer needed');
 });
 
@@ -204,6 +221,8 @@ test('a report from the background session pins the model it started on', async 
   const prompt = subagentReportPrompt(f.reports[0]);
   assert.equal(prompt.session, 'background');
   assert.equal(prompt.model, 'test/chat-model');
+  // Unattended runs are not watched, so they get no progress message.
+  assert.deepEqual(f.telegram, []);
 });
 
 test('a failed worker fails the job and its error is in the report', async (t) => {
@@ -217,6 +236,10 @@ test('a failed worker fails the job and its error is in the report', async (t) =
   assert.match(f.reports[0].outcome, /^failed \(1 of 1 task failed\)/);
   assert.equal(f.reports[0].tasks[0]?.status, 'failed');
   assert.equal(f.reports[0].tasks[0]?.output, 'Error: boom');
+  assert.match(
+    f.telegram.at(-1)?.text ?? '',
+    /^❌ <b>Sub-agents<\/b> · failed \(1 of 1 task failed\)/,
+  );
 });
 
 test('subagent_stop aborts the workers and sends no report', async (t) => {
@@ -233,6 +256,8 @@ test('subagent_stop aborts the workers and sends no report', async (t) => {
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(f.reports.length, 0);
   assert.match(await f.text(f.call('subagent_stop', { job_id: jobId })), /not running/);
+  // The stop is shown even though no report follows.
+  assert.match(f.telegram.at(-1)?.text ?? '', /^⏹ <b>Sub-agents<\/b> · stopped/);
 });
 
 test('aborting the turn during the yield window stops the job', async (t) => {

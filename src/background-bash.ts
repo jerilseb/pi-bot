@@ -25,6 +25,7 @@ import {
   jobReportPrompt,
 } from './job-registry.ts';
 import { BoundedOutputBuffer, type OutputSnapshot } from './output-buffer.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
 import { textResult } from './tool-result.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
@@ -82,6 +83,7 @@ const registry = new JobRegistry<
   cancelledStatus: 'stopped',
   signalCancel: (session) => session.abort.abort(),
   describeStatus,
+  renderProgress: (session) => formatBackgroundBashProgress(session),
   buildReport: (session) => ({
     sessionId: session.id,
     command: session.command,
@@ -343,7 +345,7 @@ function startSession(
     .finally(() => {
       session.endedAt = Date.now();
       session.output.finish();
-      void registry.reportEnd(session);
+      void registry.settled(session);
     });
 
   registry.register(session);
@@ -366,7 +368,44 @@ function describeReportOutcome(session: BackgroundBashSession): string {
   return `${describeStatus(session)} after ${runtime}`;
 }
 
-function describeStatus(session: BackgroundBashSession): string {
+/** Display widths in the progress message. */
+const PROGRESS_COMMAND_MAX_CHARS = 80;
+const PROGRESS_OUTPUT_MAX_CHARS = 120;
+
+/**
+ * The progress message of a backgrounded command, as Telegram HTML: status and
+ * runtime, the command, and its latest line of output. Rendered for the final
+ * state too, so the same message ends on the outcome.
+ */
+export function formatBackgroundBashProgress(
+  session: Pick<
+    BackgroundBashSession,
+    'id' | 'command' | 'status' | 'exitCode' | 'statusDetail' | 'startedAt' | 'endedAt'
+  > & { output: Pick<BoundedOutputBuffer, 'lastLine'> },
+): string {
+  const icon =
+    session.status === 'running'
+      ? '⏳'
+      : session.status === 'exited' && session.exitCode === 0
+        ? '✅'
+        : session.status === 'stopped'
+          ? '⏹'
+          : '❌';
+  const runtime = formatDuration((session.endedAt ?? Date.now()) - session.startedAt);
+  const lines = [
+    `${icon} <b>Background command</b> · ${escapeTelegramHtml(describeStatus(session))} · ${runtime}`,
+    `<code>${session.id}</code> · <code>${escapeTelegramHtml(oneLineLabel(session.command, PROGRESS_COMMAND_MAX_CHARS))}</code>`,
+  ];
+  const lastLine = session.output.lastLine();
+  if (lastLine) {
+    lines.push(`<i>${escapeTelegramHtml(oneLineLabel(lastLine, PROGRESS_OUTPUT_MAX_CHARS))}</i>`);
+  }
+  return lines.join('\n');
+}
+
+function describeStatus(
+  session: Pick<BackgroundBashSession, 'status' | 'exitCode' | 'statusDetail'>,
+): string {
   switch (session.status) {
     case 'running':
       return 'running';

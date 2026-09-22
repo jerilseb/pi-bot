@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ProgressTransport } from '../src/job-progress.ts';
 import { captureJobOrigin, type Job, JobRegistry, jobReportPrompt } from '../src/job-registry.ts';
 import type { SessionKind } from '../src/types.ts';
 
@@ -13,7 +14,11 @@ import type { SessionKind } from '../src/types.ts';
 type Terminal = 'done' | 'cancelled';
 type TestJob = Job<Terminal> & { finish: () => void };
 
-function registry() {
+function registry(
+  extra: Partial<
+    ConstructorParameters<typeof JobRegistry<Terminal, TestJob, { id: string }>>[0]
+  > = {},
+) {
   return new JobRegistry<Terminal, TestJob, { id: string }>({
     idPrefix: 'job',
     jobNoun: 'test job',
@@ -25,7 +30,32 @@ function registry() {
     signalCancel: (job) => job.finish(),
     describeStatus: (job) => job.status,
     buildReport: (job) => ({ id: job.id }),
+    ...extra,
   });
+}
+
+/** A registry that renders progress into a fake transport. */
+function progressRegistry() {
+  const calls: Array<[method: string, text: string]> = [];
+  const transport: ProgressTransport = {
+    async send(html) {
+      calls.push(['send', html]);
+      return 1;
+    },
+    async edit(_id, html) {
+      calls.push(['edit', html]);
+    },
+  };
+  const reg = registry({
+    renderProgress: (job) => `${job.id} ${job.status}`,
+    progressOptions: { transport, intervalMs: 60_000 },
+  });
+  const reports: string[] = [];
+  reg.setReportHandler(async (report) => {
+    // The report must follow the final progress edit, never precede it.
+    reports.push(`${report.id} after ${calls.at(-1)?.[1] ?? 'nothing'}`);
+  });
+  return { reg, calls, reports };
 }
 
 function job(
@@ -139,6 +169,48 @@ test('the report prompt carries the check for when it is about to run', () => {
   assert.equal(prompt.isSuperseded?.(), false);
   read = true;
   assert.equal(prompt.isSuperseded?.(), true);
+});
+
+test('a backgrounded chat job shows progress that ends on its outcome before the report', async () => {
+  const { reg, calls, reports } = progressRegistry();
+  const j = job(reg);
+  assert.equal(await reg.settleOrBackground(j, 5), true);
+  j.finish();
+  await reg.settled(j);
+  assert.deepEqual(calls, [
+    ['send', `${j.id} running`],
+    ['edit', `${j.id} done`],
+  ]);
+  assert.deepEqual(reports, [`${j.id} after ${j.id} done`]);
+});
+
+test('a job that settles within the yield never gets a progress message', async () => {
+  const { reg, calls } = progressRegistry();
+  const j = job(reg);
+  setTimeout(() => j.finish(), 1);
+  assert.equal(await reg.settleOrBackground(j, 1_000), false);
+  await reg.settled(j);
+  assert.deepEqual(calls, []);
+});
+
+test('a job the background session started runs without a progress message', async () => {
+  const { reg, calls } = progressRegistry();
+  const j = job(reg, 'background');
+  assert.equal(await reg.settleOrBackground(j, 5), true);
+  j.finish();
+  await reg.settled(j);
+  assert.deepEqual(calls, []);
+});
+
+test('cancelling shows the stop even if the runner never settles in time', async () => {
+  const { reg, calls, reports } = progressRegistry();
+  const j = job(reg);
+  assert.equal(await reg.settleOrBackground(j, 5), true);
+  // A runner that ignores the signal, as at shutdown before the process exits.
+  j.finish = () => {};
+  await reg.cancel([j]);
+  assert.deepEqual(calls.at(-1), ['edit', `${j.id} cancelled`]);
+  assert.deepEqual(reports, []);
 });
 
 test('the origin records the session and the model the turn is on, when there is one', () => {

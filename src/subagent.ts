@@ -26,6 +26,7 @@ import {
   jobReportPrompt,
 } from './job-registry.ts';
 import { readSubagentSystemPrompt } from './system-prompt.ts';
+import { escapeTelegramHtml } from './telegram-html.ts';
 import { textResult } from './tool-result.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
@@ -142,6 +143,7 @@ const registry = new JobRegistry<SubagentTerminalStatus, SubagentJob, SubagentRe
   cancelledStatus: 'stopped',
   signalCancel: (job) => job.abort.abort(),
   describeStatus,
+  renderProgress: (job) => formatSubagentProgress(job),
   buildReport: (job) => ({
     jobId: job.id,
     origin: job.origin,
@@ -534,7 +536,7 @@ function startJob(
     .finally(() => {
       clearTimeout(timer);
       job.endedAt = Date.now();
-      void registry.reportEnd(job);
+      void registry.settled(job);
     });
 
   registry.register(job);
@@ -599,7 +601,30 @@ async function runTask(
   }
 }
 
-function describeStatus(job: SubagentJob): string {
+/**
+ * The progress message of a backgrounded job, as Telegram HTML: status with the
+ * tasks done so far, runtime, and what the job is about. Rendered for the final
+ * state too, so the same message ends on the outcome.
+ */
+export function formatSubagentProgress(
+  job: Pick<SubagentJob, 'id' | 'status' | 'statusDetail' | 'tasks' | 'startedAt' | 'endedAt'>,
+): string {
+  const icon =
+    job.status === 'running'
+      ? '⏳'
+      : job.status === 'succeeded'
+        ? '✅'
+        : job.status === 'stopped'
+          ? '⏹'
+          : '❌';
+  const runtime = formatDuration((job.endedAt ?? Date.now()) - job.startedAt);
+  return [
+    `${icon} <b>Sub-agents</b> · ${escapeTelegramHtml(describeStatus(job))} · ${runtime}`,
+    `<code>${job.id}</code> · <code>${escapeTelegramHtml(jobLabel(job))}</code>`,
+  ].join('\n');
+}
+
+function describeStatus(job: Pick<SubagentJob, 'status' | 'statusDetail' | 'tasks'>): string {
   switch (job.status) {
     case 'running': {
       const done = job.tasks.filter((task) => task.endedAt !== null).length;
