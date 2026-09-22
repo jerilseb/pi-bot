@@ -14,9 +14,10 @@ import {
 } from '../src/background-bash.ts';
 
 /**
- * background_bash_wait against real, short shell commands: what it returns and
- * when is the contract the agent relies on, and it depends on the command
- * actually streaming output. The commands only echo and sleep.
+ * background_bash_wait and background_bash_read against real, short shell
+ * commands: what they return and when is the contract the agent relies on, and
+ * it depends on the command actually streaming output. The commands only echo
+ * and sleep.
  */
 
 function setup(t: TestContext) {
@@ -96,4 +97,29 @@ test('an invalid until pattern is reported instead of waiting', async (t) => {
     await f.call('background_bash_wait', { session_id: id, until: '(' }),
     /^Invalid until pattern:/,
   );
+});
+
+test('a read returns only output not seen yet, under a one-line header', async (t) => {
+  const f = setup(t);
+  const id = await f.start('echo one; sleep 0.3; echo two; sleep 30');
+  const first = await f.call('background_bash_wait', { session_id: id, until: 'two' });
+  assert.match(first, /\none\ntwo$/);
+
+  const read = await f.call('background_bash_read', { session_id: id });
+  const [header] = read.split('\n');
+  assert.equal(header, `Session ${id}: echo one; sleep 0.3; echo two; sleep 30`);
+  assert.match(
+    read,
+    /New output since you last saw it:\n\(no new output since you last looked, \d+s ago\)$/,
+  );
+});
+
+test('mode tail returns the whole buffered output again', async (t) => {
+  const f = setup(t);
+  const id = await f.start('echo one; echo two; sleep 30');
+  await f.call('background_bash_wait', { session_id: id, until: 'two' });
+  const tail = await f.call('background_bash_read', { session_id: id, mode: 'tail' });
+  assert.match(tail, /\nOutput:\none\ntwo$/);
+  // A tail read counts as seeing everything, so the next default read is empty.
+  assert.match(await f.call('background_bash_read', { session_id: id }), /no new output/);
 });

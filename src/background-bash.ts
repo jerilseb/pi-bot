@@ -61,8 +61,10 @@ interface BackgroundBashSession extends Job<BackgroundBashTerminalStatus> {
   command: string;
   cwd: string;
   output: BoundedOutputBuffer;
-  /** Output position the agent has seen up to, so a wait returns only what is new. */
+  /** Output position the agent has seen up to, so reads and waits return only what is new. */
   outputSeen: number;
+  /** When outputSeen last moved, for "no new output since…". */
+  outputSeenAt: number;
   abort: AbortController;
   exitCode: number | null;
 }
@@ -134,6 +136,12 @@ const ReadParams = Type.Object({
   session_id: Type.String({
     description: 'Background session ID returned by background_bash_start.',
   }),
+  mode: Type.Optional(
+    Type.Union([Type.Literal('new'), Type.Literal('tail')], {
+      description:
+        '"new" (default): only output you have not seen yet. "tail": the whole buffered tail, e.g. to re-read output from earlier in this conversation.',
+    }),
+  ),
 });
 
 const WaitParams = Type.Object({
@@ -183,7 +191,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
       'Use the normal bash tool for short commands that complete quickly; use background_bash_start for dev servers, file watchers, long builds, tail -f, or when the user asks to run something in the background.',
       `If a background command may run longer than ${END_TURN_AFTER} in total, or is still running after that, end your turn instead of waiting: tell the user briefly what is running and what you will do once it finishes, then stop. The [background-bash-report] resumes you in this conversation with the result; continue the remaining steps then.`,
       `To wait for a command expected to finish within ${END_TURN_AFTER}, call background_bash_wait: it blocks without polling until the command finishes, its new output matches \`until\`, or the user sends a message, and returns only output you have not seen yet. If the wait times out with the command still running, end your turn as above.`,
-      'Never wait by polling background_bash_read or by sleeping in bash; background_bash_read is for inspecting output. Once a read or a wait has shown the finished result, no completion report follows.',
+      'Never wait by polling background_bash_read or by sleeping in bash; background_bash_read is for inspecting output, and returns only output you have not seen unless you pass mode "tail". Once a read or a wait has shown the finished result, no completion report follows.',
       'The user sees a live progress message for background commands started from the chat, so do not post progress updates yourself.',
       'Background commands have no stdin: anything that might prompt must use non-interactive flags (--yes, CI=true, DEBIAN_FRONTEND=noninteractive) or it will fail fast on stdin EOF.',
       'Stop background sessions with background_bash_stop when they are no longer needed.',
@@ -225,7 +233,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
       }
 
       const soFar = formatOutputSnapshot(session);
-      session.outputSeen = session.output.position;
+      markOutputSeen(session);
       return textResult(
         [
           `Started background bash session ${session.id}`,
@@ -244,23 +252,24 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
     name: 'background_bash_read',
     label: 'Read Background Bash',
     description:
-      'Read the buffered output and status of a background bash session started with background_bash_start. For inspecting output or diagnosing a problem; to wait for the command, use background_bash_wait.',
+      'Read the status and output of a background bash session started with background_bash_start: only output you have not seen yet, or the whole buffered tail with mode "tail". For inspecting output or diagnosing a problem; to wait for the command, use background_bash_wait.',
     parameters: ReadParams,
 
     async execute(_toolCallId, params: Static<typeof ReadParams>) {
       const session = registry.get(params.session_id);
       if (!session) return textResult(registry.unknownJobMessage(params.session_id));
-      // The whole buffered tail is returned below, at least as much as a report carries.
+      // Either mode leaves the agent having seen the output a report would carry:
+      // the whole tail, or what is new on top of what it already saw.
       registry.markResultRead(session, originSession);
-      const output = formatOutputSnapshot(session);
-      session.outputSeen = session.output.position;
+      const tail = params.mode === 'tail';
+      const output = tail ? formatOutputSnapshot(session) : formatUnseenOutput(session);
+      markOutputSeen(session);
 
       return textResult(
         [
-          `Session ${session.id}`,
-          `Command: ${session.command}`,
+          `Session ${session.id}: ${oneLineLabel(session.command, HEADER_COMMAND_MAX_CHARS)}`,
           registry.statusLine(session),
-          'Output:',
+          tail ? 'Output:' : 'New output since you last saw it:',
           output,
         ].join('\n'),
       );
@@ -307,7 +316,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
       // is then everything a report would add.
       registry.markResultRead(session, originSession);
       const unseen = formatUnseenOutput(session);
-      session.outputSeen = session.output.position;
+      markOutputSeen(session);
       return textResult(
         [
           `Session ${session.id}: ${describeWaitOutcome(outcome, timeoutMs)}`,
@@ -395,6 +404,7 @@ function startSession(
     endedAt: null,
     output: new BoundedOutputBuffer('pi-background-bash'),
     outputSeen: 0,
+    outputSeenAt: Date.now(),
     abort: new AbortController(),
     exitCode: null,
     status: 'running',
@@ -462,7 +472,10 @@ function formatUnseenOutput(session: BackgroundBashSession): string {
   const { text: raw, missed } = session.output.textSince(session.outputSeen);
   const text = raw.trimEnd();
   const total = raw.length + missed;
-  if (!text) return missed > 0 ? unseenCutNotice(session, 0, total) : '(no new output)';
+  if (!text && missed === 0) {
+    return `(no new output since you last looked, ${formatDuration(Date.now() - session.outputSeenAt)} ago)`;
+  }
+  if (!text) return unseenCutNotice(session, 0, total);
 
   const tail = tailChars(text, BACKGROUND_BASH_WAIT_OUTPUT_MAX_CHARS);
   if (tail.length === text.length && missed === 0) return tail;
@@ -471,8 +484,17 @@ function formatUnseenOutput(session: BackgroundBashSession): string {
 
 function unseenCutNotice(session: BackgroundBashSession, shown: number, total: number): string {
   const fullOutput = session.output.snapshot().fullOutputPath;
-  return `[Showing the last ${shown} of ${total} new chars. Use background_bash_read for the buffered tail${fullOutput ? `, or read the full output at ${fullOutput}` : ''}.]`;
+  return `[Showing the last ${shown} of ${total} new chars. Use background_bash_read with mode "tail" for the buffered tail${fullOutput ? `, or read the full output at ${fullOutput}` : ''}.]`;
 }
+
+/** Records that the agent has now seen all output so far. */
+function markOutputSeen(session: BackgroundBashSession): void {
+  session.outputSeen = session.output.position;
+  session.outputSeenAt = Date.now();
+}
+
+/** Width of the command in a read's one-line header; the full command is in the start result. */
+const HEADER_COMMAND_MAX_CHARS = 80;
 
 function describeCompletion(session: BackgroundBashSession): string {
   const runtime = formatDuration(registry.runtimeMs(session));
@@ -613,7 +635,7 @@ export function formatReportOutput(snapshot: OutputSnapshot, sessionId: string):
     details.push(`${snapshot.totalLines} lines, ${formatSize(snapshot.totalBytes)} in total`);
     if (snapshot.fullOutputPath) details.push(`full output: ${snapshot.fullOutputPath}`);
   }
-  const notice = `[Truncated for report: ${details.join('; ')}. Use background_bash_read with session_id "${sessionId}" for more.]`;
+  const notice = `[Truncated for report: ${details.join('; ')}. Use background_bash_read with session_id "${sessionId}" and mode "tail" for more.]`;
   return `${notice}\n${tail}`;
 }
 
