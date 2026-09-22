@@ -4,5 +4,6 @@
   "defaultThinkingLevel": "high",
   "heartbeat": false,
   "cronJobs": false,
-  "toolCalls": "collapsed"
+  "toolCalls": "collapsed",
+  "showTranscripts": false
 }
