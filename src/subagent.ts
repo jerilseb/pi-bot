@@ -613,7 +613,7 @@ async function runTask(
  * state too, so the same message ends on the outcome.
  */
 export function formatSubagentProgress(
-  job: Pick<SubagentJob, 'id' | 'status' | 'statusDetail' | 'tasks' | 'startedAt' | 'endedAt'>,
+  job: Pick<SubagentJob, 'status' | 'statusDetail' | 'tasks' | 'startedAt' | 'endedAt'>,
 ): string {
   const icon =
     job.status === 'running'
@@ -626,7 +626,7 @@ export function formatSubagentProgress(
   const runtime = formatDuration((job.endedAt ?? Date.now()) - job.startedAt);
   return [
     `${icon} <b>Sub-agents</b> · ${escapeTelegramHtml(describeStatus(job))} · ${runtime}`,
-    `<code>${job.id}</code> · <code>${escapeTelegramHtml(jobLabel(job))}</code>`,
+    `<code>${escapeTelegramHtml(jobLabel(job))}</code>`,
   ].join('\n');
 }
 

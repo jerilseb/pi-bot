@@ -123,7 +123,6 @@ test('a JSON result field is reported on its own', () => {
 
 function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
   return formatBackgroundBashProgress({
-    id: 'bg_1',
     command: 'uv pip install\n  "vllm==0.16.0"',
     status: 'running',
     exitCode: null,
@@ -139,7 +138,8 @@ test('the progress message shows status, runtime, the command on one line, and t
   const html = progressSession({});
   const [header, command, output] = html.split('\n');
   assert.equal(header, '⏳ <b>Background bash</b> · running · 6m 12s');
-  assert.equal(command, '<code>bg_1</code> · <code>uv pip install "vllm==0.16.0"</code>');
+  // No job ID: the command is what the user recognises, and the agent tracks IDs itself.
+  assert.equal(command, '<code>uv pip install "vllm==0.16.0"</code>');
   assert.equal(output, '<i>Downloading vllm (484.8MiB)</i>');
 });
 

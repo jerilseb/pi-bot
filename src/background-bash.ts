@@ -386,7 +386,7 @@ const PROGRESS_OUTPUT_MAX_CHARS = 120;
 export function formatBackgroundBashProgress(
   session: Pick<
     BackgroundBashSession,
-    'id' | 'command' | 'status' | 'exitCode' | 'statusDetail' | 'startedAt' | 'endedAt'
+    'command' | 'status' | 'exitCode' | 'statusDetail' | 'startedAt' | 'endedAt'
   > & { output: Pick<BoundedOutputBuffer, 'lastLine'> },
 ): string {
   const icon =
@@ -400,7 +400,7 @@ export function formatBackgroundBashProgress(
   const runtime = formatDuration((session.endedAt ?? Date.now()) - session.startedAt);
   const lines = [
     `${icon} <b>Background bash</b> · ${escapeTelegramHtml(describeStatus(session))} · ${runtime}`,
-    `<code>${session.id}</code> · <code>${escapeTelegramHtml(oneLineLabel(session.command, PROGRESS_COMMAND_MAX_CHARS))}</code>`,
+    `<code>${escapeTelegramHtml(oneLineLabel(session.command, PROGRESS_COMMAND_MAX_CHARS))}</code>`,
   ];
   const lastLine = session.output.lastLine();
   if (lastLine) {

@@ -206,7 +206,8 @@ test('a job still running after the yield is backgrounded and reports once when 
     ['sendMessage', 'editMessageText'],
   );
   assert.match(f.telegram[0]?.text ?? '', /^⏳ <b>Sub-agents<\/b> · running \(0\/2 tasks done\)/);
-  assert.match(f.telegram[0]?.text ?? '', /<code>first task \(\+1 more\)<\/code>/);
+  assert.match(f.telegram[0]?.text ?? '', /\n<code>first task \(\+1 more\)<\/code>$/);
+  assert.doesNotMatch(f.telegram[0]?.text ?? '', /sub_[0-9a-f]+/);
   assert.match(f.telegram[1]?.text ?? '', /^✅ <b>Sub-agents<\/b> · succeeded \(2\/2 tasks\)/);
   assert.equal(prompt.isSuperseded?.(), true, 'the queued report is no longer needed');
 });
