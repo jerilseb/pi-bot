@@ -138,23 +138,24 @@ export async function createPiRuntime(options: {
 
 /** Throws unless the model exists in Pi's catalogue and its provider has auth. */
 export function assertModelUsable(modelRuntime: ModelRuntime, modelName: string): void {
-  const modelRef = parseModelRef(modelName);
-  resolveModel(modelRuntime, modelRef);
-  ensureConfiguredAuth(modelRuntime, modelRef);
+  resolveUsableModel(modelRuntime, parseModelRef(modelName));
 }
 
-function resolveModel(modelRuntime: ModelRuntime, modelRef: ModelRef): Model<Api> {
+/**
+ * The one place a model ref becomes a Model: it must exist in the catalogue and
+ * its provider must have auth, or nothing here may run on it. Every switch and
+ * the lazy first resolution go through this, so they cannot disagree on what
+ * "usable" means.
+ */
+function resolveUsableModel(modelRuntime: ModelRuntime, modelRef: ModelRef): Model<Api> {
   const model = modelRuntime.getModel(modelRef.provider, modelRef.model);
   if (!model) {
     throw new Error(`Unknown model: ${formatModelRef(modelRef)}`);
   }
-  return model;
-}
-
-function ensureConfiguredAuth(modelRuntime: ModelRuntime, modelRef: ModelRef): void {
   if (!modelRuntime.hasConfiguredAuth(modelRef.provider)) {
     throw new Error(`No auth configured for ${formatModelRef(modelRef)}`);
   }
+  return model;
 }
 
 export class SdkPiSession {
@@ -202,9 +203,7 @@ export class SdkPiSession {
 
   async setModel(modelName: string): Promise<void> {
     const modelRef = parseModelRef(modelName);
-    await this.runtime.modelRuntime.refresh();
-    const model = resolveModel(this.runtime.modelRuntime, modelRef);
-    ensureConfiguredAuth(this.runtime.modelRuntime, modelRef);
+    const model = await this.resolveFreshModel(modelRef);
 
     const session = await this.start();
     if (session.isStreaming) {
@@ -244,9 +243,7 @@ export class SdkPiSession {
       throw new Error('Cannot switch models while Pi is responding');
     }
 
-    await this.runtime.modelRuntime.refresh();
-    const model = resolveModel(this.runtime.modelRuntime, modelRef);
-    ensureConfiguredAuth(this.runtime.modelRuntime, modelRef);
+    const model = await this.resolveFreshModel(modelRef);
 
     this.cleanup();
     this.selectedModelRef = modelRef;
@@ -478,10 +475,19 @@ export class SdkPiSession {
       );
     }
     if (!this.selectedModel) {
-      this.selectedModel = resolveModel(this.runtime.modelRuntime, this.selectedModelRef);
-      ensureConfiguredAuth(this.runtime.modelRuntime, this.selectedModelRef);
+      this.selectedModel = resolveUsableModel(this.runtime.modelRuntime, this.selectedModelRef);
     }
     return this.selectedModel;
+  }
+
+  /**
+   * Resolves a ref for a switch. The catalogue is refreshed first so a login or
+   * key added since startup is seen; startup validation and the lazy first
+   * resolution skip that, since nothing can have changed yet.
+   */
+  private async resolveFreshModel(modelRef: ModelRef): Promise<Model<Api>> {
+    await this.runtime.modelRuntime.refresh();
+    return resolveUsableModel(this.runtime.modelRuntime, modelRef);
   }
 
   private applyPendingNewSession(): void {
