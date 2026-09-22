@@ -1,16 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
-import { isAllowedTelegramChat } from './config.ts';
-import {
-  answerTelegramCallbackQuery,
-  editTelegramMessageText,
-  sendTelegramInlineKeyboard,
-  type InlineKeyboardButton,
-} from './telegram.ts';
+import type { CallbackMenu } from './callback-menu.ts';
+import { sendTelegramInlineKeyboard, type InlineKeyboardButton } from './telegram.ts';
 import { textResult } from './tool-result.ts';
-import type { IncomingPrompt, TelegramCallbackQuery } from './types.ts';
-import { errorMessage } from './util.ts';
+import type { IncomingPrompt } from './types.ts';
 
 const MENU_CALLBACK_PREFIX = 'menu:';
 const MENU_CALLBACK_CANCEL = 'cancel';
@@ -104,71 +98,58 @@ export function telegramMenuExtension(pi: ExtensionAPI): void {
   });
 }
 
-export async function handleTelegramMenuCallbackQuery(
-  query: TelegramCallbackQuery,
+/**
+ * The keyboard sent by send_telegram_menu. Callback data is
+ * `menu:<menuId>:<index|cancel>`: Cancel belongs to one menu rather than the
+ * shared `<prefix>cancel` button, so it is handled in select. A menu is
+ * single-use and is forgotten on the first tap, whatever the tap was.
+ */
+export function telegramMenuCallbackMenu(
   enqueuePrompt: (prompt: IncomingPrompt) => Promise<void>,
-): Promise<boolean> {
-  cleanupExpiredMenus();
+): CallbackMenu {
+  return {
+    prefix: MENU_CALLBACK_PREFIX,
+    unknownOptionText: '❌ That menu option is no longer available. Ask me to send the menu again.',
+    failureToast: 'Menu selection failed.',
+    async select(value) {
+      cleanupExpiredMenus();
 
-  const data = query.data ?? '';
-  if (!data.startsWith(MENU_CALLBACK_PREFIX)) return false;
+      const parsed = parseMenuCallbackData(value);
+      if (!parsed) return null;
 
-  if (!query.message || !isAllowedTelegramChat(String(query.message.chat.id))) {
-    await answerTelegramCallbackQuery(query.id, 'This menu is no longer valid.');
-    return true;
-  }
+      const menu = menus.get(parsed.menuId);
+      if (!menu || menu.expiresAt <= Date.now()) {
+        menus.delete(parsed.menuId);
+        return {
+          toast: 'Menu expired.',
+          text: '⏱ This menu has expired. Ask me to send it again.',
+        };
+      }
+      menus.delete(menu.id);
 
-  const parsed = parseMenuCallbackData(data);
-  if (!parsed) {
-    await answerTelegramCallbackQuery(query.id, 'Unknown menu action.');
-    return true;
-  }
+      if (parsed.action === MENU_CALLBACK_CANCEL) {
+        await enqueuePrompt({
+          text: buildMenuCancelledPrompt(menu),
+          attachments: [],
+          source: 'telegram',
+        });
+        return { toast: 'Cancelled', text: `${menu.text}\n\nCancelled.` };
+      }
 
-  const menu = menus.get(parsed.menuId);
-  if (!menu || menu.expiresAt <= Date.now()) {
-    menus.delete(parsed.menuId);
-    await answerTelegramCallbackQuery(query.id, 'Menu expired.');
-    await editMenuMessageBestEffort(
-      query.message.message_id,
-      '⏱ This menu has expired. Ask me to send it again.',
-    );
-    return true;
-  }
+      const option = menu.options[parsed.optionIndex];
+      if (!option) return null;
 
-  menus.delete(menu.id);
-
-  if (parsed.action === MENU_CALLBACK_CANCEL) {
-    await answerTelegramCallbackQuery(query.id, 'Cancelled');
-    await editMenuMessageBestEffort(query.message.message_id, `${menu.text}\n\nCancelled.`);
-    await enqueuePrompt({
-      text: buildMenuCancelledPrompt(menu),
-      attachments: [],
-      source: 'telegram',
-    });
-    return true;
-  }
-
-  const option = menu.options[parsed.optionIndex];
-  if (!option) {
-    await answerTelegramCallbackQuery(query.id, 'Unknown option.');
-    await editMenuMessageBestEffort(
-      query.message.message_id,
-      '❌ That menu option is no longer available. Ask me to send the menu again.',
-    );
-    return true;
-  }
-
-  await answerTelegramCallbackQuery(query.id, `Selected: ${option.label}`);
-  await editMenuMessageBestEffort(
-    query.message.message_id,
-    `${menu.text}\n\nSelected: ${option.label}`,
-  );
-  await enqueuePrompt({
-    text: buildMenuSelectionPrompt(menu, option),
-    attachments: [],
-    source: 'telegram',
-  });
-  return true;
+      await enqueuePrompt({
+        text: buildMenuSelectionPrompt(menu, option),
+        attachments: [],
+        source: 'telegram',
+      });
+      return {
+        toast: `Selected: ${option.label}`,
+        text: `${menu.text}\n\nSelected: ${option.label}`,
+      };
+    },
+  };
 }
 
 async function sendTelegramMenu(params: SendTelegramMenuParamsType): Promise<TelegramMenu> {
@@ -242,19 +223,17 @@ function buildMenuKeyboard(menu: TelegramMenu, columns: number): InlineKeyboardB
   return rows;
 }
 
+/** Parses `<menuId>:<index|cancel>`, the callback data with the menu prefix removed. */
 function parseMenuCallbackData(
-  data: string,
+  value: string,
 ):
-  | { menuId: string; action: typeof MENU_CALLBACK_CANCEL; optionIndex: never }
+  | { menuId: string; action: typeof MENU_CALLBACK_CANCEL }
   | { menuId: string; action: 'select'; optionIndex: number }
   | null {
-  const withoutPrefix = data.slice(MENU_CALLBACK_PREFIX.length);
-  const [menuId, action] = withoutPrefix.split(':', 2);
+  const [menuId, action] = value.split(':', 2);
   if (!menuId || !action) return null;
 
-  if (action === MENU_CALLBACK_CANCEL) {
-    return { menuId, action: MENU_CALLBACK_CANCEL, optionIndex: undefined as never };
-  }
+  if (action === MENU_CALLBACK_CANCEL) return { menuId, action: MENU_CALLBACK_CANCEL };
 
   const optionIndex = Number(action);
   if (!Number.isInteger(optionIndex) || optionIndex < 0) return null;
@@ -297,13 +276,5 @@ function cleanupExpiredMenus(): void {
   const now = Date.now();
   for (const [id, menu] of menus.entries()) {
     if (menu.expiresAt <= now) menus.delete(id);
-  }
-}
-
-async function editMenuMessageBestEffort(messageId: number, text: string): Promise<void> {
-  try {
-    await editTelegramMessageText(messageId, text);
-  } catch (error) {
-    console.error('failed to edit Telegram menu:', errorMessage(error));
   }
 }

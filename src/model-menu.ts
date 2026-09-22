@@ -1,78 +1,45 @@
+import type { CallbackMenu } from './callback-menu.ts';
 import type { ChatSession } from './chat-session.ts';
-import { ALLOWED_MODELS, isAllowedTelegramChat } from './config.ts';
-import {
-  answerTelegramCallbackQuery,
-  editTelegramMessageText,
-  type InlineKeyboardButton,
-  sanitizeError,
-} from './telegram.ts';
-import type { TelegramCallbackQuery } from './types.ts';
-import { errorMessage } from './util.ts';
+import { ALLOWED_MODELS } from './config.ts';
+import type { InlineKeyboardButton } from './telegram.ts';
 
 const MODEL_CALLBACK_PREFIX = 'model:';
-const MODEL_CALLBACK_CANCEL = `${MODEL_CALLBACK_PREFIX}cancel`;
 
 export function buildModelInlineKeyboard(): InlineKeyboardButton[][] {
   return [
     ...ALLOWED_MODELS.map((model, index) => [
       { text: model, callback_data: `${MODEL_CALLBACK_PREFIX}${index}` },
     ]),
-    [{ text: 'Cancel', callback_data: MODEL_CALLBACK_CANCEL }],
+    [{ text: 'Cancel', callback_data: `${MODEL_CALLBACK_PREFIX}cancel` }],
   ];
 }
 
-export async function handleModelCallbackQuery(
-  query: TelegramCallbackQuery,
-  session: ChatSession,
-): Promise<void> {
-  const data = query.data ?? '';
-  if (!data.startsWith(MODEL_CALLBACK_PREFIX)) return;
+/** The /models keyboard. Buttons carry an index into ALLOWED_MODELS. */
+export function modelCallbackMenu(session: ChatSession): CallbackMenu {
+  return {
+    prefix: MODEL_CALLBACK_PREFIX,
+    cancelText: 'Cancelled model switch.',
+    unknownOptionText: '❌ That model option is no longer available. Use /models again.',
+    failureToast: 'Model switch failed.',
+    refuse: () =>
+      session.isBusy()
+        ? {
+            toast: 'Chat is busy.',
+            text: '⚠️ Model switch cancelled because the chat is busy. Try /models again when idle.',
+          }
+        : null,
+    async select(value) {
+      const modelIndex = Number(value);
+      const modelName = Number.isInteger(modelIndex) ? ALLOWED_MODELS[modelIndex] : undefined;
+      if (!modelName) return null;
 
-  if (!query.message || !isAllowedTelegramChat(String(query.message.chat.id))) {
-    await answerTelegramCallbackQuery(query.id, 'This model menu is no longer valid.');
-    return;
-  }
-
-  if (data === MODEL_CALLBACK_CANCEL) {
-    await answerTelegramCallbackQuery(query.id, 'Cancelled');
-    await editTelegramMessageText(query.message.message_id, 'Cancelled model switch.');
-    return;
-  }
-
-  const modelIndex = Number(data.slice(MODEL_CALLBACK_PREFIX.length));
-  const modelName = Number.isInteger(modelIndex) ? ALLOWED_MODELS[modelIndex] : undefined;
-  if (!modelName) {
-    await answerTelegramCallbackQuery(query.id, 'Unknown model.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      '❌ That model option is no longer available. Use /models again.',
-    );
-    return;
-  }
-
-  const chat = session.get();
-  if (session.isBusy()) {
-    await answerTelegramCallbackQuery(query.id, 'Chat is busy.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      '⚠️ Model switch cancelled because the chat is busy. Try /models again when idle.',
-    );
-    return;
-  }
-
-  try {
-    await chat.pi.setModel(modelName);
-    const thinking = await chat.pi.getThinkingState();
-    await answerTelegramCallbackQuery(query.id, 'Model switched.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      `✅ Switched chat model to ${chat.pi.modelName}\nReasoning: ${thinking.level}`,
-    );
-  } catch (error) {
-    await answerTelegramCallbackQuery(query.id, 'Model switch failed.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      `❌ ${sanitizeError(errorMessage(error))}`,
-    );
-  }
+      const chat = session.get();
+      await chat.pi.setModel(modelName);
+      const thinking = await chat.pi.getThinkingState();
+      return {
+        toast: 'Model switched.',
+        text: `✅ Switched chat model to ${chat.pi.modelName}\nReasoning: ${thinking.level}`,
+      };
+    },
+  };
 }

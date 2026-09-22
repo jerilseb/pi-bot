@@ -209,13 +209,20 @@ function isTelegramNotModifiedError(error: unknown): boolean {
   return errorMessage(error).toLowerCase().includes('message is not modified');
 }
 
-/** Reduces a thrown error to one escaped, length-capped line fit for the chat. */
-export function sanitizeError(error: string): string {
+/**
+ * Reduces a thrown error to one length-capped line fit for the chat. Not
+ * escaped: for a send that escapes on its own, such as editTelegramMessageText.
+ */
+export function summarizeError(error: string): string {
   const firstUsefulLine = error
     .split('\n')
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith('at ') && !line.startsWith('node:'));
   const message = firstUsefulLine || 'Something went wrong.';
-  const truncated = message.length > 500 ? `${message.slice(0, 500)}…` : message;
-  return escapeTelegramHtml(truncated);
+  return message.length > 500 ? `${message.slice(0, 500)}…` : message;
+}
+
+/** summarizeError, escaped for an HTML send. */
+export function sanitizeError(error: string): string {
+  return escapeTelegramHtml(summarizeError(error));
 }

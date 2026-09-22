@@ -17,7 +17,7 @@ Key files:
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
-- `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/model-menu.ts`, `src/reasoning-menu.ts`, `src/tool-call-menu.ts` — their inline keyboards.
+- `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers). `src/callback-menu.ts` — the shared inline-keyboard lifecycle (`CallbackMenu`, `dispatchCallbackQuery`); `src/model-menu.ts`, `src/reasoning-menu.ts`, `src/tool-call-menu.ts`, `src/transcript-menu.ts` — the keyboards themselves, each supplying only its prefix, texts, and `select`.
 - `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks.
 - `src/background-bash.ts` — background shell sessions. `src/job-registry.ts` — its lifecycle bookkeeping.

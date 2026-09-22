@@ -49,22 +49,23 @@ import {
   loadContextGist,
 } from './src/context-gist.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
+import { dispatchCallbackQuery } from './src/callback-menu.ts';
 import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
 import { ingestTelegramMessage } from './src/inbound.ts';
-import { handleModelCallbackQuery } from './src/model-menu.ts';
+import { modelCallbackMenu } from './src/model-menu.ts';
 import { createPromptQueue } from './src/prompt-queue.ts';
-import { handleReasoningCallbackQuery } from './src/reasoning-menu.ts';
-import { handleToolCallCallbackQuery } from './src/tool-call-menu.ts';
-import { handleTranscriptCallbackQuery } from './src/transcript-menu.ts';
+import { reasoningCallbackMenu } from './src/reasoning-menu.ts';
+import { toolCallCallbackMenu } from './src/tool-call-menu.ts';
+import { transcriptCallbackMenu } from './src/transcript-menu.ts';
 import {
   consumePostRestartTasks,
   ensurePostRestartTasksFile,
   formatPostRestartTask,
   type PostRestartTask,
 } from './src/post-restart-tasks.ts';
-import { handleTelegramMenuCallbackQuery } from './src/telegram-menu.ts';
+import { telegramMenuCallbackMenu } from './src/telegram-menu.ts';
 import {
   assertModelUsable,
   createPiRuntime,
@@ -155,6 +156,15 @@ const cron = createCronController({
   isChatBusy: isAssistantBusy,
   isRunning: () => running,
 });
+
+// Every inline keyboard the bot sends, keyed by callback-data prefix.
+const CALLBACK_MENUS = [
+  modelCallbackMenu(chatSession),
+  reasoningCallbackMenu(chatSession),
+  toolCallCallbackMenu,
+  transcriptCallbackMenu,
+  telegramMenuCallbackMenu(handleIncoming),
+];
 
 // Backgrounded bash sessions report back to the agent that started them as
 // internal background-bash-report prompts that go through the normal prompt
@@ -265,11 +275,7 @@ async function pollTelegram(): Promise<void> {
         offset = update.update_id + 1;
 
         if (update.callback_query) {
-          await handleModelCallbackQuery(update.callback_query, chatSession);
-          await handleReasoningCallbackQuery(update.callback_query, chatSession);
-          await handleToolCallCallbackQuery(update.callback_query);
-          await handleTranscriptCallbackQuery(update.callback_query);
-          await handleTelegramMenuCallbackQuery(update.callback_query, handleIncoming);
+          await dispatchCallbackQuery(update.callback_query, CALLBACK_MENUS);
           continue;
         }
 

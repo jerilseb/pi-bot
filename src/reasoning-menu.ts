@@ -1,17 +1,9 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { CallbackMenu } from './callback-menu.ts';
 import type { ChatSession } from './chat-session.ts';
-import { isAllowedTelegramChat } from './config.ts';
-import {
-  answerTelegramCallbackQuery,
-  editTelegramMessageText,
-  type InlineKeyboardButton,
-  sanitizeError,
-} from './telegram.ts';
-import type { TelegramCallbackQuery } from './types.ts';
-import { errorMessage } from './util.ts';
+import type { InlineKeyboardButton } from './telegram.ts';
 
 const REASONING_CALLBACK_PREFIX = 'reasoning:';
-const REASONING_CALLBACK_CANCEL = `${REASONING_CALLBACK_PREFIX}cancel`;
 const HIDDEN_REASONING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal']);
 
 function selectableReasoningLevels(levels: ThinkingLevel[]): ThinkingLevel[] {
@@ -23,62 +15,35 @@ export function buildReasoningInlineKeyboard(levels: ThinkingLevel[]): InlineKey
     ...selectableReasoningLevels(levels).map((level) => [
       { text: level, callback_data: `${REASONING_CALLBACK_PREFIX}${level}` },
     ]),
-    [{ text: 'Cancel', callback_data: REASONING_CALLBACK_CANCEL }],
+    [{ text: 'Cancel', callback_data: `${REASONING_CALLBACK_PREFIX}cancel` }],
   ];
 }
 
-export async function handleReasoningCallbackQuery(
-  query: TelegramCallbackQuery,
-  session: ChatSession,
-): Promise<void> {
-  const data = query.data ?? '';
-  if (!data.startsWith(REASONING_CALLBACK_PREFIX)) return;
+/** The /reasoning keyboard. Buttons carry the level name. */
+export function reasoningCallbackMenu(session: ChatSession): CallbackMenu {
+  return {
+    prefix: REASONING_CALLBACK_PREFIX,
+    cancelText: 'Cancelled reasoning switch.',
+    unknownOptionText: '❌ That reasoning option is no longer available. Use /reasoning again.',
+    failureToast: 'Reasoning switch failed.',
+    refuse: () =>
+      session.isBusy()
+        ? {
+            toast: 'Chat is busy.',
+            text: '⚠️ Reasoning switch cancelled because the chat is busy. Try /reasoning again when idle.',
+          }
+        : null,
+    async select(value) {
+      const requestedLevel = value as ThinkingLevel;
+      const chat = session.get();
+      const state = await chat.pi.getThinkingState();
+      if (!selectableReasoningLevels(state.availableLevels).includes(requestedLevel)) return null;
 
-  if (!query.message || !isAllowedTelegramChat(String(query.message.chat.id))) {
-    await answerTelegramCallbackQuery(query.id, 'This reasoning menu is no longer valid.');
-    return;
-  }
-
-  if (data === REASONING_CALLBACK_CANCEL) {
-    await answerTelegramCallbackQuery(query.id, 'Cancelled');
-    await editTelegramMessageText(query.message.message_id, 'Cancelled reasoning switch.');
-    return;
-  }
-
-  if (session.isBusy()) {
-    await answerTelegramCallbackQuery(query.id, 'Chat is busy.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      '⚠️ Reasoning switch cancelled because the chat is busy. Try /reasoning again when idle.',
-    );
-    return;
-  }
-
-  const chat = session.get();
-  const requestedLevel = data.slice(REASONING_CALLBACK_PREFIX.length) as ThinkingLevel;
-
-  try {
-    const state = await chat.pi.getThinkingState();
-    if (!selectableReasoningLevels(state.availableLevels).includes(requestedLevel)) {
-      await answerTelegramCallbackQuery(query.id, 'Unsupported reasoning level.');
-      await editTelegramMessageText(
-        query.message.message_id,
-        '❌ That reasoning option is no longer available. Use /reasoning again.',
-      );
-      return;
-    }
-
-    const effectiveLevel = await chat.pi.setThinkingLevel(requestedLevel);
-    await answerTelegramCallbackQuery(query.id, 'Reasoning level switched.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      `✅ Switched reasoning level to ${effectiveLevel}`,
-    );
-  } catch (error) {
-    await answerTelegramCallbackQuery(query.id, 'Reasoning switch failed.');
-    await editTelegramMessageText(
-      query.message.message_id,
-      `❌ ${sanitizeError(errorMessage(error))}`,
-    );
-  }
+      const effectiveLevel = await chat.pi.setThinkingLevel(requestedLevel);
+      return {
+        toast: 'Reasoning level switched.',
+        text: `✅ Switched reasoning level to ${effectiveLevel}`,
+      };
+    },
+  };
 }
