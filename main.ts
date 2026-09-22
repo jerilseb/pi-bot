@@ -36,6 +36,7 @@ import {
   PROJECT_SKILLS_DIR,
   RESTART_EXIT_DELAY_MS,
   SESSIONS_DIR,
+  SUBAGENT_SESSIONS_DIR,
   TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
   ensureBotSettingsFile,
@@ -73,13 +74,21 @@ import {
   type PiRuntime,
 } from './src/pi-session.ts';
 import {
+  interruptedSubagentsNote,
+  setSubagentReportHandler,
+  stopAllSubagents,
+  subagentReportPrompt,
+  subagentStatusText,
+} from './src/subagent.ts';
+import {
   activeModelSystemPromptExtension,
   ensureMemoryFile,
+  ensureSubagentPromptFile,
   memorySystemPromptExtension,
   readSystemPrompt,
 } from './src/system-prompt.ts';
 import { registerBotCommands, sendTelegramMessage, telegram } from './src/telegram.ts';
-import type { TelegramUpdate } from './src/types.ts';
+import type { SessionKind, TelegramUpdate } from './src/types.ts';
 import { errorMessage, sleep } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
@@ -104,6 +113,7 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
     activeModelSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
+  workerExtensionFactories: [protectedEnvToolAccessExtension],
   requestRestart: restart,
 });
 
@@ -124,13 +134,16 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
     activeModelSystemPromptExtension,
     protectedEnvToolAccessExtension,
   ],
+  workerExtensionFactories: [protectedEnvToolAccessExtension],
 });
 
 validateModels();
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+fs.mkdirSync(SUBAGENT_SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
+ensureSubagentPromptFile();
 ensurePostRestartTasksFile();
 
 const chatSession = createChatSession(CHAT_PI_RUNTIME);
@@ -172,6 +185,9 @@ const CALLBACK_MENUS = [
 setBackgroundBashReportHandler(async (report) => {
   await handleIncoming(backgroundBashReportPrompt(report));
 });
+setSubagentReportHandler(async (report) => {
+  await handleIncoming(subagentReportPrompt(report));
+});
 
 function validateConfiguration(): void {
   const problems = collectConfigProblems();
@@ -212,6 +228,8 @@ function validateModels(): void {
 
 /** Shuts the bot down and exits so systemd brings the process back up. */
 async function restart(): Promise<void> {
+  // Before the restart note, which must stay the session's last entry.
+  await noteInterruptedSubagents();
   // Written before the session is disposed, and the single seam both the
   // /restart command and the restart_bot tool pass through. Its absence at the
   // next startup is what identifies an exit nobody asked for.
@@ -233,6 +251,22 @@ async function restart(): Promise<void> {
  * a stop and start. Either way the conversation is about to continue as if
  * nothing happened, which is the confusion worth heading off.
  */
+/**
+ * Tell each session about the sub-agent jobs it started that shutdown is about
+ * to stop. Their reports would otherwise simply never come, and the next turn
+ * would have no way to know the work was lost.
+ */
+async function noteInterruptedSubagents(): Promise<void> {
+  const sessions: Array<[SessionKind, typeof chatSession]> = [
+    ['chat', chatSession],
+    ['background', backgroundSession],
+  ];
+  for (const [kind, session] of sessions) {
+    const note = interruptedSubagentsNote(kind);
+    if (note) await session.get().pi.noteEvent('subagent', note);
+  }
+}
+
 async function noteUncleanExit(): Promise<void> {
   const last = await chatSession.get().pi.lastNoteKind();
   if (last === 'restart' || last === 'restart-unclean') return;
@@ -301,6 +335,7 @@ function logStartupBanner(): void {
   console.log(`Voice note tool: ${voiceStatusText()}`);
   console.log(`Context gist: ${contextGistStatusText()}`);
   console.log(`Tool call messages: ${toolCallMode()}`);
+  console.log(`Sub-agents: ${subagentStatusText()}`);
   console.log(heartbeatStatusText());
   console.log(cronStatusText());
   console.log(`Post-restart tasks: ${POST_RESTART_TASKS_PATH}`);
@@ -381,9 +416,17 @@ async function shutdown(): Promise<void> {
   chatSession.clear();
   backgroundSession.clear();
   await stopAllBackgroundSessions();
+  await stopAllSubagents();
 }
 
-process.on('SIGINT', () => void shutdown().then(() => process.exit(0)));
-process.on('SIGTERM', () => void shutdown().then(() => process.exit(0)));
+/** A stop from outside: note what is being cut short, then shut down. */
+async function shutdownFromSignal(): Promise<void> {
+  if (!running) return;
+  await noteInterruptedSubagents();
+  await shutdown();
+}
+
+process.on('SIGINT', () => void shutdownFromSignal().then(() => process.exit(0)));
+process.on('SIGTERM', () => void shutdownFromSignal().then(() => process.exit(0)));
 
 await pollTelegram();

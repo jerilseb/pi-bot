@@ -62,6 +62,12 @@ export interface Attachment {
 /** The bot's two Pi sessions: the Telegram chat and the unattended background one. */
 export type SessionKind = 'chat' | 'background';
 
+/**
+ * Completion reports from background work the agent started earlier. They are
+ * the tail of a turn already under way, so the queue admits them even when full.
+ */
+export type JobReportSource = 'background-bash-report' | 'subagent-report';
+
 export interface IncomingPrompt {
   text: string;
   attachments: Attachment[];
@@ -69,12 +75,12 @@ export interface IncomingPrompt {
    * Where the prompt came from. Only `telegram` (or unset) may steer an active
    * chat run; every internal origin is queued so two of them cannot merge.
    */
-  source?: 'telegram' | 'heartbeat' | 'cron' | 'post-restart' | 'background-bash-report';
+  source?: 'telegram' | 'heartbeat' | 'cron' | 'post-restart' | JobReportSource;
   /**
    * Session that runs this prompt. Unset, it follows from source: heartbeat and
    * cron run in the background session, everything else in the chat session. A
-   * background-bash report sets it so the result returns to the session that
-   * started the command rather than always landing in the chat.
+   * job report sets it so the result returns to the session that started the
+   * work rather than always landing in the chat.
    */
   session?: SessionKind;
   suppressNoop?: boolean;

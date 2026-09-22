@@ -2,7 +2,6 @@ import * as path from 'node:path';
 import {
   createLocalBashOperations,
   type ExtensionAPI,
-  type ExtensionContext,
   formatSize,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
@@ -18,11 +17,17 @@ import {
   BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS,
   BACKGROUND_BASH_STOP_WAIT_MS,
 } from './config.ts';
-import { type Job, JobRegistry } from './job-registry.ts';
+import {
+  captureJobOrigin,
+  type Job,
+  type JobOrigin,
+  JobRegistry,
+  jobReportPrompt,
+} from './job-registry.ts';
 import { BoundedOutputBuffer, type OutputSnapshot } from './output-buffer.ts';
 import { textResult } from './tool-result.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
-import { clamp, errorMessage, formatDuration, formatModelRef, sleep } from './util.ts';
+import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
 
 /**
  * Background bash sessions for the Pi agent: start long-running shell commands
@@ -39,24 +44,17 @@ import { clamp, errorMessage, formatDuration, formatModelRef, sleep } from './ut
  * command a scheduled task started reports to the background session that
  * remembers starting it, not to the chat.
  *
- * Lifecycle bookkeeping (IDs, pruning, stopping, report delivery) lives in
- * src/job-registry.ts. Tuning knobs live in src/config.ts under
- * "Background work".
+ * Lifecycle bookkeeping (IDs, yield-then-background, pruning, stopping, report
+ * routing and delivery) lives in src/job-registry.ts. Tuning knobs live in
+ * src/config.ts under "Background work".
  */
 
 type BackgroundBashTerminalStatus = 'exited' | 'stopped' | 'failed';
 
-/** Where a command was started from, so its report can find its way back. */
-interface BackgroundBashOrigin {
-  session: SessionKind;
-  /** Model the starting turn ran on, as provider/model, when the SDK exposed one. */
-  model?: string;
-}
-
 interface BackgroundBashSession extends Job<BackgroundBashTerminalStatus> {
   command: string;
   cwd: string;
-  origin: BackgroundBashOrigin;
+  origin: JobOrigin;
   output: BoundedOutputBuffer;
   abort: AbortController;
   exitCode: number | null;
@@ -66,7 +64,7 @@ export interface BackgroundBashReport {
   sessionId: string;
   command: string;
   cwd: string;
-  origin: BackgroundBashOrigin;
+  origin: JobOrigin;
   outcome: string;
   output: string;
 }
@@ -181,21 +179,20 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
         BACKGROUND_BASH_MAX_YIELD_MS,
       );
 
-      const model = currentModel(ctx);
-      const session = startSession(params.command, cwd, maxRuntimeMs, {
-        session: originSession,
-        ...(model ? { model } : {}),
-      });
-      await Promise.race([session.done, sleep(yieldTimeMs)]);
+      const session = startSession(
+        params.command,
+        cwd,
+        maxRuntimeMs,
+        captureJobOrigin(ctx, originSession),
+      );
+      const backgrounded = await registry.settleOrBackground(session, yieldTimeMs);
 
-      if (session.status !== 'running') {
-        registry.remove(session.id);
+      if (!backgrounded) {
         return textResult(
           [describeCompletion(session), 'Output:', formatOutputSnapshot(session)].join('\n'),
         );
       }
 
-      session.backgrounded = true;
       return textResult(
         [
           `Started background bash session ${session.id}`,
@@ -294,18 +291,11 @@ export async function stopAllBackgroundSessions(): Promise<void> {
   await registry.cancelAll();
 }
 
-/** The model the starting turn is on, as provider/model, or undefined when the SDK has none. */
-function currentModel(ctx: ExtensionContext): string | undefined {
-  return ctx.model
-    ? formatModelRef({ provider: ctx.model.provider, model: ctx.model.id })
-    : undefined;
-}
-
 function startSession(
   command: string,
   cwd: string,
   maxRuntimeMs: number,
-  origin: BackgroundBashOrigin,
+  origin: JobOrigin,
 ): BackgroundBashSession {
   const session: BackgroundBashSession = {
     id: registry.allocateId(),
@@ -408,35 +398,16 @@ function formatOutputSnapshot(session: BackgroundBashSession): string {
   return `${text}\n\n${notice}`;
 }
 
-/**
- * The prompt that delivers a completion report, addressed to the session that
- * started the command. A report bound for the background session also pins the
- * model that session was on when it started the command, since that session has
- * no default model and a later scheduled task may have moved it elsewhere. The
- * chat session keeps whatever model the user has selected since.
- */
+/** The prompt that delivers a completion report to the session that started the command. */
 export function backgroundBashReportPrompt(report: BackgroundBashReport): IncomingPrompt {
-  const { session, model } = report.origin;
-  return {
+  return jobReportPrompt(report.origin, {
     text: formatBackgroundBashReportPrompt(report),
-    attachments: [],
     source: 'background-bash-report',
-    session,
-    suppressNoop: true,
-    label: shortCommand(report.command),
-    ...(session === 'background' && model ? { model } : {}),
-  };
+    label: oneLineLabel(report.command, REPORT_LABEL_MAX_CHARS),
+  });
 }
 
 const REPORT_LABEL_MAX_CHARS = 80;
-
-/** The command on one line, cut to fit a note that names it. */
-function shortCommand(command: string): string {
-  const oneLine = command.replace(/\s+/g, ' ').trim();
-  return oneLine.length <= REPORT_LABEL_MAX_CHARS
-    ? oneLine
-    : `${oneLine.slice(0, REPORT_LABEL_MAX_CHARS - 1)}…`;
-}
 
 function formatBackgroundBashReportPrompt(report: BackgroundBashReport): string {
   return buildAgentEnvelope({

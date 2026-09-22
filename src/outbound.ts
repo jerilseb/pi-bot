@@ -1,4 +1,4 @@
-import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP } from './config.ts';
+import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP, SUBAGENT_NOOP } from './config.ts';
 import { sendTelegramMessage } from './telegram.ts';
 import type { IncomingPrompt, PiPromptResult } from './types.ts';
 
@@ -29,7 +29,7 @@ export async function sendPiResponse(
 // Compared against the bare sentinel name so a model that drops the __ wrapper —
 // e.g. emits "HEARTBEAT_NOOP" instead of "__HEARTBEAT_NOOP__" — still counts.
 const NOOP_MARKERS = new Set(
-  [HEARTBEAT_NOOP, CRON_NOOP, BACKGROUND_BASH_NOOP].map(stripSentinelWrapper),
+  [HEARTBEAT_NOOP, CRON_NOOP, BACKGROUND_BASH_NOOP, SUBAGENT_NOOP].map(stripSentinelWrapper),
 );
 
 function stripSentinelWrapper(value: string): string {

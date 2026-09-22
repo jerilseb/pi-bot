@@ -9,8 +9,8 @@ import {
   type CreateCronJobInput,
   type CronJobKind,
 } from './cron-store.ts';
+import { requireCurrentModel, resolveRequestedModel } from './extension-models.ts';
 import { textResult } from './tool-result.ts';
-import { formatModelRef, parseModelRef } from './util.ts';
 
 /** Passing this as `model` to update_scheduled_task re-pins the task to the current chat model. */
 const DEFAULT_MODEL_KEYWORD = 'default';
@@ -98,7 +98,9 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
     ],
     parameters: ScheduleTaskParams,
     async execute(_toolCallId, params: ScheduleTaskParamsType, _signal, _onUpdate, ctx) {
-      const model = params.model ? resolveTaskModel(ctx, params.model) : currentChatModel(ctx);
+      const model = params.model
+        ? resolveRequestedModel(ctx, params.model)
+        : requireCurrentModel(ctx);
       const job = addCronJob(toCreateInput(params, model));
       return textResult(`Scheduled task created:\n${formatCronJob(job)}`);
     },
@@ -153,47 +155,10 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
   });
 }
 
-/**
- * The model the chat is on right now, as provider/model. The tools run inside
- * the chat's Pi session, so this is the /models selection at the moment of the
- * call. Every task without an explicit model is pinned to it.
- */
-function currentChatModel(ctx: ExtensionContext): string {
-  if (!ctx.model) {
-    throw new Error('No chat model is active; pass model explicitly.');
-  }
-  return formatModelRef({ provider: ctx.model.provider, model: ctx.model.id });
-}
-
-/**
- * Checks a requested task model against the live model catalogue so a typo or a
- * provider without auth fails at creation, not silently when the task fires.
- * Returns the normalised provider/model ref.
- */
-function resolveTaskModel(ctx: ExtensionContext, requested: string): string {
-  const ref = parseModelRef(requested);
-  const model = ctx.modelRegistry.find(ref.provider, ref.model);
-  if (!model) {
-    throw new Error(`Unknown model ${formatModelRef(ref)}. Available: ${availableModelList(ctx)}`);
-  }
-  if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
-    throw new Error(`No auth configured for ${formatModelRef(ref)}.`);
-  }
-  return formatModelRef(ref);
-}
-
 function toUpdateModel(ctx: ExtensionContext, requested: string): string {
   return requested.trim().toLowerCase() === DEFAULT_MODEL_KEYWORD
-    ? currentChatModel(ctx)
-    : resolveTaskModel(ctx, requested);
-}
-
-function availableModelList(ctx: ExtensionContext): string {
-  const names = ctx.modelRegistry
-    .getAvailable()
-    .map((model) => `${model.provider}/${model.id}`)
-    .sort();
-  return names.length ? names.join(', ') : 'none';
+    ? requireCurrentModel(ctx)
+    : resolveRequestedModel(ctx, requested);
 }
 
 function toCreateInput(params: ScheduleTaskParamsType, model: string): CreateCronJobInput {

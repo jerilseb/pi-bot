@@ -34,7 +34,8 @@ export type SessionEventKind =
   | 'abort'
   | 'scheduled-task'
   | 'heartbeat'
-  | 'background-bash';
+  | 'background-bash'
+  | 'subagent';
 
 export interface SessionEventDetails {
   kind: SessionEventKind;
@@ -93,6 +94,10 @@ export function backgroundReportNote(options: {
     case 'background-bash-report':
       kind = 'background-bash';
       intro = `A background command${label} started from the separate background session finished, and that session${model} sent this message to the user:`;
+      break;
+    case 'subagent-report':
+      kind = 'subagent';
+      intro = `A sub-agent job${label} started from the separate background session finished, and that session${model} sent this message to the user:`;
       break;
     default:
       return null;

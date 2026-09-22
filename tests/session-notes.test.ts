@@ -74,6 +74,19 @@ describe('backgroundReportNote', () => {
     assert.match(note?.text ?? '', /tests failed/);
   });
 
+  it('names the first task a sub-agent report came from', () => {
+    const note = backgroundReportNote({
+      source: 'subagent-report',
+      label: 'summarise the logs (+1 more)',
+      model: 'test/m',
+      report: 'two summaries',
+    });
+    assert.equal(note?.kind, 'subagent');
+    assert.match(note?.text ?? '', /sub-agent job "summarise the logs \(\+1 more\)"/);
+    assert.match(note?.text ?? '', /on test\/m/);
+    assert.match(note?.text ?? '', /two summaries/);
+  });
+
   it('has nothing to say about chat-session replies', () => {
     assert.equal(backgroundReportNote({ source: 'telegram', report: 'x' }), null);
     assert.equal(backgroundReportNote({ source: undefined, report: 'x' }), null);

@@ -24,6 +24,17 @@ export function isBackgroundPrompt(prompt: Pick<IncomingPrompt, 'source' | 'sess
   return promptSessionKind(prompt) === 'background';
 }
 
+/** True for a completion report from background work (background bash, sub-agents). */
+export function isJobReportPrompt(prompt: Pick<IncomingPrompt, 'source'>): boolean {
+  return prompt.source === 'background-bash-report' || prompt.source === 'subagent-report';
+}
+
+/** The text on one line, cut to maxChars so it fits a label or a note. */
+export function oneLineLabel(text: string, maxChars: number): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length <= maxChars ? oneLine : `${oneLine.slice(0, maxChars - 1)}…`;
+}
+
 export function parseModelRef(value: string): ModelRef {
   const normalized = value.trim();
   const slash = normalized.indexOf('/');

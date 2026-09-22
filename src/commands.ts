@@ -22,6 +22,7 @@ import {
   type TelegramBotCommand,
 } from './telegram.ts';
 import { errorMessage } from './util.ts';
+import { subagentStatusText } from './subagent.ts';
 import { voiceStatusText } from './voice.ts';
 
 export interface CommandContext {
@@ -134,6 +135,7 @@ const BOT_COMMANDS: BotCommand[] = [
           `- Voice note tool: ${voiceStatusText()}`,
           `- Tool call messages: ${toolCallMode()}`,
           `- Voice transcripts: ${describeTranscriptSetting(showTranscriptsEnabled())}`,
+          `- Sub-agents: ${subagentStatusText()}`,
           `- ${heartbeatStatusText()}`,
           `- ${cronStatusText()}`,
         ].join('\n'),

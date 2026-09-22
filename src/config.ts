@@ -19,6 +19,12 @@ import { parseModelRef } from './util.ts';
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, '..');
 export const SESSIONS_DIR = path.join(PROJECT_ROOT, 'sessions');
+/**
+ * Sub-agent worker transcripts. A subdirectory, not SESSIONS_DIR itself: the
+ * SDK's session listing is not recursive and the chat session lists SESSIONS_DIR
+ * on every start, which must not mean parsing every worker transcript ever kept.
+ */
+export const SUBAGENT_SESSIONS_DIR = path.join(SESSIONS_DIR, 'subagent-sessions');
 export const TMP_DIR = path.join(os.tmpdir(), 'pi-channel');
 
 export const PROJECT_EXTENSIONS_DIR = path.join(PROJECT_ROOT, 'extensions');
@@ -34,6 +40,8 @@ export const CRON_JOBS_PATH = path.join(FILES_DIR, 'cron-jobs.json');
 export const POST_RESTART_TASKS_PATH = path.join(FILES_DIR, 'post-restart-tasks.json');
 export const HEARTBEAT_FILE_PATH = path.join(FILES_DIR, 'heartbeat.md');
 export const HEARTBEAT_STATE_PATH = path.join(FILES_DIR, 'heartbeat-state.md');
+/** System prompt for sub-agent workers; created with a default on first start. */
+export const SUBAGENT_PROMPT_PATH = path.join(FILES_DIR, 'subagent.md');
 
 // ---------------------------------------------------------------------------
 // Environment and secrets
@@ -46,6 +54,15 @@ export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? '';
 export const OPENAI_CODEX_API_KEY = process.env.OPENAI_CODEX_API_KEY ?? '';
 export const GOOGLE_GENAI_API_KEY = process.env.GOOGLE_GENAI_API_KEY ?? '';
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+/**
+ * Sub-agents run only when .env sets ENABLE_SUBAGENTS=true. Off by default: a
+ * worker is a whole extra agent with tool access spending tokens on its own, so
+ * turning that on is a deployment decision. Read at startup; the tools are not
+ * registered at all while it is off. The raw value is kept for validation, so a
+ * misspelling is a startup error rather than a silently disabled feature.
+ */
+export const ENABLE_SUBAGENTS = process.env.ENABLE_SUBAGENTS?.trim() ?? '';
+export const SUBAGENTS_ENABLED = ENABLE_SUBAGENTS.toLowerCase() === 'true';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -290,7 +307,7 @@ export const DOCUMENT_UPLOAD_EXTS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Background work: background bash
+// Background work: background bash and sub-agents
 //
 // Every concurrency limit, timeout, TTL, and payload cap for background work
 // belongs in this section — only narrow display widths stay next to the
@@ -306,6 +323,25 @@ export const BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS = 3_000;
 export const BACKGROUND_BASH_COMPLETED_TTL_MS = 30 * 60_000;
 /** How long background_bash_stop waits for a signalled session to settle. */
 export const BACKGROUND_BASH_STOP_WAIT_MS = 5_000;
+
+/** Jobs (one subagent_run call each) that may be running at once. */
+export const SUBAGENT_MAX_RUNNING_JOBS = 8;
+/** Tasks one subagent_run call may carry. */
+export const SUBAGENT_MAX_TASKS_PER_JOB = 4;
+/**
+ * Worker sessions running at once across all jobs. A job with more tasks than
+ * free slots starts what it can and runs the rest as slots open.
+ */
+export const SUBAGENT_MAX_CONCURRENT_WORKERS = 4;
+export const SUBAGENT_DEFAULT_YIELD_MS = 20_000;
+export const SUBAGENT_MAX_YIELD_MS = 120_000;
+export const SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 15 * 60_000;
+export const SUBAGENT_MAX_RUNTIME_CAP_MS = 2 * 60 * 60_000;
+/** Per task, in reports and subagent_read output. */
+export const SUBAGENT_RESULT_MAX_CHARS = 12_000;
+export const SUBAGENT_COMPLETED_TTL_MS = 30 * 60_000;
+/** How long subagent_stop waits for signalled workers to settle. */
+export const SUBAGENT_STOP_WAIT_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Pi resources and scheduled prompt config
@@ -332,6 +368,7 @@ export const HEARTBEAT_INTERVAL_MS = HEARTBEAT_INTERVAL_SECONDS * 1000;
 export const HEARTBEAT_NOOP = '__HEARTBEAT_NOOP__';
 export const CRON_NOOP = '__CRON_NOOP__';
 export const BACKGROUND_BASH_NOOP = '__BACKGROUND_BASH_NOOP__';
+export const SUBAGENT_NOOP = '__SUBAGENT_NOOP__';
 
 /** True only for the single chat configured via TELEGRAM_ALLOWED_CHAT_ID. */
 export function isAllowedTelegramChat(chatId: string): boolean {

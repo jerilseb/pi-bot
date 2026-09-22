@@ -6,12 +6,42 @@ import {
   DAILY_MEMORY_DIR,
   FILES_DIR,
   MEMORY_PATH,
+  SUBAGENT_PROMPT_PATH,
   SYSTEM_PROMPT_PATH,
 } from './config.ts';
 import { localDateString } from './util.ts';
 
 export function readSystemPrompt(): string {
   return fs.readFileSync(SYSTEM_PROMPT_PATH, 'utf8').trim();
+}
+
+/**
+ * The system prompt a sub-agent worker runs under. Short and standalone on
+ * purpose: a worker has no chat history, no memory blocks, and no user to talk
+ * to, so the chat prompt's guidance about the conversation would only mislead
+ * it. Kept as a file, like the chat prompt, so it can be tuned without a code
+ * change; created with this default when missing.
+ */
+const DEFAULT_SUBAGENT_PROMPT = `# Sub-agent worker
+
+You are a worker agent. A main assistant delegated one self-contained task to you and is waiting for your result. Your final message is the only thing it receives.
+
+- You have no access to the main assistant's conversation and cannot contact its user. Everything you know about the task is in the task message. Do not ask clarifying questions: make a reasonable assumption, state it, and continue.
+- Do the task with the tools you have, then reply with one complete result: what you did, what you found, and anything the main assistant must know to continue, such as paths of files you created, commands to run, or problems you hit.
+- Lead with the result. Be concise but complete; the main assistant cannot ask you follow-up questions.
+- Never read, print, or modify .env files or other secrets.
+`;
+
+export function ensureSubagentPromptFile(): void {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+  if (!fs.existsSync(SUBAGENT_PROMPT_PATH)) {
+    fs.writeFileSync(SUBAGENT_PROMPT_PATH, DEFAULT_SUBAGENT_PROMPT, 'utf8');
+  }
+}
+
+export function readSubagentSystemPrompt(): string {
+  ensureSubagentPromptFile();
+  return fs.readFileSync(SUBAGENT_PROMPT_PATH, 'utf8').trim();
 }
 
 export function ensureMemoryFile(): void {
@@ -93,6 +123,7 @@ function appendActiveModelToSystemPrompt(systemPrompt: string): string {
     'The scheduled heartbeat runs only when that file sets "heartbeat": true and HEARTBEAT_MODEL is set in .env; scheduled tasks run only when it sets "cronJobs": true. Cron jobs and scheduled tasks are the same feature; the terms are interchangeable. Both settings default to off and are read at startup, so changing either requires a restart to take effect. A heartbeat switched on without its model is a startup error, so the bot will not run in that state.',
     'When "cronJobs" is false the scheduled-task tools are not registered at all, so tell the user to enable that setting and restart rather than claiming a schedule was created.',
     'The heartbeat model is HEARTBEAT_MODEL in .env and cannot be changed from Telegram. A scheduled task is pinned to the chat model active when it is created; later /models switches do not change existing tasks. A task can instead be given a specific model through the model parameter of create_schedule_task or update_scheduled_task, and passing "default" to update_scheduled_task re-pins it to the current chat model.',
+    'Sub-agent tools (subagent_run and friends) are registered only when ENABLE_SUBAGENTS=true in .env, read at startup. When they are absent, tell the user to enable that variable and restart rather than claiming to have delegated work.',
     'When the Telegram user changes chat models with /models or reasoning with /reasoning, the bot updates this bot-specific settings file.',
     'These settings are isolated from ~/.pi/agent/settings.json.',
   ].join('\n');

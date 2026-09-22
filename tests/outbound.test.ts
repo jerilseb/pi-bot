@@ -21,6 +21,7 @@ test('adds a scheduled report header only to cron responses', async (t) => {
     'telegram',
     'heartbeat',
     'background-bash-report',
+    'subagent-report',
   ];
   for (const source of otherSources) {
     await sendPiResponse({ text: body }, { source });

@@ -7,14 +7,14 @@ import { backgroundReportNote } from './session-notes.ts';
 import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
 import { createToolNotifications } from './tool-notification-batch.ts';
 import type { IncomingPrompt } from './types.ts';
-import { errorMessage, isBackgroundPrompt } from './util.ts';
+import { errorMessage, isBackgroundPrompt, isJobReportPrompt } from './util.ts';
 
 /**
  * The bot's single entry point for work, and the worker that drains it.
  *
  * Every prompt arrives here regardless of origin — a Telegram message, a
- * heartbeat or cron run, a post-restart task, a background-bash completion
- * report — so this is the one place that decides which session handles a prompt,
+ * heartbeat or cron run, a post-restart task, a background-bash or sub-agent
+ * completion report — so this is the one place that decides which session handles a prompt,
  * whether it is a slash command, and whether the queue has room for it.
  *
  * Runs are serial per session. Ordinary Telegram messages steer the active run;
@@ -60,7 +60,7 @@ export function createPromptQueue(options: {
 
     // A completion report is the tail of work the agent already started, so it is
     // delivered even when the queue is full.
-    const bypassQueueLimit = prompt.source === 'background-bash-report';
+    const bypassQueueLimit = isJobReportPrompt(prompt);
     if (
       !bypassQueueLimit &&
       chat.queue.length + chat.pi.pendingSteeringCount >= MAX_QUEUED_PROMPTS

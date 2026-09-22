@@ -4,6 +4,7 @@ import {
   BOT_SETTINGS_PATH,
   BOT_TOKEN,
   CHAT_MODEL,
+  ENABLE_SUBAGENTS,
   HEARTBEAT_ENABLED,
   HEARTBEAT_MODEL,
   MODEL,
@@ -45,6 +46,10 @@ export function collectConfigProblems(): string[] {
     `Active chat model (${MODEL}) must be included in ALLOWED_MODELS in src/config.ts. Check ${BOT_SETTINGS_PATH} or CHAT_MODEL in src/config.ts.`,
   );
   problems.push(...heartbeatModelProblems());
+  requireConfig(
+    ['', 'true', 'false'].includes(ENABLE_SUBAGENTS.toLowerCase()),
+    `ENABLE_SUBAGENTS in .env (${ENABLE_SUBAGENTS}) must be true or false.`,
+  );
 
   return problems;
 }

@@ -22,6 +22,7 @@ import {
   SEND_LOCAL_DOCUMENTS,
   SEND_LOCAL_IMAGES,
   SESSIONS_DIR,
+  SUBAGENTS_ENABLED,
   TRANSPORT_RECOVERY_DELAY_MS,
   TRANSPORT_RECOVERY_MAX_CONTINUATIONS,
 } from './config.ts';
@@ -49,6 +50,7 @@ import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts'
 import { telegramRestartToolExtension } from './restart-tool.ts';
 import { scheduledTasksExtension } from './scheduled-tasks.ts';
 import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
+import { subagentExtension, type WorkerRunRequest, type WorkerRunResult } from './subagent.ts';
 import { telegramMenuExtension } from './telegram-menu.ts';
 import { telegramVoiceNoteExtension } from './voice.ts';
 
@@ -89,6 +91,12 @@ export interface PiRuntime {
   getSkillPaths: () => string[];
   systemPromptOverride: () => string;
   extensionFactories: Array<(pi: ExtensionAPI) => void>;
+  /**
+   * Factories a sub-agent worker session gets instead of extensionFactories and
+   * the Telegram tools: the guards that must hold for any agent this bot runs,
+   * without the chat's memory blocks or user-facing tools.
+   */
+  workerExtensionFactories?: Array<(pi: ExtensionAPI) => void>;
   requestRestart?: () => Promise<void>;
 }
 
@@ -102,6 +110,7 @@ export async function createPiRuntime(options: {
   getSkillPaths: () => string[];
   systemPromptOverride: () => string;
   extensionFactories?: Array<(pi: ExtensionAPI) => void>;
+  workerExtensionFactories?: Array<(pi: ExtensionAPI) => void>;
   requestRestart?: () => Promise<void>;
 }): Promise<PiRuntime> {
   const modelRuntime = await ModelRuntime.create();
@@ -132,8 +141,159 @@ export async function createPiRuntime(options: {
     getSkillPaths: options.getSkillPaths,
     systemPromptOverride: options.systemPromptOverride,
     extensionFactories: options.extensionFactories ?? [],
+    workerExtensionFactories: options.workerExtensionFactories ?? [],
     ...(options.requestRestart ? { requestRestart: options.requestRestart } : {}),
   };
+}
+
+/**
+ * Runs one sub-agent worker: a fresh AgentSession with its own transcript that
+ * answers a single task and is disposed. Workers share the runtime's model
+ * catalogue, settings, extension paths, and skills, but get only the worker
+ * extension factories and a caller-supplied system prompt — no Telegram tools,
+ * no steering, no transport recovery.
+ *
+ * The transcript is persisted under request.sessionDir with the parent's file
+ * in its header, and framed by two custom entries of request.customType: a
+ * start entry carrying the caller's metadata, and an end entry with the outcome,
+ * so a viewer can tell a finished worker from one the bot was stopped under.
+ */
+export async function runWorkerPrompt(
+  runtime: PiRuntime,
+  request: WorkerRunRequest,
+): Promise<WorkerRunResult> {
+  if (request.signal.aborted) throw new Error('aborted');
+  const model = resolveUsableModel(runtime.modelRuntime, parseModelRef(request.model));
+
+  const sessionManager = SessionManager.create(request.cwd, request.sessionDir, {
+    id: request.sessionId,
+    ...(request.parentSession ? { parentSession: request.parentSession } : {}),
+  });
+  const sessionFile = sessionManager.getSessionFile();
+  sessionManager.appendCustomEntry(request.customType, { event: 'start', ...request.metadata });
+  sessionManager.appendSessionInfo(request.sessionName);
+  if (sessionFile) request.onSessionFile?.(sessionFile);
+
+  const resourceLoader = await loadResources(runtime, {
+    extensionFactories: runtime.workerExtensionFactories ?? [],
+    systemPromptOverride: () => request.systemPrompt,
+  });
+  const { session } = await createAgentSession({
+    cwd: request.cwd,
+    model,
+    modelRuntime: runtime.modelRuntime,
+    resourceLoader,
+    sessionManager,
+    settingsManager: runtime.settingsManager,
+  });
+
+  const chunks: string[] = [];
+  let promptError = '';
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === 'auto_retry_start') {
+      chunks.length = 0;
+      promptError = '';
+    }
+    collectResponseEvent(event, chunks, (message) => {
+      promptError = message;
+    });
+  });
+  const onAbort = (): void => void session.abort();
+  request.signal.addEventListener('abort', onAbort, { once: true });
+
+  let outcome: { status: 'succeeded' | 'failed' | 'aborted'; error?: string } = {
+    status: 'succeeded',
+  };
+  try {
+    try {
+      await session.prompt(request.task);
+    } catch (error) {
+      promptError ||= getErrorMessage(error);
+    }
+    if (request.signal.aborted) {
+      outcome = { status: 'aborted' };
+      throw new Error('aborted');
+    }
+    if (promptError) {
+      outcome = { status: 'failed', error: promptError };
+      throw new Error(promptError);
+    }
+    return { text: chunks.join('').trim() || '(no response)', sessionFile };
+  } finally {
+    request.signal.removeEventListener('abort', onAbort);
+    unsubscribe();
+    try {
+      sessionManager.appendCustomEntry(request.customType, {
+        event: 'end',
+        ...outcome,
+        endedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Failed to close worker transcript:', getErrorMessage(error));
+    }
+    session.dispose();
+  }
+}
+
+/**
+ * The bot's resource loader: nothing from the user's Pi agent directory except
+ * skills named explicitly, plus the given factories. Shared by the persistent
+ * chat and background sessions and by sub-agent workers, which differ only in
+ * which factories and system prompt they get.
+ */
+async function loadResources(
+  runtime: PiRuntime,
+  options: {
+    extensionFactories: Array<(pi: ExtensionAPI) => void>;
+    systemPromptOverride: () => string;
+  },
+): Promise<DefaultResourceLoader> {
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: runtime.cwd,
+    agentDir: getAgentDir(),
+    settingsManager: runtime.settingsManager,
+    noExtensions: true,
+    noSkills: true,
+    additionalExtensionPaths: runtime.getExtensionPaths(),
+    additionalSkillPaths: runtime.getSkillPaths(),
+    extensionFactories: options.extensionFactories,
+    systemPromptOverride: options.systemPromptOverride,
+  });
+  await resourceLoader.reload();
+  return resourceLoader;
+}
+
+/**
+ * Accumulates a response's text and records its error, for both the persistent
+ * sessions and workers. agent_end is emitted for each low-level attempt: a
+ * retrying failure is superseded, and a later successful attempt must clear its
+ * stale error.
+ */
+function collectResponseEvent(
+  event: AgentSessionEvent,
+  chunks: string[],
+  setError: (message: string) => void,
+): void {
+  if (event.type === 'message_update') {
+    const delta = event.assistantMessageEvent;
+    if (delta.type === 'text_delta') {
+      chunks.push(delta.delta);
+    }
+    if (delta.type === 'error') {
+      setError(delta.error.errorMessage || 'Pi agent failed while generating a response');
+    }
+  }
+
+  if (event.type === 'agent_end') {
+    let lastAssistantError = '';
+    for (let index = event.messages.length - 1; index >= 0; index--) {
+      const message = event.messages[index];
+      if (message.role !== 'assistant') continue;
+      lastAssistantError = message.errorMessage ?? '';
+      break;
+    }
+    setError(event.willRetry ? '' : lastAssistantError);
+  }
 }
 
 /** Throws unless the model exists in Pi's catalogue and its provider has auth. */
@@ -512,14 +672,7 @@ export class SdkPiSession {
   }
 
   private async createSession(): Promise<AgentSession> {
-    const resourceLoader = new DefaultResourceLoader({
-      cwd: this.runtime.cwd,
-      agentDir: getAgentDir(),
-      settingsManager: this.runtime.settingsManager,
-      noExtensions: true,
-      noSkills: true,
-      additionalExtensionPaths: this.runtime.getExtensionPaths(),
-      additionalSkillPaths: this.runtime.getSkillPaths(),
+    const resourceLoader = await loadResources(this.runtime, {
       extensionFactories: [
         ...this.runtime.extensionFactories,
         ...(this.runtime.requestRestart
@@ -532,12 +685,21 @@ export class SdkPiSession {
         telegramMenuExtension,
         telegramVoiceNoteExtension,
         backgroundBashExtension(this.runtime.sessionKind),
+        // Withheld when sub-agents are off, so the agent cannot claim to have
+        // delegated work.
+        ...(SUBAGENTS_ENABLED
+          ? [
+              subagentExtension({
+                origin: this.runtime.sessionKind,
+                runWorker: (request) => runWorkerPrompt(this.runtime, request),
+              }),
+            ]
+          : []),
         ...(SEND_LOCAL_IMAGES ? [telegramImageExtension] : []),
         ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension] : []),
       ],
       systemPromptOverride: this.runtime.systemPromptOverride,
     });
-    await resourceLoader.reload();
 
     const sessionManager = await this.createSessionManager();
     const { session } = await createAgentSession({
@@ -579,31 +741,10 @@ export class SdkPiSession {
     setError: (message: string) => void,
     onToolCall: ((notification: string) => void) | undefined,
   ): void {
-    if (event.type === 'message_update') {
-      const delta = event.assistantMessageEvent;
-      if (delta.type === 'text_delta') {
-        chunks.push(delta.delta);
-      }
-      if (delta.type === 'error') {
-        setError(delta.error.errorMessage || 'Pi agent failed while generating a response');
-      }
-    }
+    collectResponseEvent(event, chunks, setError);
 
     if (event.type === 'tool_execution_start') {
       onToolCall?.(formatToolStartNotification(event, session, this.runtime.cwd));
-    }
-
-    if (event.type === 'agent_end') {
-      // agent_end is emitted for each low-level attempt. A retrying failure is
-      // superseded, and a later successful attempt must clear its stale error.
-      let lastAssistantError = '';
-      for (let index = event.messages.length - 1; index >= 0; index--) {
-        const message = event.messages[index];
-        if (message.role !== 'assistant') continue;
-        lastAssistantError = message.errorMessage ?? '';
-        break;
-      }
-      setError(event.willRetry ? '' : lastAssistantError);
     }
   }
 }

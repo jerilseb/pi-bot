@@ -9,6 +9,7 @@ import {
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   PROJECT_SKILLS_DIR,
+  SUBAGENT_SESSIONS_DIR,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
 import { contextGistSystemPromptExtension } from '../src/context-gist.ts';
@@ -16,11 +17,14 @@ import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts'
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
 import { assertModelUsable, createPiRuntime } from '../src/pi-session.ts';
 import { scheduledTasksExtension } from '../src/scheduled-tasks.ts';
+import { subagentExtension } from '../src/subagent.ts';
 import { isRecord } from '../src/util.ts';
 import {
   activeModelSystemPromptExtension,
   ensureMemoryFile,
+  ensureSubagentPromptFile,
   memorySystemPromptExtension,
+  readSubagentSystemPrompt,
   readSystemPrompt,
 } from '../src/system-prompt.ts';
 
@@ -149,6 +153,7 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
       activeModelSystemPromptExtension,
       protectedEnvToolAccessExtension,
     ],
+    workerExtensionFactories: [protectedEnvToolAccessExtension],
   };
 
   const chat = await createPiRuntime({
@@ -169,36 +174,69 @@ async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[
   if (HEARTBEAT_MODEL) assertModelUsable(background.modelRuntime, HEARTBEAT_MODEL);
 }
 
-function verifyScheduledTaskTools(): number {
+/**
+ * Registers a gated extension against a fake API and checks its tool names.
+ * Gated extensions (scheduled tasks, sub-agents) are only wired into a session
+ * when their switch is on, so they are exercised here regardless, or a disabled
+ * deploy could ship a definition that fails the moment someone enables it.
+ */
+function verifyGatedExtensionTools(
+  label: string,
+  extension: (pi: ExtensionAPI) => void,
+  expectedTools: string[],
+): number {
   const registeredTools = new Set<string>();
   const fakePi = {
     registerTool(tool: unknown) {
-      assert(isRecord(tool), 'Scheduled-task extension attempted to register a non-object tool.');
+      assert(isRecord(tool), `${label} extension attempted to register a non-object tool.`);
       assert(
         typeof tool.name === 'string' && tool.name.trim(),
-        'Scheduled-task extension registered a tool without a name.',
+        `${label} extension registered a tool without a name.`,
       );
       registeredTools.add(tool.name);
     },
   } as unknown as ExtensionAPI;
 
-  scheduledTasksExtension(fakePi);
+  extension(fakePi);
 
-  for (const name of [
+  for (const name of expectedTools) {
+    assert(registeredTools.has(name), `${label} extension did not register ${name}.`);
+  }
+  return registeredTools.size;
+}
+
+function verifyScheduledTaskTools(): number {
+  return verifyGatedExtensionTools('Scheduled-task', scheduledTasksExtension, [
     'create_schedule_task',
     'list_scheduled_tasks',
     'cancel_scheduled_task',
     'update_scheduled_task',
-  ]) {
-    assert(registeredTools.has(name), `Scheduled-task extension did not register ${name}.`);
-  }
-  return registeredTools.size;
+  ]);
+}
+
+function verifySubagentTools(): number {
+  const extension = subagentExtension({
+    origin: 'chat',
+    runWorker: async () => {
+      throw new Error('Smoke check never runs a worker.');
+    },
+  });
+  return verifyGatedExtensionTools('Sub-agent', extension, [
+    'subagent_run',
+    'subagent_read',
+    'subagent_stop',
+    'subagent_list',
+    'subagent_stop_all',
+  ]);
 }
 
 async function main(): Promise<void> {
   validateConfiguration();
   ensureMemoryFile();
+  ensureSubagentPromptFile();
+  fs.mkdirSync(SUBAGENT_SESSIONS_DIR, { recursive: true });
   assert(readSystemPrompt().trim(), 'System prompt is empty.');
+  assert(readSubagentSystemPrompt().trim(), 'Sub-agent worker prompt is empty.');
 
   const importedModules = await importAllSourceModules();
   const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
@@ -206,9 +244,10 @@ async function main(): Promise<void> {
   const registeredTools = await importAndRegisterExtensions(extensionPaths);
   await createSmokeRuntimes(extensionPaths, skillPaths);
   const scheduledTaskTools = verifyScheduledTaskTools();
+  const subagentTools = verifySubagentTools();
 
   console.log(
-    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${skillPaths.length} skill(s).`,
+    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
   );
 }
 

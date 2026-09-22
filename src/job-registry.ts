@@ -1,20 +1,61 @@
 import { randomBytes } from 'node:crypto';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { currentModel } from './extension-models.ts';
+import type { IncomingPrompt, JobReportSource, SessionKind } from './types.ts';
 import { errorMessage, formatDuration, sleep } from './util.ts';
 
 /**
- * Bookkeeping for the bot's background-work registries. The only caller today is
- * background bash sessions (src/background-bash.ts); the shape stays generic
- * because it describes any job that starts as 'running', settles into exactly
- * one terminal status, and reports back to the chat agent when it finishes.
+ * Bookkeeping for the bot's background-work registries: background bash
+ * sessions (src/background-bash.ts) and sub-agent jobs (src/subagent.ts). The
+ * shape is generic because it describes any job that starts as 'running',
+ * settles into exactly one terminal status, and reports back to the agent that
+ * started it when it finishes.
  *
  * This module owns the parts that are not specific to a kind of job — ID
- * allocation, TTL pruning, cancellation, and report delivery — while the caller
- * keeps its own status vocabulary and user-facing wording.
+ * allocation, the yield-then-background step, TTL pruning, cancellation, and
+ * report delivery including where a report is routed — while the caller keeps
+ * its own status vocabulary and user-facing wording.
  *
  * A registry lives at module level in src/ (imported once by Node), so it is
  * shared for the lifetime of the bot process. Jobs do not survive bot restarts;
  * main.ts stops them all on shutdown.
  */
+
+/** Where a job was started from, so its report can find its way back. */
+export interface JobOrigin {
+  session: SessionKind;
+  /** Model the starting turn ran on, as provider/model, when the SDK exposed one. */
+  model?: string;
+}
+
+/** Records which session a tool call came from and the model it was on. */
+export function captureJobOrigin(ctx: ExtensionContext, session: SessionKind): JobOrigin {
+  const model = currentModel(ctx);
+  return { session, ...(model ? { model } : {}) };
+}
+
+/**
+ * The prompt that delivers a completion report, addressed to the session that
+ * started the job. A report bound for the background session also pins the
+ * model that session was on when it started the job, since that session has no
+ * default model and a later scheduled task may have moved it elsewhere. The
+ * chat session keeps whatever model the user has selected since.
+ */
+export function jobReportPrompt(
+  origin: JobOrigin,
+  report: { text: string; source: JobReportSource; label: string },
+): IncomingPrompt {
+  const { session, model } = origin;
+  return {
+    text: report.text,
+    attachments: [],
+    source: report.source,
+    session,
+    suppressNoop: true,
+    label: report.label,
+    ...(session === 'background' && model ? { model } : {}),
+  };
+}
 
 /** 'running' plus the caller's terminal statuses. */
 export type JobStatus<TTerminal extends string> = 'running' | TTerminal;
@@ -101,6 +142,22 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   runningCount(): number {
     return this.all().filter((job) => job.status === 'running').length;
+  }
+
+  /**
+   * Waits up to yieldMs for a just-started job. A job that settles in time is
+   * forgotten, since its result goes back inline and no report follows; one
+   * still running is marked backgrounded so its completion report is delivered.
+   * Returns true when the job was backgrounded.
+   */
+  async settleOrBackground(job: TJob, yieldMs: number): Promise<boolean> {
+    await Promise.race([job.done, sleep(yieldMs)]);
+    if (job.status !== 'running') {
+      this.remove(job.id);
+      return false;
+    }
+    job.backgrounded = true;
+    return true;
   }
 
   /**

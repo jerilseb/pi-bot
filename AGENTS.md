@@ -9,10 +9,10 @@ Guidance for AI coding agents working in this repository.
 Key files:
 
 - `main.ts` — entrypoint/orchestrator: constructs the runtimes and sessions, wires the modules together, owns the polling loop, startup banner, post-restart tasks, and shutdown. Keep it to wiring and lifecycle; new behavior belongs in a module.
-- `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the serial worker. Ordinary Telegram messages steer an active chat run; background work and startup/finishing races queue normally. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report. `src/prompt-steering.ts` owns accepted steering messages through delivery, cancellation, or safe deferral, retaining their attachments until the run finishes.
+- `src/prompt-queue.ts` — the single entry point for all work (`handleIncoming`) plus the serial worker. Ordinary Telegram messages steer an active chat run; background work and startup/finishing races queue normally. Every prompt goes through here regardless of origin: Telegram, heartbeat, cron, post-restart, background-bash report, sub-agent report. `src/prompt-steering.ts` owns accepted steering messages through delivery, cancellation, or safe deferral, retaining their attachments until the run finishes.
 - `src/tool-notification-batch.ts` — coalesces tool-call notifications and delivers them in the `toolCalls` mode (`collapsed` edits one expandable message per prompt, `stream` sends one per batch, `off` drops them); `src/tool-notifications.ts` — formats a single event and renders the collapsed block (pure).
 - `src/config.ts` — env vars, paths, models, and all non-secret tuning.
-- `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection); `src/transport-recovery.ts` classifies the narrow transport failures eligible for one post-SDK continuation.
+- `src/pi-session.ts` — Pi SDK runtime + `AgentSession` wrapper (session reuse, extension wiring, stream collection) and `runWorkerPrompt`, the one-shot worker session sub-agents run in; `src/transport-recovery.ts` classifies the narrow transport failures eligible for one post-SDK continuation.
 - `src/chat-session.ts` — the single chat's state and explicit session disposal (no idle timeout).
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
@@ -20,14 +20,14 @@ Key files:
 - `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers). `src/callback-menu.ts` — the shared inline-keyboard lifecycle (`CallbackMenu`, `dispatchCallbackQuery`); `src/model-menu.ts`, `src/reasoning-menu.ts`, `src/tool-call-menu.ts`, `src/transcript-menu.ts` — the keyboards themselves, each supplying only its prefix, texts, and `select`.
 - `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks.
-- `src/background-bash.ts` — background shell sessions. `src/job-registry.ts` — its lifecycle bookkeeping.
-- `src/agent-envelope.ts` — shared layout for the internal prompts the bot sends itself (heartbeat, cron, post-restart, background-bash reports).
+- `src/background-bash.ts` — background shell sessions. `src/subagent.ts` — sub-agent jobs: concurrent worker sessions with their own transcripts under `sessions/subagent-sessions/`, registered only when `ENABLE_SUBAGENTS=true` in `.env`. `src/job-registry.ts` — the lifecycle bookkeeping both share: IDs, the yield-then-background step, TTL pruning, cancellation, and report routing back to the originating session. `src/extension-models.ts` — model lookups shared by the tools that pin work to a model.
+- `src/agent-envelope.ts` — shared layout for the internal prompts the bot sends itself (heartbeat, cron, post-restart, background-bash and sub-agent reports).
 - `src/uploads.ts`, `src/voice.ts`, `src/speech.ts`, `src/telegram-menu.ts` — agent-facing Telegram tools.
 - `src/env-guard.ts` — blocks tool access to `.env` files. `src/util.ts` — shared helpers.
 - `src/restart-tool.ts`, `src/restart-flow.ts` (shared `/restart` + `restart_bot` gate), `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
 - `extensions/` — local Pi extensions (web search, web fetch).
 - `skills/` — Pi skills.
-- `files/` — persistent prompt/memory/heartbeat/schedule state.
+- `files/` — persistent prompt/memory/heartbeat/schedule state, including `files/subagent.md`, the worker system prompt (created with a default on first start).
 - `scripts/systemd.sh` — installs/removes the systemd `--user` unit. `scripts/smoke.ts` — the smoke check.
 
 ## Commands
@@ -55,7 +55,7 @@ Keep `npm run lint` at zero errors. It went unchecked for a while because no scr
 
 - `tests/` holds unit tests run by Node's built-in runner (`node --test`); there is no test framework dependency. Name files `*.test.ts`.
 - Tests must live in `tests/`, not `src/`: `scripts/smoke.ts` imports every `.ts` file under `src/` and would execute them during the smoke check.
-- Current coverage is the pure Telegram HTML machinery in `src/telegram-html.ts` (escaping, sanitizing, tag-aware splitting) — the code where a regression is silent because Telegram rejects a whole message on malformed markup.
+- Coverage centres on the pure Telegram HTML machinery in `src/telegram-html.ts` (escaping, sanitizing, tag-aware splitting) — the code where a regression is silent because Telegram rejects a whole message on malformed markup — plus the prompt queue, steering, transport recovery, and the background-work tools. Sub-agent tools are tested against a fake extension API with a fake worker (`tests/subagent.test.ts`); nothing in `tests/` may start a real Pi session.
 - Prefer invariants over golden strings for the splitter (chunk fits the limit, chunk is independently balanced, no tag or entity cut in half, content preserved). They survive refactors and catch the failure modes that matter.
 
 ## Coding conventions
@@ -70,15 +70,15 @@ Keep `npm run lint` at zero errors. It went unchecked for a while because no scr
 ## Environment and secrets
 
 - Never commit `.env` or real API keys/tokens.
-- Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, and optional ElevenLabs/Tavily/KIE API keys.
-- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. The exception is runtime state in `files/settings.json`: the active model/reasoning level plus `"heartbeat"` and `"cronJobs"` (both default `false`, both gating the ways the bot acts unprompted). That file belongs to Pi's `SettingsManager`, which merges writes into the existing contents, so bot-only keys added there survive `/models` and `/reasoning` — but they must be read through `BotSettings` in `src/config.ts`, not by re-reading the file elsewhere. `files/settings.json` itself is gitignored; `files/settings.json.example` is checked in and must stay byte-identical to what `ensureBotSettingsFile()` writes, so update both together when adding a key. Concurrency limits, timeouts, TTLs, and payload caps for background work (background bash) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
+- Keep secrets and deployment-specific values in `.env`, such as `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, provider API keys, optional ElevenLabs/Tavily/KIE API keys, and the `ENABLE_SUBAGENTS` switch (off by default; any value other than `true`/`false` is a startup error).
+- Non-secret bot configuration lives in `src/config.ts`, including chat/model choices, queue/timeouts, upload behavior, and heartbeat interval. The exception is runtime state in `files/settings.json`: the active model/reasoning level plus `"heartbeat"` and `"cronJobs"` (both default `false`, both gating the ways the bot acts unprompted). That file belongs to Pi's `SettingsManager`, which merges writes into the existing contents, so bot-only keys added there survive `/models` and `/reasoning` — but they must be read through `BotSettings` in `src/config.ts`, not by re-reading the file elsewhere. `files/settings.json` itself is gitignored; `files/settings.json.example` is checked in and must stay byte-identical to what `ensureBotSettingsFile()` writes, so update both together when adding a key. Concurrency limits, timeouts, TTLs, and payload caps for background work (background bash, sub-agents) belong in its "Background work" section — do not add them as module-local constants. Only narrow display widths stay next to the formatter that uses them.
 - Provider-specific auth such as `OPENROUTER_API_KEY` or Pi auth storage is required for the selected model.
 
 ## Operational notes
 
 - This bot uses Telegram long polling, not webhooks.
 - Only one running process should poll a given Telegram bot token.
-- Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested. `TELEGRAM_ALLOWED_CHAT_ID` in `.env` is the single Telegram chat allowed to use the bot; every other chat is ignored.
+- Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested. Sub-agent worker transcripts under `sessions/subagent-sessions/` are kept indefinitely; each records its parent's transcript path in the session header and a `telegram-bot-subagent` custom entry with the job, task, tool call, and parent leaf entry. `TELEGRAM_ALLOWED_CHAT_ID` in `.env` is the single Telegram chat allowed to use the bot; every other chat is ignored.
 - Temporary downloads/generated files are under the system temp directory.
 - After changing extensions, skills, prompts, or env vars, restart the bot.
 - Deployment is a systemd `--user` unit written by `scripts/systemd.sh` to `~/.config/systemd/user/pi-bot.service`. It is generated, not checked in: change the script, then re-run `npm run systemd:install`. `Restart=always` is what makes `/restart` and `restart_bot` work — both exit 0 on purpose and rely on the supervisor to bring the process back.

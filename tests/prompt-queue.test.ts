@@ -152,13 +152,14 @@ test('background jobs and completion reports never steer', async (t) => {
   const f = setup(t);
   await f.send('first');
   await f.send('shell done', 'background-bash-report');
+  await f.send('workers done', 'subagent-report');
   await f.send('cron task', 'cron');
   await f.send('heartbeat task', 'heartbeat');
   assert.equal(f.steer.mock.callCount(), 0);
   assert.equal(f.backgroundSteer.mock.callCount(), 0);
   assert.deepEqual(
     f.chat.queue.map((prompt) => prompt.text),
-    ['shell done'],
+    ['shell done', 'workers done'],
   );
   assert.deepEqual(f.backgroundRuns, ['cron task']);
   assert.equal(f.backgroundOptions()?.recoverTransportErrors, undefined);
@@ -193,6 +194,19 @@ test('pending steering counts toward the existing queue limit', async (t) => {
   assert.equal(f.steer.mock.callCount(), 0);
   assert.ok(f.messages.some((text) => text.includes('Queue full')));
   assert.equal(f.chat.messageCount, 1);
+});
+
+test('completion reports are admitted when the queue is full', async (t) => {
+  const f = setup(t);
+  await f.send('first');
+  t.mock.getter(f.chat.pi, 'pendingSteeringCount', () => MAX_QUEUED_PROMPTS);
+  await f.send('shell done', 'background-bash-report');
+  await f.send('workers done', 'subagent-report');
+  assert.deepEqual(
+    f.chat.queue.map((prompt) => prompt.text),
+    ['shell done', 'workers done'],
+  );
+  assert.ok(!f.messages.some((text) => text.includes('Queue full')));
 });
 
 test('late steering is replayed before fallback queued prompts', async (t) => {
