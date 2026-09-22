@@ -36,6 +36,8 @@ export class BoundedOutputBuffer {
   private completedLines = 0;
   private hasOpenLine = false;
   private totalBytes = 0;
+  /** Decoded characters appended so far; positions for textSince() count these. */
+  private decodedChars = 0;
   private finished = false;
   private tempFilePath: string | null = null;
   private tempFileStream: fs.WriteStream | null = null;
@@ -76,6 +78,24 @@ export class BoundedOutputBuffer {
     };
   }
 
+  /** The current end of the output, to pass to textSince() later. */
+  get position(): number {
+    return this.decodedChars;
+  }
+
+  /**
+   * The output appended after `position`, as far as the kept tail still holds it.
+   * `missed` counts the characters that already scrolled out of the tail; they
+   * survive only in the spilled full-output file.
+   */
+  textSince(position: number): { text: string; missed: number } {
+    const tailStart = this.decodedChars - this.tail.length;
+    if (position >= tailStart) {
+      return { text: this.tail.slice(Math.max(0, position - tailStart)), missed: 0 };
+    }
+    return { text: this.tail, missed: tailStart - position };
+  }
+
   /**
    * The last line of output with visible text, for a one-line progress display.
    * A carriage return ends a line too, so a progress bar redrawn in place shows
@@ -104,6 +124,7 @@ export class BoundedOutputBuffer {
 
   private appendDecodedText(text: string): void {
     if (!text) return;
+    this.decodedChars += text.length;
     this.tail += text;
     for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) {
       this.completedLines++;

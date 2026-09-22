@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ProgressTransport } from '../src/job-progress.ts';
 import { captureJobOrigin, type Job, JobRegistry, jobReportPrompt } from '../src/job-registry.ts';
+import { notifySteeringMessage } from '../src/steering-signal.ts';
 import type { SessionKind } from '../src/types.ts';
 
 /**
@@ -211,6 +212,61 @@ test('cancelling shows the stop even if the runner never settles in time', async
   await reg.cancel([j]);
   assert.deepEqual(calls.at(-1), ['edit', `${j.id} cancelled`]);
   assert.deepEqual(reports, []);
+});
+
+test('a wait returns when the job settles', async () => {
+  const reg = registry();
+  const j = job(reg);
+  setTimeout(() => j.finish(), 5);
+  assert.equal(await reg.waitFor(j, { timeoutMs: 1_000, session: 'chat' }), 'settled');
+  assert.equal(await reg.waitFor(j, { timeoutMs: 1_000, session: 'chat' }), 'settled');
+});
+
+test('a wait gives up at its timeout while the job keeps running', async () => {
+  const reg = registry();
+  const j = job(reg);
+  assert.equal(await reg.waitFor(j, { timeoutMs: 5, session: 'chat' }), 'timeout');
+  assert.equal(j.status, 'running');
+  j.finish();
+});
+
+test('a message steered into the waiting session ends the wait, and only that session', async () => {
+  const reg = registry();
+  const j = job(reg);
+  const waiting = reg.waitFor(j, { timeoutMs: 1_000, session: 'chat' });
+  notifySteeringMessage('background');
+  const early = await Promise.race([waiting, new Promise((r) => setTimeout(() => r('still'), 10))]);
+  assert.equal(early, 'still', 'a message to the other session is not for this turn');
+  notifySteeringMessage('chat');
+  assert.equal(await waiting, 'interrupted');
+  j.finish();
+});
+
+test('aborting the turn ends the wait', async () => {
+  const reg = registry();
+  const j = job(reg);
+  const controller = new AbortController();
+  const waiting = reg.waitFor(j, { timeoutMs: 1_000, session: 'chat', signal: controller.signal });
+  controller.abort();
+  assert.equal(await waiting, 'aborted');
+  j.finish();
+});
+
+test('a wait ends once its until condition holds, checked while it waits', async () => {
+  const reg = registry();
+  const j = job(reg);
+  let ready = false;
+  setTimeout(() => {
+    ready = true;
+  }, 5);
+  const outcome = await reg.waitFor(j, {
+    timeoutMs: 1_000,
+    session: 'chat',
+    until: () => ready,
+    checkMs: 1,
+  });
+  assert.equal(outcome, 'matched');
+  j.finish();
 });
 
 test('the origin records the session and the model the turn is on, when there is one', () => {

@@ -17,6 +17,9 @@ import {
   BACKGROUND_BASH_NOOP,
   BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS,
   BACKGROUND_BASH_STOP_WAIT_MS,
+  BACKGROUND_BASH_WAIT_OUTPUT_MAX_CHARS,
+  BACKGROUND_WAIT_CHECK_MS,
+  BACKGROUND_WAIT_MAX_MS,
 } from './config.ts';
 import {
   captureJobOrigin,
@@ -24,6 +27,7 @@ import {
   type JobOrigin,
   JobRegistry,
   jobReportPrompt,
+  type WaitOutcome,
 } from './job-registry.ts';
 import { BoundedOutputBuffer, type OutputSnapshot } from './output-buffer.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
@@ -57,6 +61,8 @@ interface BackgroundBashSession extends Job<BackgroundBashTerminalStatus> {
   command: string;
   cwd: string;
   output: BoundedOutputBuffer;
+  /** Output position the agent has seen up to, so a wait returns only what is new. */
+  outputSeen: number;
   abort: AbortController;
   exitCode: number | null;
 }
@@ -130,6 +136,23 @@ const ReadParams = Type.Object({
   }),
 });
 
+const WaitParams = Type.Object({
+  session_id: Type.String({
+    description: 'Background session ID returned by background_bash_start.',
+  }),
+  timeout_ms: Type.Optional(
+    Type.Number({
+      description: `Longest to wait (default and max ${BACKGROUND_WAIT_MAX_MS}ms).`,
+    }),
+  ),
+  until: Type.Optional(
+    Type.String({
+      description:
+        'Regular expression; the wait also ends once new output matches it, e.g. a server\'s "listening on" line.',
+    }),
+  ),
+});
+
 const StopParams = Type.Object({
   session_id: Type.String({
     description: 'Background session ID returned by background_bash_start.',
@@ -159,7 +182,8 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
     promptGuidelines: [
       'Use the normal bash tool for short commands that complete quickly; use background_bash_start for dev servers, file watchers, long builds, tail -f, or when the user asks to run something in the background.',
       `If a background command may run longer than ${END_TURN_AFTER} in total, or is still running after that, end your turn instead of waiting: tell the user briefly what is running and what you will do once it finishes, then stop. The [background-bash-report] resumes you in this conversation with the result; continue the remaining steps then.`,
-      'For shorter waits, poll with background_bash_read when you need progress or the result. Never wait by sleeping in bash. Once a read has shown the finished result, no completion report follows.',
+      `To wait for a command expected to finish within ${END_TURN_AFTER}, call background_bash_wait: it blocks without polling until the command finishes, its new output matches \`until\`, or the user sends a message, and returns only output you have not seen yet. If the wait times out with the command still running, end your turn as above.`,
+      'Never wait by polling background_bash_read or by sleeping in bash; background_bash_read is for inspecting output. Once a read or a wait has shown the finished result, no completion report follows.',
       'The user sees a live progress message for background commands started from the chat, so do not post progress updates yourself.',
       'Background commands have no stdin: anything that might prompt must use non-interactive flags (--yes, CI=true, DEBIAN_FRONTEND=noninteractive) or it will fail fast on stdin EOF.',
       'Stop background sessions with background_bash_stop when they are no longer needed.',
@@ -200,15 +224,17 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
         );
       }
 
+      const soFar = formatOutputSnapshot(session);
+      session.outputSeen = session.output.position;
       return textResult(
         [
           `Started background bash session ${session.id}`,
           `Command: ${session.command}`,
           `Cwd: ${session.cwd}`,
           `Status: running (max runtime ${formatDuration(maxRuntimeMs)})`,
-          `If it may run longer than ${END_TURN_AFTER} in total, end your turn now: an internal [background-bash-report] message with the result resumes you when it finishes. For a shorter wait, poll with background_bash_read using session_id "${session.id}"; once a read shows the finished result, no report follows.`,
+          `If it should finish within ${END_TURN_AFTER}, wait for it with background_bash_wait using session_id "${session.id}". If it may run longer, end your turn now: an internal [background-bash-report] message with the result resumes you when it finishes.`,
           'Output so far:',
-          formatOutputSnapshot(session),
+          soFar,
         ].join('\n'),
       );
     },
@@ -218,7 +244,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
     name: 'background_bash_read',
     label: 'Read Background Bash',
     description:
-      'Read the buffered output and status of a background bash session started with background_bash_start. For checking progress or diagnosing a problem, not for waiting out a long command.',
+      'Read the buffered output and status of a background bash session started with background_bash_start. For inspecting output or diagnosing a problem; to wait for the command, use background_bash_wait.',
     parameters: ReadParams,
 
     async execute(_toolCallId, params: Static<typeof ReadParams>) {
@@ -226,6 +252,8 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
       if (!session) return textResult(registry.unknownJobMessage(params.session_id));
       // The whole buffered tail is returned below, at least as much as a report carries.
       registry.markResultRead(session, originSession);
+      const output = formatOutputSnapshot(session);
+      session.outputSeen = session.output.position;
 
       return textResult(
         [
@@ -233,7 +261,59 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
           `Command: ${session.command}`,
           registry.statusLine(session),
           'Output:',
-          formatOutputSnapshot(session),
+          output,
+        ].join('\n'),
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: 'background_bash_wait',
+    label: 'Wait for Background Bash',
+    description: `Wait for a background bash session without polling. Returns as soon as the command finishes, its new output matches \`until\`, the user sends a message, or the timeout passes (default and max ${END_TURN_AFTER}), with the status and only the output you have not seen yet.`,
+    parameters: WaitParams,
+
+    async execute(_toolCallId, params: Static<typeof WaitParams>, signal) {
+      const session = registry.get(params.session_id);
+      if (!session) return textResult(registry.unknownJobMessage(params.session_id));
+
+      let pattern: RegExp | null = null;
+      if (params.until) {
+        try {
+          pattern = new RegExp(params.until, 'm');
+        } catch (error) {
+          return textResult(`Invalid until pattern: ${errorMessage(error)}`);
+        }
+      }
+      const timeoutMs = clamp(
+        params.timeout_ms ?? BACKGROUND_WAIT_MAX_MS,
+        1_000,
+        BACKGROUND_WAIT_MAX_MS,
+      );
+      const until = pattern;
+      const outcome = await registry.waitFor(session, {
+        timeoutMs,
+        session: originSession,
+        ...(signal ? { signal } : {}),
+        ...(until
+          ? {
+              until: () => until.test(session.output.textSince(session.outputSeen).text),
+              checkMs: BACKGROUND_WAIT_CHECK_MS,
+            }
+          : {}),
+      });
+
+      // Only takes effect once the command has finished: the unseen output below
+      // is then everything a report would add.
+      registry.markResultRead(session, originSession);
+      const unseen = formatUnseenOutput(session);
+      session.outputSeen = session.output.position;
+      return textResult(
+        [
+          `Session ${session.id}: ${describeWaitOutcome(outcome, timeoutMs)}`,
+          registry.statusLine(session),
+          'New output since you last saw it:',
+          unseen,
         ].join('\n'),
       );
     },
@@ -314,6 +394,7 @@ function startSession(
     startedAt: Date.now(),
     endedAt: null,
     output: new BoundedOutputBuffer('pi-background-bash'),
+    outputSeen: 0,
     abort: new AbortController(),
     exitCode: null,
     status: 'running',
@@ -356,6 +437,41 @@ function startSession(
 
   registry.register(session);
   return session;
+}
+
+function describeWaitOutcome(outcome: WaitOutcome, timeoutMs: number): string {
+  switch (outcome) {
+    case 'settled':
+      return 'finished.';
+    case 'matched':
+      return 'the new output matched `until`; the command is still running.';
+    case 'timeout':
+      return `still running after waiting ${formatDuration(timeoutMs)}. End your turn now, saying what you will do once it finishes; the [background-bash-report] resumes you then. Do not wait again unless the output shows it is about to finish.`;
+    case 'interrupted':
+      return 'the user sent a message, which follows this result; the command is still running. Answer the user, then wait again or end your turn.';
+    case 'aborted':
+      return 'the wait was aborted; the command is still running.';
+  }
+}
+
+/**
+ * The output the agent has not seen yet, keeping the end when it is long, since
+ * that is where a build or test run puts its outcome. Any cut is announced first.
+ */
+function formatUnseenOutput(session: BackgroundBashSession): string {
+  const { text: raw, missed } = session.output.textSince(session.outputSeen);
+  const text = raw.trimEnd();
+  const total = raw.length + missed;
+  if (!text) return missed > 0 ? unseenCutNotice(session, 0, total) : '(no new output)';
+
+  const tail = tailChars(text, BACKGROUND_BASH_WAIT_OUTPUT_MAX_CHARS);
+  if (tail.length === text.length && missed === 0) return tail;
+  return `${unseenCutNotice(session, tail.length, total)}\n${tail}`;
+}
+
+function unseenCutNotice(session: BackgroundBashSession, shown: number, total: number): string {
+  const fullOutput = session.output.snapshot().fullOutputPath;
+  return `[Showing the last ${shown} of ${total} new chars. Use background_bash_read for the buffered tail${fullOutput ? `, or read the full output at ${fullOutput}` : ''}.]`;
 }
 
 function describeCompletion(session: BackgroundBashSession): string {

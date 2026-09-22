@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { SdkPiSession, type PiRuntime } from '../src/pi-session.ts';
 import type { SteeringDisposition } from '../src/prompt-steering.ts';
+import { onSteeringMessage } from '../src/steering-signal.ts';
 import type { IncomingPrompt } from '../src/types.ts';
 
 /** A transport-free SDK double: exercises the real wrapper, not a model/provider. */
@@ -136,5 +137,24 @@ test('agent_end and a pending session reset both prevent new steering', async ()
     assert.equal(await f.pi.trySteer({ text: 'next', attachments: [] }), false);
     f.release();
     await run;
+  }
+});
+
+test('an accepted steer tells waits in this session, a refused one does not', async () => {
+  const f = fixture();
+  let signals = 0;
+  const off = onSteeringMessage('chat', () => {
+    signals++;
+  });
+  try {
+    assert.equal(await f.pi.trySteer({ text: 'too early', attachments: [] }), false);
+    assert.equal(signals, 0);
+    const { run } = await f.start();
+    assert.equal(await f.pi.trySteer({ text: 'change of plan', attachments: [] }), true);
+    assert.equal(signals, 1);
+    f.release();
+    await run;
+  } finally {
+    off();
   }
 });

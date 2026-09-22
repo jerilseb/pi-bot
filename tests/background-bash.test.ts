@@ -170,6 +170,10 @@ test('the guidance says to end the turn rather than wait out a long command', ()
   } as unknown as ExtensionAPI);
   const guidelines = tools.get('background_bash_start')?.promptGuidelines?.join('\n') ?? '';
   assert.match(guidelines, /may run longer than 3m in total[^\n]*end your turn instead of waiting/);
-  assert.match(guidelines, /Never wait by sleeping in bash/);
-  assert.match(tools.get('background_bash_read')?.description ?? '', /not for waiting/);
+  assert.match(guidelines, /expected to finish within 3m, call background_bash_wait/);
+  assert.match(guidelines, /Never wait by polling background_bash_read or by sleeping in bash/);
+  assert.match(
+    tools.get('background_bash_read')?.description ?? '',
+    /to wait for the command, use background_bash_wait/,
+  );
 });

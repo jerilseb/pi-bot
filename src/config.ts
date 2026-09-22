@@ -336,6 +336,16 @@ export const JOB_PROGRESS_UPDATE_MS = 20_000;
  * may poll. Stated to the agent in the background bash and sub-agent tools.
  */
 export const BACKGROUND_JOB_END_TURN_AFTER_MS = 3 * 60_000;
+/**
+ * Longest (and default) background_bash_wait / subagent_wait. Equal to the
+ * end-your-turn threshold: a job worth waiting for in the turn is one expected
+ * to finish within it, and one that outlasts the wait should end the turn.
+ */
+export const BACKGROUND_WAIT_MAX_MS = BACKGROUND_JOB_END_TURN_AFTER_MS;
+/** How often a wait with an `until` pattern checks the command's new output. */
+export const BACKGROUND_WAIT_CHECK_MS = 250;
+/** Unseen output a background_bash_wait returns; the tail is kept. */
+export const BACKGROUND_BASH_WAIT_OUTPUT_MAX_CHARS = 3_000;
 
 /** Jobs (one subagent_run call each) that may be running at once. */
 export const SUBAGENT_MAX_RUNNING_JOBS = 8;

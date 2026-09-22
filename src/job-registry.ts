@@ -6,8 +6,9 @@ import {
   type ProgressMessageOptions,
   startProgressMessage,
 } from './job-progress.ts';
+import { onSteeringMessage } from './steering-signal.ts';
 import type { IncomingPrompt, JobReportSource, SessionKind } from './types.ts';
-import { errorMessage, formatDuration, sleep } from './util.ts';
+import { errorMessage, formatDuration } from './util.ts';
 
 /**
  * Bookkeeping for the bot's background-work registries: background bash
@@ -68,6 +69,23 @@ export function jobReportPrompt(
     isSuperseded: report.isSuperseded,
     ...(session === 'background' && model ? { model } : {}),
   };
+}
+
+/**
+ * Why a wait returned: the job settled, the caller's `until` condition held, the
+ * timeout passed, the user sent a message into the waiting turn, or the turn was
+ * aborted.
+ */
+export type WaitOutcome = 'settled' | 'matched' | 'timeout' | 'interrupted' | 'aborted';
+
+export interface WaitOptions {
+  timeoutMs: number;
+  /** The session the waiting turn runs in; a message steered into it ends the wait. */
+  session: SessionKind;
+  signal?: AbortSignal;
+  /** Ends the wait early once true; checked every checkMs while the job runs. */
+  until?: () => boolean;
+  checkMs?: number;
 }
 
 /** 'running' plus the caller's terminal statuses. */
@@ -179,7 +197,7 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
    * Returns true when the job was backgrounded.
    */
   async settleOrBackground(job: TJob, yieldMs: number): Promise<boolean> {
-    await Promise.race([job.done, sleep(yieldMs)]);
+    await settleWithin(job.done, yieldMs);
     if (job.status !== 'running') {
       this.remove(job.id);
       return false;
@@ -187,6 +205,46 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
     job.backgrounded = true;
     this.startProgress(job);
     return true;
+  }
+
+  /**
+   * Blocks the calling tool, not the model, until one of the WaitOptions ends
+   * it. No model call is spent while it waits, and the job's progress message
+   * keeps the user informed meanwhile.
+   */
+  waitFor(job: TJob, options: WaitOptions): Promise<WaitOutcome> {
+    if (job.status !== 'running') return Promise.resolve('settled');
+    if (options.signal?.aborted) return Promise.resolve('aborted');
+    if (options.until?.()) return Promise.resolve('matched');
+
+    return new Promise((resolve) => {
+      const cleanups: Array<() => void> = [];
+      let finished = false;
+      const finish = (outcome: WaitOutcome): void => {
+        if (finished) return;
+        finished = true;
+        for (const cleanup of cleanups) cleanup();
+        resolve(outcome);
+      };
+
+      void job.done.then(() => finish('settled'));
+      const timer = setTimeout(() => finish('timeout'), options.timeoutMs);
+      cleanups.push(() => clearTimeout(timer));
+      cleanups.push(onSteeringMessage(options.session, () => finish('interrupted')));
+
+      const { signal, until } = options;
+      if (signal) {
+        const onAbort = (): void => finish('aborted');
+        signal.addEventListener('abort', onAbort, { once: true });
+        cleanups.push(() => signal.removeEventListener('abort', onAbort));
+      }
+      if (until) {
+        const check = setInterval(() => {
+          if (until()) finish('matched');
+        }, options.checkMs ?? 1_000);
+        cleanups.push(() => clearInterval(check));
+      }
+    });
   }
 
   /**
@@ -234,10 +292,10 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
       this.options.signalCancel(job);
     }
     if (running.length > 0) {
-      await Promise.race([
+      await settleWithin(
         Promise.allSettled(running.map((job) => job.done)),
-        sleep(this.options.cancelWaitMs),
-      ]);
+        this.options.cancelWaitMs,
+      );
     }
     // Awaited here as well as on settle: at shutdown the process may exit
     // before a runner's settle path runs, and a message left saying "running"
@@ -310,5 +368,24 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
         this.jobs.delete(job.id);
       }
     }
+  }
+}
+
+/**
+ * Waits for `promise` or `ms`, whichever comes first. The timer is cleared
+ * either way: a plain race against sleep() would leave it pending and hold the
+ * process open until it fired.
+ */
+async function settleWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }

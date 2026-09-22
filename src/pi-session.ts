@@ -37,6 +37,7 @@ import {
 import { formatToolStartNotification } from './tool-notifications.ts';
 import type { Attachment, IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
 import { PromptSteering, type SteeringDisposition } from './prompt-steering.ts';
+import { notifySteeringMessage } from './steering-signal.ts';
 import {
   isTransientTransportError,
   TRANSPORT_RECOVERY_PROMPT,
@@ -528,10 +529,19 @@ export class SdkPiSession {
     return this.steering?.pendingCount ?? 0;
   }
 
-  /** False during startup, shutdown, or a pending reset: the caller queues instead. */
+  /**
+   * False during startup, shutdown, or a pending reset: the caller queues instead.
+   * An accepted message also ends any wait tool blocking this turn, so the
+   * message is not held until the wait times out.
+   */
   async trySteer(prompt: IncomingPrompt): Promise<boolean> {
     if (!this.steering || this.pendingNewSessionRequest) return false;
-    return this.steering.trySteer(prompt, buildPiPrompt(prompt.text, prompt.attachments));
+    const steered = await this.steering.trySteer(
+      prompt,
+      buildPiPrompt(prompt.text, prompt.attachments),
+    );
+    if (steered) notifySteeringMessage(this.runtime.sessionKind);
+    return steered;
   }
 
   async requestNewSession(task?: string): Promise<string> {

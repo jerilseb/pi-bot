@@ -35,3 +35,12 @@ test('no output yet reads as empty', () => {
   assert.equal(buffer().lastLine(), '');
   assert.equal(buffer('\n\n').lastLine(), '');
 });
+
+test('textSince returns only what was appended after a position', () => {
+  const output = buffer('first\n');
+  const seen = output.position;
+  output.append(Buffer.from('second\nthird\n'));
+  assert.deepEqual(output.textSince(seen), { text: 'second\nthird\n', missed: 0 });
+  assert.deepEqual(output.textSince(output.position), { text: '', missed: 0 });
+  assert.equal(output.textSince(0).text, 'first\nsecond\nthird\n');
+});
