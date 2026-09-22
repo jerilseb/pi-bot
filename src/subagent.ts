@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type, type Static } from 'typebox';
 import { buildAgentEnvelope } from './agent-envelope.ts';
 import {
+  BACKGROUND_JOB_END_TURN_AFTER_MS,
   SUBAGENT_COMPLETED_TTL_MS,
   SUBAGENT_DEFAULT_MAX_RUNTIME_MS,
   SUBAGENT_DEFAULT_YIELD_MS,
@@ -53,6 +54,9 @@ import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
  * Lifecycle bookkeeping lives in src/job-registry.ts. Tuning knobs live in
  * src/config.ts under "Background work".
  */
+
+/** The end-your-turn threshold, as the agent reads it (e.g. "3m"). */
+const END_TURN_AFTER = formatDuration(BACKGROUND_JOB_END_TURN_AFTER_MS);
 
 /** Custom entry type framing a worker transcript: a start entry with metadata, an end entry with the outcome. */
 export const SUBAGENT_SESSION_ENTRY_TYPE = 'telegram-bot-subagent';
@@ -254,13 +258,15 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     name: 'subagent_run',
     label: 'Run Sub-agents',
     description:
-      'Delegate one or more self-contained tasks to worker agents that run concurrently in fresh sessions with file, shell, web, and skill tools but no access to this conversation. Waits briefly; if every worker finishes in time the results are returned, otherwise the job keeps running and a job ID is returned for polling with subagent_read. Use for independent research or implementation chunks that would otherwise take many turns here.',
+      'Delegate one or more self-contained tasks to worker agents that run concurrently in fresh sessions with file, shell, web, and skill tools but no access to this conversation. Waits briefly; if every worker finishes in time the results are returned, otherwise the job keeps running, a job ID is returned, and a completion report is delivered to you when it finishes. Use for independent research or implementation chunks that would otherwise take many turns here.',
     promptSnippet:
       'Delegate independent, self-contained tasks to concurrent worker agents with subagent_run.',
     promptGuidelines: [
       'Use subagent_run for work that splits into independent pieces, or for a long investigation whose details you do not need in this conversation. Do the work yourself when it is short or depends on back-and-forth with the user.',
       'Workers see only their task text. Put every fact, path, constraint, and the expected shape of the answer into each task; never assume a worker knows what the user said.',
-      'After a job is backgrounded, keep the job ID and poll it with subagent_read when you need results; an internal [subagent-report] message with the results is delivered to you when the job finishes, unless a read has already shown them.',
+      `If a backgrounded job may run longer than ${END_TURN_AFTER} in total, or is still running after that, end your turn instead of waiting: tell the user briefly what the workers are doing and what you will do with their results, then stop. The [subagent-report] resumes you in this conversation with the results; continue the remaining steps then.`,
+      'For shorter waits, poll with subagent_read when you need results. Never wait by sleeping in bash. Once a read has shown the finished results, no completion report follows.',
+      'The user sees a live progress message for jobs started from the chat, so do not post progress updates yourself.',
       'Workers cannot contact the user and cannot start sub-agents of their own. Relay their results to the user yourself.',
       'Stop jobs you no longer need with subagent_stop.',
     ],
@@ -336,7 +342,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
             text: [
               `Started sub-agent job ${job.id} with ${job.tasks.length} task${job.tasks.length === 1 ? '' : 's'}; still running after ${formatDuration(yieldTimeMs)}.`,
               `Max runtime: ${formatDuration(maxRuntimeMs)}.`,
-              `Poll with subagent_read using job_id "${job.id}"; an internal [subagent-report] message with the results is delivered to you when it finishes, unless you have already read the finished results.`,
+              `If it may run longer than ${END_TURN_AFTER} in total, end your turn now: an internal [subagent-report] message with the results resumes you when it finishes. For a shorter wait, poll with subagent_read using job_id "${job.id}"; once a read shows the finished results, no report follows.`,
               '',
               formatTaskStatusList(job),
             ].join('\n'),
@@ -351,7 +357,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     name: 'subagent_read',
     label: 'Read Sub-agent Job',
     description:
-      'Read the status and any results so far of a sub-agent job started with subagent_run.',
+      'Read the status and any results so far of a sub-agent job started with subagent_run. For checking progress, not for waiting out a long job.',
     parameters: JobIdParams,
 
     async execute(_toolCallId, params: Static<typeof JobIdParams>) {

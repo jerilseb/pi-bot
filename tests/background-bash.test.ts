@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { ExtensionAPI, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   type BackgroundBashReport,
+  backgroundBashExtension,
   backgroundBashReportPrompt,
   formatBackgroundBashProgress,
   formatReportOutput,
@@ -159,4 +161,15 @@ test('output in the progress message is escaped, and absent until there is some'
   const html = progressSession({ output: { lastLine: () => '<b>1 < 2</b> & more' } });
   assert.match(html, /<i>&lt;b&gt;1 &lt; 2&lt;\/b&gt; &amp; more<\/i>$/);
   assert.equal(progressSession({ output: { lastLine: () => '' } }).split('\n').length, 2);
+});
+
+test('the guidance says to end the turn rather than wait out a long command', () => {
+  const tools = new Map<string, ToolDefinition>();
+  backgroundBashExtension('chat')({
+    registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
+  } as unknown as ExtensionAPI);
+  const guidelines = tools.get('background_bash_start')?.promptGuidelines?.join('\n') ?? '';
+  assert.match(guidelines, /may run longer than 3m in total[^\n]*end your turn instead of waiting/);
+  assert.match(guidelines, /Never wait by sleeping in bash/);
+  assert.match(tools.get('background_bash_read')?.description ?? '', /not for waiting/);
 });

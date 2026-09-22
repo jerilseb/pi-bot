@@ -7,6 +7,7 @@ import {
 import { Type, type Static } from 'typebox';
 import { buildAgentEnvelope } from './agent-envelope.ts';
 import {
+  BACKGROUND_JOB_END_TURN_AFTER_MS,
   BACKGROUND_BASH_COMPLETED_TTL_MS,
   BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS,
   BACKGROUND_BASH_DEFAULT_YIELD_MS,
@@ -101,6 +102,9 @@ export function setBackgroundBashReportHandler(
   registry.setReportHandler(handler);
 }
 
+/** The end-your-turn threshold, as the agent reads it (e.g. "3m"). */
+const END_TURN_AFTER = formatDuration(BACKGROUND_JOB_END_TURN_AFTER_MS);
+
 const StartParams = Type.Object({
   command: Type.String({ description: 'Bash command to run in the background.', minLength: 1 }),
   cwd: Type.Optional(
@@ -149,12 +153,14 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
     name: 'background_bash_start',
     label: 'Background Bash',
     description:
-      'Run a bash command in the background. Waits briefly; if the command finishes in time the full result is returned, otherwise it keeps running and a session ID is returned for polling with background_bash_read. Use for long-running commands: dev servers, watchers, long builds, tail -f. Use the normal bash tool for short commands.',
+      'Run a bash command in the background. Waits briefly; if the command finishes in time the full result is returned, otherwise it keeps running, a session ID is returned, and a completion report is delivered to you when it finishes. Use for long-running commands: dev servers, watchers, long builds, tail -f. Use the normal bash tool for short commands.',
     promptSnippet:
       'Run long-lived shell commands (dev servers, watchers, long builds) with background_bash_start instead of blocking bash.',
     promptGuidelines: [
       'Use the normal bash tool for short commands that complete quickly; use background_bash_start for dev servers, file watchers, long builds, tail -f, or when the user asks to run something in the background.',
-      'After starting a background command, keep the session ID and poll it with background_bash_read when you need progress or final output. Once a read has shown the finished result, no completion report follows.',
+      `If a background command may run longer than ${END_TURN_AFTER} in total, or is still running after that, end your turn instead of waiting: tell the user briefly what is running and what you will do once it finishes, then stop. The [background-bash-report] resumes you in this conversation with the result; continue the remaining steps then.`,
+      'For shorter waits, poll with background_bash_read when you need progress or the result. Never wait by sleeping in bash. Once a read has shown the finished result, no completion report follows.',
+      'The user sees a live progress message for background commands started from the chat, so do not post progress updates yourself.',
       'Background commands have no stdin: anything that might prompt must use non-interactive flags (--yes, CI=true, DEBIAN_FRONTEND=noninteractive) or it will fail fast on stdin EOF.',
       'Stop background sessions with background_bash_stop when they are no longer needed.',
     ],
@@ -200,7 +206,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
           `Command: ${session.command}`,
           `Cwd: ${session.cwd}`,
           `Status: running (max runtime ${formatDuration(maxRuntimeMs)})`,
-          `Poll with background_bash_read using session_id "${session.id}"; an internal [background-bash-report] message with the result is delivered to you when it finishes, unless you have already read the finished result.`,
+          `If it may run longer than ${END_TURN_AFTER} in total, end your turn now: an internal [background-bash-report] message with the result resumes you when it finishes. For a shorter wait, poll with background_bash_read using session_id "${session.id}"; once a read shows the finished result, no report follows.`,
           'Output so far:',
           formatOutputSnapshot(session),
         ].join('\n'),
@@ -212,7 +218,7 @@ function registerBackgroundBashTools(pi: ExtensionAPI, originSession: SessionKin
     name: 'background_bash_read',
     label: 'Read Background Bash',
     description:
-      'Read the buffered output and status of a background bash session started with background_bash_start.',
+      'Read the buffered output and status of a background bash session started with background_bash_start. For checking progress or diagnosing a problem, not for waiting out a long command.',
     parameters: ReadParams,
 
     async execute(_toolCallId, params: Static<typeof ReadParams>) {

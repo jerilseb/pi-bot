@@ -170,6 +170,7 @@ test('a job still running after the yield is backgrounded and reports once when 
   );
   const jobId = jobIdIn(started);
   assert.match(started, /still running after/);
+  assert.match(started, /If it may run longer than 3m in total, end your turn now/);
   assert.match(started, /Task 1: running/);
 
   const running = await f.text(f.call('subagent_read', { job_id: jobId }));
@@ -339,4 +340,11 @@ test('the interrupted note names running jobs of the given session only', async 
 
   await stopAllSubagents();
   assert.equal(interruptedSubagentsNote('background'), null);
+});
+
+test('the guidance says to end the turn rather than wait out a long job', (t) => {
+  const f = setup(t);
+  const guidelines = f.tools.get('subagent_run')?.promptGuidelines?.join('\n') ?? '';
+  assert.match(guidelines, /may run longer than 3m in total[^\n]*end your turn instead of waiting/);
+  assert.match(guidelines, /Never wait by sleeping in bash/);
 });

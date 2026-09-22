@@ -329,6 +329,13 @@ export const BACKGROUND_BASH_STOP_WAIT_MS = 5_000;
  * no model call; the elapsed time it shows means most refreshes do edit.
  */
 export const JOB_PROGRESS_UPDATE_MS = 20_000;
+/**
+ * Guidance, not a limit: a background job the agent expects to run longer than
+ * this, or that is still running after it, should end the agent's turn, with the
+ * completion report resuming the work in the same conversation. Shorter waits
+ * may poll. Stated to the agent in the background bash and sub-agent tools.
+ */
+export const BACKGROUND_JOB_END_TURN_AFTER_MS = 3 * 60_000;
 
 /** Jobs (one subagent_run call each) that may be running at once. */
 export const SUBAGENT_MAX_RUNNING_JOBS = 8;
