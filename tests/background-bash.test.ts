@@ -136,7 +136,7 @@ function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBa
 test('the progress message shows status, runtime, the command on one line, and the latest output', () => {
   const html = progressSession({});
   const [header, command, output] = html.split('\n');
-  assert.equal(header, '⏳ <b>Background command</b> · running · 6m 12s');
+  assert.equal(header, '⏳ <b>Background bash</b> · running · 6m 12s');
   assert.equal(command, '<code>bg_1</code> · <code>uv pip install "vllm==0.16.0"</code>');
   assert.equal(output, '<i>Downloading vllm (484.8MiB)</i>');
 });
@@ -145,7 +145,7 @@ test('the progress message ends on the outcome', () => {
   const ended = { startedAt: 0, endedAt: 663_000 };
   assert.match(
     progressSession({ ...ended, status: 'exited', exitCode: 0 }),
-    /^✅ <b>Background command<\/b> · exited with code 0 · 11m 3s/,
+    /^✅ <b>Background bash<\/b> · exited with code 0 · 11m 3s/,
   );
   assert.match(progressSession({ ...ended, status: 'exited', exitCode: 2 }), /^❌ .* code 2/);
   assert.match(progressSession({ ...ended, status: 'stopped' }), /^⏹ .* stopped/);

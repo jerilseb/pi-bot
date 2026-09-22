@@ -393,7 +393,7 @@ export function formatBackgroundBashProgress(
           : '❌';
   const runtime = formatDuration((session.endedAt ?? Date.now()) - session.startedAt);
   const lines = [
-    `${icon} <b>Background command</b> · ${escapeTelegramHtml(describeStatus(session))} · ${runtime}`,
+    `${icon} <b>Background bash</b> · ${escapeTelegramHtml(describeStatus(session))} · ${runtime}`,
     `<code>${session.id}</code> · <code>${escapeTelegramHtml(oneLineLabel(session.command, PROGRESS_COMMAND_MAX_CHARS))}</code>`,
   ];
   const lastLine = session.output.lastLine();
