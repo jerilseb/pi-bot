@@ -65,7 +65,7 @@ export const SUBAGENTS_ENABLED = ENABLE_SUBAGENTS.toLowerCase() === 'true';
 // ---------------------------------------------------------------------------
 
 /** Default chat model. files/settings.json overrides it; see MODEL below. */
-export const CHAT_MODEL = 'openai-codex/gpt-5.6-luna';
+export const CHAT_MODEL = 'openai-codex/gpt-6-luna';
 /**
  * Model for heartbeat runs, as provider/model. It lives in .env rather than here
  * because which model an unprompted run may use is a deployment choice that
@@ -84,8 +84,8 @@ export const HEARTBEAT_MODEL = process.env.HEARTBEAT_MODEL?.trim() ?? '';
 /** Chat models offered by /models. Must contain CHAT_MODEL and the active model. */
 export const ALLOWED_MODELS: readonly string[] = [
   'openai-codex/gpt-6-astra',
-  'openai-codex/gpt-5.6-luna',
-  'openai-codex/gpt-5.6-sol',
+  'openai-codex/gpt-6-luna',
+  'openai-codex/gpt-6-sol',
   'openrouter/deepseek/deepseek-v4.1-flash',
 ];
 

@@ -156,7 +156,7 @@ The startup logs show the active chat model, background model, and enabled exten
 The default chat model is configured in `src/config.ts`:
 
 ```ts
-export const CHAT_MODEL = "openai-codex/gpt-5.6-luna";
+export const CHAT_MODEL = "openai-codex/gpt-6-luna";
 ```
 
 The active chat model and reasoning level can be changed from Telegram with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `ALLOWED_MODELS` or startup fails.
@@ -209,7 +209,8 @@ Examples:
 
 ```text
 openai-codex/gpt-6-astra
-openai-codex/gpt-5.6-luna
+openai-codex/gpt-6-luna
+openai-codex/gpt-6-sol
 openrouter/deepseek/deepseek-v4.1-flash
 ```
 

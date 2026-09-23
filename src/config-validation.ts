@@ -63,7 +63,7 @@ export function collectConfigProblems(): string[] {
  */
 function heartbeatModelProblems(): string[] {
   const problems: string[] = [];
-  const example = 'openai-codex/gpt-5.6-luna';
+  const example = 'openai-codex/gpt-6-luna';
 
   if (HEARTBEAT_ENABLED && !HEARTBEAT_MODEL) {
     problems.push(
