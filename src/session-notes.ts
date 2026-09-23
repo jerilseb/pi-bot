@@ -19,10 +19,11 @@ import type { IncomingPrompt } from './types.ts';
  * Only record what changes Pi's picture of the world. Every note is context it
  * pays for on every subsequent turn, so `/status` and `/help` stay out.
  *
- * Messages sent from the background session count: scheduled tasks, heartbeat
- * runs, and the completion reports of commands those started all run there, so
- * without a note the chat agent has no idea the user was just sent one and
- * cannot answer "what did this morning's report say?".
+ * Messages sent from background runs count: scheduled tasks and heartbeat runs
+ * each run in a fresh session of their own, and the completion reports of jobs
+ * they started resume that run's session, so the chat agent never sees any of
+ * it. Without a note it has no idea the user was just sent one and cannot
+ * answer "what did this morning's report say?".
  */
 
 /** Marks our entries in the session file so they can be found on reload. */
