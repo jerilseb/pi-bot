@@ -2,18 +2,19 @@ import type { SessionManager } from '@earendil-works/pi-coding-agent';
 import type { IncomingPrompt } from './types.ts';
 
 /**
- * Notes about the bot itself, written straight into the Pi session file.
+ * Notes about the bot itself, recorded in the Pi session.
  *
  * Slash commands, restarts and model switches are handled entirely by this
  * process, so Pi never sees them: the session resumes mid-thought with no hint
  * that the process died, the model changed, or the last turn was cut off.
  *
- * `appendCustomMessageEntry` is built for exactly this — unlike a plain custom
- * entry it participates in LLM context, so the note is part of the conversation
- * on the next turn without costing a turn of its own. It also means the session
- * file stays the single record: the transcript explains its own gaps, and
- * anything reading the file later (the session explorer, a future resume) sees
- * the same history Pi does.
+ * A note is a custom message — unlike a plain custom entry it participates in
+ * LLM context, so the note is part of the conversation on the next turn without
+ * costing a turn of its own. It also means the session file stays the single
+ * record: the transcript explains its own gaps, and anything reading the file
+ * later (the session explorer, a future resume) sees the same history Pi does.
+ * A live session takes the note through the SDK, which updates the running
+ * agent's context as well as the file; see SdkPiSession.noteEvent.
  *
  * Only record what changes Pi's picture of the world. Every note is context it
  * pays for on every subsequent turn, so `/status` and `/help` stay out.
@@ -42,18 +43,31 @@ export interface SessionEventDetails {
 }
 
 /**
- * Append a note as a child of the session's current leaf.
+ * A note as the custom message the SDK sends into a live session.
  *
  * `display: true` so it renders as its own thing rather than masquerading as
  * something the user typed.
  */
+export function sessionEventMessage(
+  kind: SessionEventKind,
+  text: string,
+): { customType: string; content: string; display: boolean; details: SessionEventDetails } {
+  return {
+    customType: SESSION_EVENT_TYPE,
+    content: formatSessionEvent(text),
+    display: true,
+    details: { kind },
+  };
+}
+
+/** Append a note straight to the file, as a child of the session's current leaf. */
 export function appendSessionEvent(
   manager: SessionManager,
   kind: SessionEventKind,
   text: string,
 ): void {
-  const details: SessionEventDetails = { kind };
-  manager.appendCustomMessageEntry(SESSION_EVENT_TYPE, formatSessionEvent(text), true, details);
+  const { customType, content, display, details } = sessionEventMessage(kind, text);
+  manager.appendCustomMessageEntry(customType, content, display, details);
 }
 
 /** The wording Pi reads. Tagged so it cannot be mistaken for user input. */

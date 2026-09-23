@@ -81,7 +81,7 @@ Environment=PATH=$(resolve_path)
 # /restart and the restart_bot tool exit 0 on purpose, so restart on any exit.
 Restart=always
 RestartSec=2
-# SIGTERM is handled: the bot drains its session before exiting.
+# SIGTERM is handled: the bot notes interrupted work and stops its jobs before exiting.
 TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal

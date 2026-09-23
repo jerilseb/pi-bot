@@ -230,7 +230,7 @@ async function restart(): Promise<void> {
   // next startup is what identifies an exit nobody asked for.
   await chatSession
     .get()
-    .pi.noteEvent(
+    .pi.noteEventBeforeExit(
       'restart',
       'The bot process was restarted deliberately. This session resumed, but any in-flight work was dropped.',
     );
@@ -238,14 +238,6 @@ async function restart(): Promise<void> {
   setTimeout(() => process.exit(0), RESTART_EXIT_DELAY_MS);
 }
 
-/**
- * Record an exit nobody announced.
- *
- * A deliberate restart leaves its note as the session's last entry, so finding
- * anything else there means the previous run ended some other way — a crash, or
- * a stop and start. Either way the conversation is about to continue as if
- * nothing happened, which is the confusion worth heading off.
- */
 /**
  * Tell each session about the sub-agent jobs it started that shutdown is about
  * to stop. Their reports would otherwise simply never come, and the next turn
@@ -258,10 +250,18 @@ async function noteInterruptedSubagents(): Promise<void> {
   ];
   for (const [kind, session] of sessions) {
     const note = interruptedSubagentsNote(kind);
-    if (note) await session.get().pi.noteEvent('subagent', note);
+    if (note) await session.get().pi.noteEventBeforeExit('subagent', note);
   }
 }
 
+/**
+ * Record an exit nobody announced.
+ *
+ * A deliberate restart leaves its note as the session's last entry, so finding
+ * anything else there means the previous run ended some other way — a crash, or
+ * a stop and start. Either way the conversation is about to continue as if
+ * nothing happened, which is the confusion worth heading off.
+ */
 async function noteUncleanExit(): Promise<void> {
   const last = await chatSession.get().pi.lastNoteKind();
   if (last === 'restart' || last === 'restart-unclean') return;

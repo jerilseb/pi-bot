@@ -33,6 +33,7 @@ import {
   lastSessionEventKind,
   markConversationCleared,
   type SessionEventKind,
+  sessionEventMessage,
 } from './session-notes.ts';
 import { formatToolStartNotification } from './tool-notifications.ts';
 import type { Attachment, IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
@@ -575,22 +576,49 @@ export class SdkPiSession {
   }
 
   /**
-   * Write a note about the bot into this chat's session file.
+   * Tell Pi about something the bot did outside its turns.
    *
-   * Prefers the live session: a second SessionManager over the same file would
-   * carry its own leaf pointer, and appending through it would branch the tree
-   * away from where the running agent is writing. With no live session there is
-   * nothing to desynchronise, so the file is opened just long enough to append.
-   * A chat that has never had a session, or whose last conversation was cleared
-   * and whose next one has not started, has nothing to annotate.
+   * A live session takes the note through the SDK, which adds it to the running
+   * agent's context as well as the file. Appending to the file alone would leave
+   * the agent unaware of the note until the transcript is next loaded. During a
+   * turn the SDK holds the note until the turn ends, so it cannot land between a
+   * tool call and its result, which providers reject on replay.
+   *
+   * With no live session the file is all there is, so it is opened just long
+   * enough to append. A chat that has never had a session, or whose last
+   * conversation was cleared and whose next one has not started, has nothing to
+   * annotate.
    */
   async noteEvent(kind: SessionEventKind, text: string): Promise<void> {
     try {
-      const manager = this.session?.sessionManager ?? (await this.openStoredSessionManager());
-      if (!manager) return;
-      appendSessionEvent(manager, kind, text);
+      const session = await this.liveSession();
+      if (session) {
+        await session.sendCustomMessage(sessionEventMessage(kind, text), { triggerTurn: false });
+        return;
+      }
+      const manager = await this.openStoredSessionManager();
+      if (manager) appendSessionEvent(manager, kind, text);
     } catch (error) {
       // A missing note must never take down the command that recorded it.
+      console.error('Failed to write session note:', error);
+    }
+  }
+
+  /**
+   * Write a note for the next start, just before this session is disposed.
+   *
+   * Goes straight to the file: the live context is about to be discarded, and a
+   * note the SDK was holding for the end of the turn would be discarded with it.
+   * Appends through the live session's manager when there is one, since a second
+   * SessionManager over the same file would carry its own leaf pointer and branch
+   * the tree away from where the running agent is writing.
+   */
+  async noteEventBeforeExit(kind: SessionEventKind, text: string): Promise<void> {
+    try {
+      const manager =
+        (await this.liveSession())?.sessionManager ?? (await this.openStoredSessionManager());
+      if (manager) appendSessionEvent(manager, kind, text);
+    } catch (error) {
       console.error('Failed to write session note:', error);
     }
   }
@@ -686,6 +714,16 @@ export class SdkPiSession {
     this.pendingNewSessionRequest = false;
     this.cleanup();
     this.forceNewSessionOnNextStart = true;
+  }
+
+  /**
+   * The session notes should go to, waiting out one that is still starting: the
+   * file is opened on its own only when there is no session at all, or its
+   * start failed. Never starts one.
+   */
+  private async liveSession(): Promise<AgentSession | null> {
+    if (this.session) return this.session;
+    return this.starting ? this.starting.catch(() => null) : null;
   }
 
   private async start(): Promise<AgentSession> {

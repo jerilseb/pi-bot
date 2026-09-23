@@ -1,16 +1,18 @@
 /**
  * Shared builder for the internal prompts the bot sends itself.
  *
- * Four flows hand work to the chat agent without a user typing anything:
- * heartbeat runs (src/heartbeat.ts), scheduled tasks (src/cron.ts), post-restart
- * tasks (main.ts), and completion reports from background bash sessions
- * (src/background-bash.ts). They all need the same thing: say what kind of run
- * this is, carry some metadata, quote a body the agent must not confuse with
- * user input, then state what to send back.
+ * Five flows hand work to an agent without a user typing anything: heartbeat
+ * runs (src/heartbeat.ts) and scheduled tasks (src/cron.ts) in the background
+ * session, post-restart tasks (main.ts) in the chat session, and completion
+ * reports from background bash sessions (src/background-bash.ts) and sub-agent
+ * jobs (src/subagent.ts), which go back to whichever session started the work.
+ * They all need the same thing: say what kind of run this is, carry some
+ * metadata, quote a body the agent must not confuse with user input, then state
+ * what to send back.
  *
  * Keeping that layout here means the convention — how instructions are fenced,
  * how metadata reads, how a "nothing to report" reply is requested — is defined
- * once instead of drifting across four files.
+ * once instead of drifting across five files.
  */
 
 /** A labelled block of the envelope body, optionally fenced in a tag. */

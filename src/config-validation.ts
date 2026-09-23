@@ -58,12 +58,12 @@ export function collectConfigProblems(): string[] {
  * The heartbeat has no default model, so its switch in files/settings.json and
  * its model in .env must agree. Enabled without a model is the case worth
  * catching: the bot would start looking healthy and then do nothing at the
- * scheduled moment. Scheduled tasks fall back to the chat model, which is
- * validated above, so they need no check here.
+ * scheduled moment. Scheduled tasks need no check here: each is pinned at
+ * creation to a model validated then.
  */
 function heartbeatModelProblems(): string[] {
   const problems: string[] = [];
-  const example = 'openai-codex/gpt-5.6-terra';
+  const example = 'openai-codex/gpt-5.6-luna';
 
   if (HEARTBEAT_ENABLED && !HEARTBEAT_MODEL) {
     problems.push(

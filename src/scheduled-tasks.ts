@@ -27,7 +27,7 @@ const ScheduleTaskParams = Type.Object({
   model: Type.Optional(
     Type.String({
       description:
-        'Model to run this task on, as provider/model (e.g. openai-codex/gpt-5.6-terra or openrouter/moonshotai/kimi-k2.6). Only set it when the user asks for a specific model; otherwise the task is pinned to the chat model active right now.',
+        'Model to run this task on, as provider/model (e.g. openai-codex/gpt-5.6-sol or openrouter/deepseek/deepseek-v4.1-flash). Only set it when the user asks for a specific model; otherwise the task is pinned to the chat model active right now.',
     }),
   ),
   run_at: Type.Optional(

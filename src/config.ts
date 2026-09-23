@@ -284,10 +284,10 @@ export const TRANSCRIPTION_MAX_FILE_SIZE = 25 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 export const SEND_LOCAL_IMAGES = true;
-export const LOCAL_IMAGE_UPLOAD_DIRS = [path.join(os.tmpdir(), 'create-image')];
+export const LOCAL_IMAGE_UPLOAD_DIRS = [TMP_DIR];
 
 export const SEND_LOCAL_DOCUMENTS = true;
-export const LOCAL_DOCUMENT_UPLOAD_DIRS = [path.join(os.tmpdir(), 'pi-channel'), process.cwd()];
+export const LOCAL_DOCUMENT_UPLOAD_DIRS = [TMP_DIR, process.cwd()];
 export const DOCUMENT_UPLOAD_EXTS = [
   'pdf',
   'doc',

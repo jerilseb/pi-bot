@@ -195,7 +195,7 @@ The file is gitignored, but `files/settings.json.example` is checked in and show
 
 Heartbeat runs take their model from `HEARTBEAT_MODEL` in `.env`. There is no default — an unset model means the heartbeat does not run, and turning it on in `files/settings.json` without setting the model is a startup error rather than a schedule that quietly never fires. It is separate from the chat model and cannot be changed from Telegram.
 
-Scheduled tasks are pinned to a model when they are created: by default the chat model `/models` had selected at that moment, so switching models later does not change existing tasks. A task can be given a specific model instead ("schedule this with kimi-k2.6"), which the agent validates against Pi's catalogue at creation time, so a typo or a provider without auth fails there rather than when the task fires. Asking to update a task's model to "default" re-pins it to the current chat model. Each task's model shows in the task list.
+Scheduled tasks are pinned to a model when they are created: by default the chat model `/models` had selected at that moment, so switching models later does not change existing tasks. A task can be given a specific model instead ("schedule this with deepseek-v4.1-flash"), which the agent validates against Pi's catalogue at creation time, so a typo or a provider without auth fails there rather than when the task fires. Asking to update a task's model to "default" re-pins it to the current chat model. Each task's model shows in the task list.
 
 No skills are loaded: neither a project `skills/` directory nor Pi's global `~/.pi/agent/skills/`. When a skill is needed, ask the agent to read its SKILL.md.
 
@@ -209,8 +209,8 @@ Examples:
 
 ```text
 openai-codex/gpt-6-astra
-openrouter/openai/gpt-5.4-mini
-openrouter/moonshotai/kimi-k2.6
+openai-codex/gpt-5.6-luna
+openrouter/deepseek/deepseek-v4.1-flash
 ```
 
 For `openai-codex/...`, authenticate through Pi with `/login openai-codex`, or set `OPENAI_CODEX_API_KEY` as a runtime override.
@@ -229,9 +229,6 @@ GOOGLE_GENAI_API_KEY=your-google-genai-key
 # Tavily web search extension
 TAVILY_API_KEY_1=tvly-your-key
 # TAVILY_API_KEY_2=another-key-if-you-want
-
-# image generation (used by an external create-image skill)
-KIE_API_KEY=your-kie-api-key
 
 # optional OpenAI Codex runtime override
 OPENAI_CODEX_API_KEY=your-codex-bearer-token
