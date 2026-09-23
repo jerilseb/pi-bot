@@ -512,14 +512,19 @@ function describeReportOutcome(session: BackgroundBashSession): string {
   return `${describeStatus(session)} after ${runtime}`;
 }
 
-/** Display widths in the progress message. */
-const PROGRESS_COMMAND_MAX_CHARS = 80;
+/**
+ * Display widths in the progress message. The command budget keeps the whole
+ * message, header and output line included, under Telegram's 4096-char limit.
+ */
+const PROGRESS_COMMAND_MAX_CHARS = 3_000;
 const PROGRESS_OUTPUT_MAX_CHARS = 120;
 
 /**
  * The progress message of a backgrounded command, as Telegram HTML: status and
- * runtime, the command, and its latest line of output. Rendered for the final
- * state too, so the same message ends on the outcome.
+ * runtime, the command in an expandable blockquote, and its latest line of
+ * output. The command keeps its line breaks, so a multi-line script reads as
+ * written once expanded, while the folded quote keeps the message short.
+ * Rendered for the final state too, so the same message ends on the outcome.
  */
 export function formatBackgroundBashProgress(
   session: Pick<
@@ -538,13 +543,25 @@ export function formatBackgroundBashProgress(
   const runtime = formatDuration((session.endedAt ?? Date.now()) - session.startedAt);
   const lines = [
     `${icon} <b>Background bash</b> · ${escapeTelegramHtml(describeStatus(session))} · ${runtime}`,
-    `<code>${escapeTelegramHtml(oneLineLabel(session.command, PROGRESS_COMMAND_MAX_CHARS))}</code>`,
+    `<blockquote expandable><code>${escapeTelegramHtml(progressCommand(session.command))}</code></blockquote>`,
   ];
   const lastLine = session.output.lastLine();
   if (lastLine) {
     lines.push(`<i>${escapeTelegramHtml(oneLineLabel(lastLine, PROGRESS_OUTPUT_MAX_CHARS))}</i>`);
   }
   return lines.join('\n');
+}
+
+/** The command as shown in the progress message: line breaks kept, length capped. */
+function progressCommand(command: string): string {
+  const text = command
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+  return text.length <= PROGRESS_COMMAND_MAX_CHARS
+    ? text
+    : `${text.slice(0, PROGRESS_COMMAND_MAX_CHARS - 1)}…`;
 }
 
 function describeStatus(

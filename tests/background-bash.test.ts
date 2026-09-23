@@ -134,13 +134,25 @@ function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBa
   });
 }
 
-test('the progress message shows status, runtime, the command on one line, and the latest output', () => {
+test('the progress message shows status, runtime, the command in an expandable quote, and the latest output', () => {
   const html = progressSession({});
-  const [header, command, output] = html.split('\n');
-  assert.equal(header, '⏳ <b>Background bash</b> · running · 6m 12s');
+  const lines = html.split('\n');
+  assert.equal(lines[0], '⏳ <b>Background bash</b> · running · 6m 12s');
   // No job ID: the command is what the user recognises, and the agent tracks IDs itself.
-  assert.equal(command, '<code>uv pip install "vllm==0.16.0"</code>');
-  assert.equal(output, '<i>Downloading vllm (484.8MiB)</i>');
+  // Line breaks are kept so a multi-line script reads as written once expanded.
+  assert.equal(
+    lines.slice(1, 3).join('\n'),
+    '<blockquote expandable><code>uv pip install\n  "vllm==0.16.0"</code></blockquote>',
+  );
+  assert.equal(lines[3], '<i>Downloading vllm (484.8MiB)</i>');
+});
+
+test('the command in the progress message is escaped and capped', () => {
+  const escaped = progressSession({ command: 'echo "<a>" && ls' });
+  assert.match(escaped, /<code>echo "&lt;a&gt;" &amp;&amp; ls<\/code>/);
+  const long = progressSession({ command: 'x'.repeat(10_000) });
+  assert.ok(long.length < 4096);
+  assert.match(long, /x…<\/code><\/blockquote>/);
 });
 
 test('the progress message ends on the outcome', () => {
@@ -160,7 +172,7 @@ test('the progress message ends on the outcome', () => {
 test('output in the progress message is escaped, and absent until there is some', () => {
   const html = progressSession({ output: { lastLine: () => '<b>1 < 2</b> & more' } });
   assert.match(html, /<i>&lt;b&gt;1 &lt; 2&lt;\/b&gt; &amp; more<\/i>$/);
-  assert.equal(progressSession({ output: { lastLine: () => '' } }).split('\n').length, 2);
+  assert.doesNotMatch(progressSession({ output: { lastLine: () => '' } }), /<i>/);
 });
 
 test('the guidance says to end the turn rather than wait out a long command', () => {
