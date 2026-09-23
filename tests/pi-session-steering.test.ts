@@ -19,6 +19,7 @@ function fixture() {
     cwd: '/unused',
     sessionDir: '/unused',
     sessionPrefix: 'test',
+    sessionPerPrompt: false,
     sessionKind: 'chat',
     getExtensionPaths: () => [],
     systemPromptOverride: () => '',

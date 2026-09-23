@@ -80,7 +80,7 @@ Open this site and test the login flow.
 
 Ask it to do something later, once, repeatedly, or on a cron-like schedule. Requires `"cronJobs": true` in `files/settings.json` — see [Configuration](#configuration).
 
-Scheduled tasks run in a separate background session so they cannot disturb your conversation, but every report they send you is also noted in the chat session. Asking "what did this morning's report say?" works without the chat agent having to go and read files.
+Scheduled tasks and the heartbeat run in the background, each in a fresh session of its own (transcripts in `sessions/scheduled-tasks-sessions/` and `sessions/heartbeat-sessions/`), so they cannot disturb your conversation or each other, but every report they send you is also noted in the chat session. Asking "what did this morning's report say?" works without the chat agent having to go and read files.
 
 Examples:
 
@@ -253,7 +253,7 @@ Useful non-secret settings in `src/config.ts` include:
 - `HEARTBEAT_INTERVAL_SECONDS` (whether the heartbeat runs at all is a `files/settings.json` setting — see below)
 - `BACKGROUND_BASH_MAX_RUNNING` and `BACKGROUND_BASH_DEFAULT_MAX_RUNTIME_MS`
 
-Chat and background session state stays loaded between prompts; there is no idle timeout. Conversation resets and bot shutdown/restart still dispose the underlying Pi sessions.
+Chat session state stays loaded between prompts; there is no idle timeout. Each background run's session is disposed when the run ends. Conversation resets and bot shutdown/restart still dispose the underlying Pi sessions.
 
 Ordinary Telegram messages sent while the chat agent is running **steer the current task** via the Pi SDK. The bot acknowledges them with “↪️ Steering current task.” They are delivered after the current assistant turn finishes its tool calls, before the next model call; running tools are not cancelled. Text, transcribed voice, and attachments use the same route. Messages arriving during startup or after the run stops accepting steering fall back to the serial queue, as do background jobs and completion reports. There is no explicit queue command. The pending limit includes both queued and undelivered steering messages. `/abort` and `/new` discard both kinds of pending work.
 

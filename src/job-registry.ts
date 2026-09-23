@@ -33,20 +33,27 @@ export interface JobOrigin {
   session: SessionKind;
   /** Model the starting turn ran on, as provider/model, when the SDK exposed one. */
   model?: string;
+  /**
+   * Transcript of the starting turn. Background runs each get a fresh one, so a
+   * report must name it to reach the run that started the job.
+   */
+  sessionFile?: string;
 }
 
-/** Records which session a tool call came from and the model it was on. */
+/** Records which session a tool call came from, the model it was on, and its transcript. */
 export function captureJobOrigin(ctx: ExtensionContext, session: SessionKind): JobOrigin {
   const model = currentModel(ctx);
-  return { session, ...(model ? { model } : {}) };
+  const sessionFile = ctx.sessionManager?.getSessionFile();
+  return { session, ...(model ? { model } : {}), ...(sessionFile ? { sessionFile } : {}) };
 }
 
 /**
  * The prompt that delivers a completion report, addressed to the session that
- * started the job. A report bound for the background session also pins the
- * model that session was on when it started the job, since that session has no
- * default model and a later scheduled task may have moved it elsewhere. The
- * chat session keeps whatever model the user has selected since.
+ * started the job. A report bound for the background session also names the
+ * transcript of the run that started the job, since every background run starts
+ * a fresh one, and pins the model that run was on, since the background session
+ * has no default model. The chat session keeps whatever model the user has
+ * selected since.
  */
 export function jobReportPrompt(
   origin: JobOrigin,
@@ -58,7 +65,7 @@ export function jobReportPrompt(
     isSuperseded: () => boolean;
   },
 ): IncomingPrompt {
-  const { session, model } = origin;
+  const { session, model, sessionFile } = origin;
   return {
     text: report.text,
     attachments: [],
@@ -68,6 +75,7 @@ export function jobReportPrompt(
     label: report.label,
     isSuperseded: report.isSuperseded,
     ...(session === 'background' && model ? { model } : {}),
+    ...(session === 'background' && sessionFile ? { resumeSessionFile: sessionFile } : {}),
   };
 }
 

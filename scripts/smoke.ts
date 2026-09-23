@@ -4,9 +4,11 @@ import { pathToFileURL } from 'node:url';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   HEARTBEAT_MODEL,
+  HEARTBEAT_SESSIONS_DIR,
   MODEL,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
+  SCHEDULED_TASKS_SESSIONS_DIR,
   SUBAGENT_SESSIONS_DIR,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
@@ -232,6 +234,8 @@ async function main(): Promise<void> {
   ensureMemoryFile();
   ensureSubagentPromptFile();
   fs.mkdirSync(SUBAGENT_SESSIONS_DIR, { recursive: true });
+  fs.mkdirSync(HEARTBEAT_SESSIONS_DIR, { recursive: true });
+  fs.mkdirSync(SCHEDULED_TASKS_SESSIONS_DIR, { recursive: true });
   assert(readSystemPrompt().trim(), 'System prompt is empty.');
   assert(readSubagentSystemPrompt().trim(), 'Sub-agent worker prompt is empty.');
 

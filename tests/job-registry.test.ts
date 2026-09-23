@@ -133,6 +133,21 @@ test('a report to the background session pins the model that started the job', (
   assert.equal(unpinned.model, undefined);
 });
 
+test('a report to the background session resumes the transcript of the run that started the job', () => {
+  const background = jobReportPrompt(
+    { session: 'background', model: 'test/job', sessionFile: '/bg/run-a.jsonl' },
+    { text: 'done', source: 'subagent-report', label: 'task', isSuperseded: () => false },
+  );
+  assert.equal(background.resumeSessionFile, '/bg/run-a.jsonl');
+
+  // The chat keeps one conversation, so its reports never name a transcript.
+  const chat = jobReportPrompt(
+    { session: 'chat', sessionFile: '/sessions/chat.jsonl' },
+    { text: 'done', source: 'subagent-report', label: 'task', isSuperseded: () => false },
+  );
+  assert.equal(chat.resumeSessionFile, undefined);
+});
+
 test('a report is superseded once the starting session reads the settled result', () => {
   const reg = registry();
   const j = job(reg);
@@ -277,4 +292,15 @@ test('the origin records the session and the model the turn is on, when there is
   });
   const without = { model: undefined } as unknown as ExtensionContext;
   assert.deepEqual(captureJobOrigin(without, 'chat'), { session: 'chat' });
+});
+
+test('the origin records the transcript of the starting turn', () => {
+  const context = {
+    model: undefined,
+    sessionManager: { getSessionFile: () => '/bg/run-a.jsonl' },
+  } as unknown as ExtensionContext;
+  assert.deepEqual(captureJobOrigin(context, 'background'), {
+    session: 'background',
+    sessionFile: '/bg/run-a.jsonl',
+  });
 });

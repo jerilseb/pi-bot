@@ -9,6 +9,7 @@ import type {
 import { SUBAGENT_MAX_CONCURRENT_WORKERS, SUBAGENT_MAX_TASKS_PER_JOB } from '../src/config.ts';
 import {
   interruptedSubagentsNote,
+  runningSubagentOriginFiles,
   type RunWorker,
   setSubagentReportHandler,
   stopAllSubagents,
@@ -28,7 +29,7 @@ import type { SessionKind } from '../src/types.ts';
  */
 
 function ctx(
-  overrides: { model?: { provider: string; id: string } | null } = {},
+  overrides: { model?: { provider: string; id: string } | null; sessionFile?: string } = {},
 ): ExtensionContext {
   const known = new Set(['chat-model', 'other']);
   return {
@@ -45,7 +46,7 @@ function ctx(
     },
     sessionManager: {
       getSessionId: () => 'telegram-chat-1',
-      getSessionFile: () => '/sessions/chat.jsonl',
+      getSessionFile: () => overrides.sessionFile ?? '/sessions/chat.jsonl',
       getLeafId: () => 'leaf-1',
     },
   } as unknown as ExtensionContext;
@@ -343,6 +344,34 @@ test('the interrupted note names running jobs of the given session only', async 
 
   await stopAllSubagents();
   assert.equal(interruptedSubagentsNote('background'), null);
+});
+
+test('each background run gets an interrupted note for its own jobs only', async (t) => {
+  const f = setup(t, 'background');
+  const start = (task: string, sessionFile: string) =>
+    f.text(
+      f.call(
+        'subagent_run',
+        { tasks: [{ task }], yield_time_ms: 5 },
+        undefined,
+        ctx({ sessionFile }),
+      ),
+    );
+  const first = jobIdIn(await start('first run task', '/bg/run-a.jsonl'));
+  const second = jobIdIn(await start('second run task', '/bg/run-b.jsonl'));
+
+  assert.deepEqual(runningSubagentOriginFiles('background').sort(), [
+    '/bg/run-a.jsonl',
+    '/bg/run-b.jsonl',
+  ]);
+  assert.deepEqual(runningSubagentOriginFiles('chat'), []);
+  const noteA = interruptedSubagentsNote('background', '/bg/run-a.jsonl') ?? '';
+  assert.match(noteA, new RegExp(`- ${first}: first run task`));
+  assert.doesNotMatch(noteA, new RegExp(second));
+  assert.equal(interruptedSubagentsNote('background', '/bg/other.jsonl'), null);
+
+  await stopAllSubagents();
+  assert.deepEqual(runningSubagentOriginFiles('background'), []);
 });
 
 test('the guidance says to end the turn rather than wait out a long job', (t) => {

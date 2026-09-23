@@ -4,7 +4,8 @@
  * Standalone Telegram → Pi chat bridge.
  *
  * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID: polls for
- * updates, keeps one foreground and one background Pi SDK session, queues
+ * updates, keeps one foreground Pi SDK session plus a background one that
+ * starts a fresh transcript for every heartbeat or scheduled-task run, queues
  * prompts, and sends Pi's final response back. Supports text, images,
  * downloaded files, optional audio transcription, local extensions,
  * generated file uploads, model refs across Pi providers, and scheduled heartbeat prompts.
@@ -33,6 +34,8 @@ import {
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
   RESTART_EXIT_DELAY_MS,
+  HEARTBEAT_SESSIONS_DIR,
+  SCHEDULED_TASKS_SESSIONS_DIR,
   SESSIONS_DIR,
   SUBAGENT_SESSIONS_DIR,
   TELEGRAM_POLL_TIMEOUT_MS,
@@ -73,6 +76,7 @@ import {
 } from './src/pi-session.ts';
 import {
   interruptedSubagentsNote,
+  runningSubagentOriginFiles,
   setSubagentReportHandler,
   stopAllSubagents,
   subagentReportPrompt,
@@ -86,7 +90,7 @@ import {
   readSystemPrompt,
 } from './src/system-prompt.ts';
 import { registerBotCommands, sendTelegramMessage, telegram } from './src/telegram.ts';
-import type { SessionKind, TelegramUpdate } from './src/types.ts';
+import type { TelegramUpdate } from './src/types.ts';
 import { errorMessage, sleep } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
@@ -126,6 +130,10 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   model: null,
   sessionPrefix: 'telegram-background',
   sessionKind: 'background',
+  // The fallback only: each run's transcript goes to the heartbeat or
+  // scheduled-tasks directory (see backgroundRunTranscript in prompt-queue).
+  sessionDir: SCHEDULED_TASKS_SESSIONS_DIR,
+  sessionPerPrompt: true,
   getExtensionPaths: () => EXTENSION_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
   extensionFactories: SESSION_EXTENSION_FACTORIES,
@@ -137,6 +145,8 @@ validateModels();
 fs.mkdirSync(TMP_DIR, { recursive: true });
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 fs.mkdirSync(SUBAGENT_SESSIONS_DIR, { recursive: true });
+fs.mkdirSync(HEARTBEAT_SESSIONS_DIR, { recursive: true });
+fs.mkdirSync(SCHEDULED_TASKS_SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
 ensureSubagentPromptFile();
 ensurePostRestartTasksFile();
@@ -241,16 +251,15 @@ async function restart(): Promise<void> {
 /**
  * Tell each session about the sub-agent jobs it started that shutdown is about
  * to stop. Their reports would otherwise simply never come, and the next turn
- * would have no way to know the work was lost.
+ * would have no way to know the work was lost. Background runs each have their
+ * own transcript, so each run that started a job gets its own note.
  */
 async function noteInterruptedSubagents(): Promise<void> {
-  const sessions: Array<[SessionKind, typeof chatSession]> = [
-    ['chat', chatSession],
-    ['background', backgroundSession],
-  ];
-  for (const [kind, session] of sessions) {
-    const note = interruptedSubagentsNote(kind);
-    if (note) await session.get().pi.noteEventBeforeExit('subagent', note);
+  const chatNote = interruptedSubagentsNote('chat');
+  if (chatNote) await chatSession.get().pi.noteEventBeforeExit('subagent', chatNote);
+  for (const file of runningSubagentOriginFiles('background')) {
+    const note = interruptedSubagentsNote('background', file);
+    if (note) await backgroundSession.get().pi.noteEventBeforeExit('subagent', note, file);
   }
 }
 

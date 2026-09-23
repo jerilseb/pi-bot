@@ -47,8 +47,8 @@ import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
  *
  * Both Pi sessions can start commands, so each session records which one did
  * and the model it was on. The completion report is routed back there: a
- * command a scheduled task started reports to the background session that
- * remembers starting it, not to the chat.
+ * command a scheduled task started reports to that task's own background
+ * transcript, which remembers starting it, not to the chat.
  *
  * Lifecycle bookkeeping (IDs, yield-then-background, pruning, stopping, report
  * routing and delivery) lives in src/job-registry.ts. Tuning knobs live in

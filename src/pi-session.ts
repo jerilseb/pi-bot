@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
 import {
@@ -69,6 +71,23 @@ export interface PiRunPromptOptions {
   recoverTransportErrors?: boolean;
   /** Called once when either SDK retry or fallback continuation begins. */
   onAutoRecovery?: (error: string) => void | Promise<void>;
+  /**
+   * Session-per-prompt runtimes only: the transcript to continue instead of
+   * starting a fresh one, e.g. the run a job report belongs to.
+   */
+  resumeSessionFile?: string;
+  /**
+   * Session-per-prompt runtimes only: where a fresh transcript goes, the prefix
+   * of its ID, and a name recorded on it. Defaults to the runtime's directory
+   * and prefix.
+   */
+  transcript?: RunTranscript;
+}
+
+export interface RunTranscript {
+  dir: string;
+  prefix: string;
+  name?: string;
 }
 
 export interface PiRuntime {
@@ -87,6 +106,13 @@ export interface PiRuntime {
   cwd: string;
   sessionDir: string;
   sessionPrefix: string;
+  /**
+   * True when every prompt runs in a transcript of its own (the background
+   * session): nothing carries over from one run to the next, and the live
+   * session is disposed when the prompt ends. False for the chat, which keeps
+   * and resumes one conversation.
+   */
+  sessionPerPrompt: boolean;
   /**
    * Which of the bot's two sessions this runtime backs. Recorded on background
    * work started from it, so a completion report returns to the same session.
@@ -110,6 +136,10 @@ export async function createPiRuntime(options: {
   model: string | null;
   sessionPrefix: string;
   sessionKind: SessionKind;
+  /** Where transcripts are written; defaults to SESSIONS_DIR. */
+  sessionDir?: string;
+  /** See PiRuntime.sessionPerPrompt; defaults to false. */
+  sessionPerPrompt?: boolean;
   getExtensionPaths: () => string[];
   systemPromptOverride: () => string;
   extensionFactories?: Array<(pi: ExtensionAPI) => void>;
@@ -137,8 +167,9 @@ export async function createPiRuntime(options: {
     modelRuntime,
     settingsManager,
     cwd: options.cwd,
-    sessionDir: SESSIONS_DIR,
+    sessionDir: options.sessionDir ?? SESSIONS_DIR,
     sessionPrefix: options.sessionPrefix,
+    sessionPerPrompt: options.sessionPerPrompt ?? false,
     sessionKind: options.sessionKind,
     getExtensionPaths: options.getExtensionPaths,
     systemPromptOverride: options.systemPromptOverride,
@@ -239,7 +270,7 @@ export async function runWorkerPrompt(
 
 /**
  * The bot's resource loader: no skills and nothing from the user's Pi agent
- * directory, only the project extensions and the given factories. Shared by the persistent
+ * directory, only the project extensions and the given factories. Shared by the
  * chat and background sessions and by sub-agent workers, which differ only in
  * which factories and system prompt they get.
  */
@@ -330,6 +361,8 @@ export class SdkPiSession {
   private pendingNewSessionTask: string | null = null;
   private steering: PromptSteering | null = null;
   private transportRecoveryAbortController: AbortController | null = null;
+  /** Session-per-prompt only: what the next start() opens or creates. */
+  private nextRun: { resumeSessionFile?: string; transcript?: RunTranscript } = {};
 
   constructor(runtime: PiRuntime) {
     this.runtime = runtime;
@@ -416,6 +449,14 @@ export class SdkPiSession {
     attachments: Attachment[],
     options: PiRunPromptOptions = {},
   ): Promise<PiPromptResult> {
+    if (this.runtime.sessionPerPrompt) {
+      // Whatever a previous run left behind is not this run's conversation.
+      this.cleanup();
+      this.nextRun = {
+        ...(options.resumeSessionFile ? { resumeSessionFile: options.resumeSessionFile } : {}),
+        ...(options.transcript ? { transcript: options.transcript } : {}),
+      };
+    }
     const session = await this.start();
     if (session.isStreaming) {
       throw new Error('Pi SDK session is already processing a prompt');
@@ -519,6 +560,9 @@ export class SdkPiSession {
         this.steering = null;
         this.transportRecoveryAbortController = null;
         this.applyPendingNewSession();
+        // The run is over, and nothing resumes a session-per-prompt transcript
+        // except through its file.
+        if (this.runtime.sessionPerPrompt) this.cleanup();
       }
     }
   }
@@ -619,10 +663,15 @@ export class SdkPiSession {
    * SessionManager over the same file would carry its own leaf pointer and branch
    * the tree away from where the running agent is writing.
    */
-  async noteEventBeforeExit(kind: SessionEventKind, text: string): Promise<void> {
+  async noteEventBeforeExit(
+    kind: SessionEventKind,
+    text: string,
+    sessionFile?: string,
+  ): Promise<void> {
     try {
-      const manager =
-        (await this.liveSession())?.sessionManager ?? (await this.openStoredSessionManager());
+      const manager = sessionFile
+        ? await this.openSessionFile(sessionFile)
+        : ((await this.liveSession())?.sessionManager ?? (await this.openStoredSessionManager()));
       if (manager) appendSessionEvent(manager, kind, text);
     } catch (error) {
       console.error('Failed to write session note:', error);
@@ -641,11 +690,25 @@ export class SdkPiSession {
   }
 
   /**
+   * One specific transcript, through the live session's manager when that is
+   * the one running — a second manager over the same file would branch the tree
+   * away from where the agent is writing. Null when the file is not on disk.
+   */
+  private async openSessionFile(sessionFile: string): Promise<SessionManager | null> {
+    const live = await this.liveSession();
+    if (live?.sessionManager.getSessionFile() === sessionFile) return live.sessionManager;
+    if (!fs.existsSync(sessionFile)) return null;
+    return SessionManager.open(sessionFile, path.dirname(sessionFile), this.runtime.cwd);
+  }
+
+  /**
    * Opens the conversation this chat would resume, without starting an agent:
    * the most recent session file, unless /new or start_new_session marked it
-   * cleared. Null when there is nothing to resume.
+   * cleared. Null when there is nothing to resume — always, for a
+   * session-per-prompt runtime, which never resumes on its own.
    */
   private async openStoredSessionManager(): Promise<SessionManager | null> {
+    if (this.runtime.sessionPerPrompt) return null;
     const existing = await findMostRecentSessionForId(
       this.runtime.cwd,
       this.runtime.sessionDir,
@@ -790,6 +853,7 @@ export class SdkPiSession {
   }
 
   private async createSessionManager(): Promise<SessionManager> {
+    if (this.runtime.sessionPerPrompt) return this.createRunSessionManager();
     if (!this.forceNewSessionOnNextStart) {
       const stored = await this.openStoredSessionManager();
       if (stored) return stored;
@@ -798,6 +862,32 @@ export class SdkPiSession {
     return SessionManager.create(this.runtime.cwd, this.runtime.sessionDir, {
       id: buildTelegramSessionId(this.runtime.sessionPrefix),
     });
+  }
+
+  /**
+   * A session-per-prompt run's transcript: the one a job report names, when it
+   * is still on disk, otherwise a fresh one with an ID of its own.
+   */
+  private createRunSessionManager(): SessionManager {
+    const { resumeSessionFile, transcript } = this.nextRun;
+    this.nextRun = {};
+    if (resumeSessionFile) {
+      if (fs.existsSync(resumeSessionFile)) {
+        return SessionManager.open(
+          resumeSessionFile,
+          path.dirname(resumeSessionFile),
+          this.runtime.cwd,
+        );
+      }
+      console.error(`Transcript to resume is gone, starting fresh: ${resumeSessionFile}`);
+    }
+    const dir = transcript?.dir ?? this.runtime.sessionDir;
+    const prefix = transcript?.prefix ?? this.runtime.sessionPrefix;
+    const manager = SessionManager.create(this.runtime.cwd, dir, {
+      id: `${buildTelegramSessionId(prefix)}-${randomBytes(4).toString('hex')}`,
+    });
+    if (transcript?.name) manager.appendSessionInfo(transcript.name);
+    return manager;
   }
 
   private collectPromptEvent(

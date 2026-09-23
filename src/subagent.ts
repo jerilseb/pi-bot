@@ -176,14 +176,38 @@ export function subagentStatusText(): string {
 }
 
 /**
+ * The transcripts of background runs with sub-agent jobs still running. Each
+ * background run has its own transcript, so an interrupted-jobs note is written
+ * to each of them rather than to one shared background session.
+ */
+export function runningSubagentOriginFiles(session: SessionKind): string[] {
+  const files = new Set<string>();
+  for (const job of registry.all()) {
+    if (job.status === 'running' && job.origin.session === session && job.origin.sessionFile) {
+      files.add(job.origin.sessionFile);
+    }
+  }
+  return [...files];
+}
+
+/**
  * The note for a session whose sub-agent jobs are about to be stopped by a
  * shutdown, so the next turn knows those results are never coming and where the
- * partial transcripts are. Null when that session has none running.
+ * partial transcripts are. With sessionFile, only the jobs started from that
+ * transcript. Null when there are none running.
  */
-export function interruptedSubagentsNote(session: SessionKind): string | null {
+export function interruptedSubagentsNote(
+  session: SessionKind,
+  sessionFile?: string,
+): string | null {
   const running = registry
     .all()
-    .filter((job) => job.status === 'running' && job.origin.session === session);
+    .filter(
+      (job) =>
+        job.status === 'running' &&
+        job.origin.session === session &&
+        (sessionFile === undefined || job.origin.sessionFile === sessionFile),
+    );
   if (running.length === 0) return null;
 
   const lines = [

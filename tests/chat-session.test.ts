@@ -16,6 +16,7 @@ function runtime(): PiRuntime {
     cwd: '/unused',
     sessionDir: '/unused',
     sessionPrefix: 'test',
+    sessionPerPrompt: false,
     sessionKind: 'chat',
     getExtensionPaths: () => [],
     systemPromptOverride: () => '',

@@ -59,7 +59,10 @@ export interface Attachment {
   size?: number;
 }
 
-/** The bot's two Pi sessions: the Telegram chat and the unattended background one. */
+/**
+ * The bot's two Pi sessions: the Telegram chat and the unattended background
+ * one, which starts a fresh transcript for every run.
+ */
 export type SessionKind = 'chat' | 'background';
 
 /**
@@ -83,6 +86,12 @@ export interface IncomingPrompt {
    * work rather than always landing in the chat.
    */
   session?: SessionKind;
+  /**
+   * Transcript a background-session prompt continues instead of starting fresh.
+   * Every background run gets a new transcript; a job report sets this so the
+   * result returns to the run that started the job.
+   */
+  resumeSessionFile?: string;
   suppressNoop?: boolean;
   /**
    * Checked when the prompt reaches the front of its queue, not when it is

@@ -24,6 +24,13 @@ export const SESSIONS_DIR = path.join(PROJECT_ROOT, 'sessions');
  * on every start, which must not mean parsing every worker transcript ever kept.
  */
 export const SUBAGENT_SESSIONS_DIR = path.join(SESSIONS_DIR, 'subagent-sessions');
+/**
+ * Background-session transcripts, one per run: heartbeat runs and scheduled-task
+ * runs each in their own directory, so neither is mistaken for the other.
+ * Subdirectories for the same reason as SUBAGENT_SESSIONS_DIR.
+ */
+export const HEARTBEAT_SESSIONS_DIR = path.join(SESSIONS_DIR, 'heartbeat-sessions');
+export const SCHEDULED_TASKS_SESSIONS_DIR = path.join(SESSIONS_DIR, 'scheduled-tasks-sessions');
 export const TMP_DIR = path.join(os.tmpdir(), 'pi-channel');
 
 export const PROJECT_EXTENSIONS_DIR = path.join(PROJECT_ROOT, 'extensions');

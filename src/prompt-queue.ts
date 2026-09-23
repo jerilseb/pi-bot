@@ -1,7 +1,12 @@
 import type { ChatSession, ChatState } from './chat-session.ts';
 import { handleCommand } from './commands.ts';
-import { MAX_QUEUED_PROMPTS } from './config.ts';
+import {
+  HEARTBEAT_SESSIONS_DIR,
+  MAX_QUEUED_PROMPTS,
+  SCHEDULED_TASKS_SESSIONS_DIR,
+} from './config.ts';
 import { cleanupAttachments } from './inbound.ts';
+import type { RunTranscript } from './pi-session.ts';
 import { sendPiResponse } from './outbound.ts';
 import { backgroundReportNote } from './session-notes.ts';
 import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
@@ -139,6 +144,8 @@ export function createPromptQueue(options: {
         if (prompt.model) await chat.pi.useModel(prompt.model);
         const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
           onToolCall: toolNotifications.notify,
+          ...(prompt.resumeSessionFile ? { resumeSessionFile: prompt.resumeSessionFile } : {}),
+          ...(isBackground ? { transcript: backgroundRunTranscript(prompt) } : {}),
           ...(!isBackground
             ? {
                 recoverTransportErrors: true,
@@ -220,4 +227,21 @@ function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): 
     ...(prompt.session ? { session: prompt.session } : {}),
   });
   chat.messageCount++;
+}
+
+/**
+ * Where a background run's fresh transcript goes: heartbeat runs and scheduled
+ * tasks each keep their own directory and ID prefix. A job report resumes the
+ * file of the run that started the job, so this only applies to one whose file
+ * is gone; such strays go with the scheduled tasks.
+ */
+function backgroundRunTranscript(prompt: IncomingPrompt): RunTranscript {
+  if (prompt.source === 'heartbeat') {
+    return { dir: HEARTBEAT_SESSIONS_DIR, prefix: 'telegram-heartbeat', name: 'heartbeat' };
+  }
+  return {
+    dir: SCHEDULED_TASKS_SESSIONS_DIR,
+    prefix: 'telegram-scheduled-task',
+    name: prompt.label ?? 'scheduled task',
+  };
 }
