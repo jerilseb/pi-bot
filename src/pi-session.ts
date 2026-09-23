@@ -4,6 +4,7 @@ import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
   type AgentSessionEvent,
+  type ContextUsage,
   type SessionStats,
   createAgentSession,
   DefaultResourceLoader,
@@ -566,6 +567,11 @@ export class SdkPiSession {
 
   getSessionStats(): SessionStats | null {
     return this.session?.getSessionStats() ?? null;
+  }
+
+  /** How full the context window is, from the loaded transcript; undefined before it loads. */
+  getContextUsage(): ContextUsage | undefined {
+    return this.session?.getContextUsage();
   }
 
   abort(): void {

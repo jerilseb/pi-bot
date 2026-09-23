@@ -1,9 +1,18 @@
-import type { SessionStats } from '@earendil-works/pi-coding-agent';
 import type { ChatSession, ChatState } from './chat-session.ts';
-import { ELEVENLABS_API_KEY, showTranscriptsEnabled, toolCallMode } from './config.ts';
-import { cronStatusText } from './cron.ts';
+import {
+  CRON_JOBS_ENABLED,
+  ELEVENLABS_API_KEY,
+  HEARTBEAT_ENABLED,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_MODEL,
+  SUBAGENTS_ENABLED,
+  showTranscriptsEnabled,
+  toolCallMode,
+} from './config.ts';
+import { readCronJobs } from './cron-store.ts';
+import { configuredTextToSpeechProviders } from './speech.ts';
+import { renderStatus, type StatusSnapshot } from './status.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
-import { heartbeatStatusText } from './heartbeat.ts';
 import { buildModelInlineKeyboard } from './model-menu.ts';
 import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
 import { buildToolCallInlineKeyboard, describeToolCallMode } from './tool-call-menu.ts';
@@ -22,8 +31,6 @@ import {
   type TelegramBotCommand,
 } from './telegram.ts';
 import { errorMessage } from './util.ts';
-import { subagentStatusText } from './subagent.ts';
-import { voiceStatusText } from './voice.ts';
 
 export interface CommandContext {
   chat: ChatState;
@@ -49,43 +56,6 @@ interface BotCommand {
   /** Set only for commands deliberately kept out of /help. */
   hideFromHelp?: boolean;
   handler: CommandHandler;
-}
-
-const TOKEN_NUMBER_FORMAT = new Intl.NumberFormat('en-US', {
-  maximumFractionDigits: 1,
-});
-
-function formatSessionTokens(stats: SessionStats | null): string {
-  if (!stats) return 'not loaded';
-
-  // Match pi-tps semantics: display input as billable/request input,
-  // including provider cache reads and cache writes. Cache hits are cacheRead.
-  const totalInput = stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite;
-  const cacheDetails = [`cache hits ${formatTokenCount(stats.tokens.cacheRead)}`];
-  if (stats.tokens.cacheWrite > 0) {
-    cacheDetails.push(`writes ${formatTokenCount(stats.tokens.cacheWrite)}`);
-  }
-
-  return [
-    `in ${formatTokenCount(totalInput)}`,
-    `(${cacheDetails.join(', ')})`,
-    `out ${formatTokenCount(stats.tokens.output)}`,
-  ].join(', ');
-}
-
-const TOKEN_UNITS = [
-  { suffix: 'b', value: 1_000_000_000 },
-  { suffix: 'm', value: 1_000_000 },
-] as const;
-/** Smallest abbreviated unit; anything at or above it is abbreviated. */
-const TOKEN_BASE_UNIT = { suffix: 'k', value: 1_000 } as const;
-
-function formatTokenCount(value: number): string {
-  const rounded = Math.max(0, Math.round(value));
-  if (rounded < TOKEN_BASE_UNIT.value) return String(rounded);
-
-  const unit = TOKEN_UNITS.find((candidate) => rounded >= candidate.value) ?? TOKEN_BASE_UNIT;
-  return `${TOKEN_NUMBER_FORMAT.format(rounded / unit.value)}${unit.suffix}`;
 }
 
 const BOT_COMMANDS: BotCommand[] = [
@@ -115,30 +85,10 @@ const BOT_COMMANDS: BotCommand[] = [
     description: 'Show chat session status',
     help: 'show this chat session status',
     handler: async ({ chat, backgroundSession }) => {
-      const uptimeSeconds = Math.floor((Date.now() - chat.startedAt) / 1000);
-      const background = backgroundSession.existing();
+      // Loads the transcript if it is not yet, so the context and usage below are real.
       const thinking = await chat.pi.getThinkingState();
       await sendTelegramMessage(
-        [
-          'Session status:',
-          `- Chat state: ${chat.processing ? 'processing' : 'idle'}`,
-          `- Chat messages: ${chat.messageCount}`,
-          `- Chat queue: ${chat.queue.length}`,
-          `- Pending steering: ${chat.pi.pendingSteeringCount}`,
-          `- Chat uptime: ${Math.floor(uptimeSeconds / 60)}m ${uptimeSeconds % 60}s`,
-          `- Chat model: ${chat.pi.modelName}`,
-          `- Chat reasoning: ${thinking.level}`,
-          `- Session tokens: ${formatSessionTokens(chat.pi.getSessionStats())}`,
-          `- Background state: ${background?.processing ? 'processing' : 'idle'}`,
-          `- Background queue: ${background?.queue.length ?? 0}`,
-          `- Background model: ${background?.pi.modelName ?? 'idle'}`,
-          `- Voice note tool: ${voiceStatusText()}`,
-          `- Tool call messages: ${toolCallMode()}`,
-          `- Voice transcripts: ${describeTranscriptSetting(showTranscriptsEnabled())}`,
-          `- Sub-agents: ${subagentStatusText()}`,
-          `- ${heartbeatStatusText()}`,
-          `- ${cronStatusText()}`,
-        ].join('\n'),
+        renderStatus(collectStatus(chat, backgroundSession.existing(), thinking.level)),
       );
     },
   },
@@ -346,4 +296,59 @@ export async function handleCommand(ctx: CommandContext, text: string): Promise<
 
   await handler(ctx);
   return true;
+}
+
+/** Everything /status shows, read from live state at one moment. */
+function collectStatus(
+  chat: ChatState,
+  background: ChatState | null,
+  reasoning: string,
+): StatusSnapshot {
+  const stats = chat.pi.getSessionStats();
+  const context = chat.pi.getContextUsage();
+  const voice = configuredTextToSpeechProviders();
+  return {
+    chat: {
+      processing: chat.processing,
+      model: chat.pi.modelName,
+      reasoning,
+      messages: chat.messageCount,
+      queue: chat.queue.length,
+      steering: chat.pi.pendingSteeringCount,
+      uptimeMs: Date.now() - chat.startedAt,
+    },
+    ...(context ? { context } : {}),
+    ...(stats ? { tokens: { ...stats.tokens, cost: stats.cost } } : {}),
+    background: {
+      loaded: Boolean(background),
+      processing: Boolean(background?.processing),
+      queue: background?.queue.length ?? 0,
+      model: background?.pi.modelName ?? '',
+    },
+    features: {
+      voice: { on: voice.length > 0, detail: voice.length ? voice.join(', ') : 'not configured' },
+      heartbeat: heartbeatFeature(),
+      cron: cronFeature(),
+      subagents: SUBAGENTS_ENABLED,
+      toolCalls: describeToolCallMode(toolCallMode()),
+      transcripts: showTranscriptsEnabled(),
+    },
+  };
+}
+
+function heartbeatFeature(): { on: boolean; detail: string } {
+  if (!HEARTBEAT_ENABLED || !HEARTBEAT_MODEL) return { on: false, detail: 'off' };
+  const minutes = Math.round(HEARTBEAT_INTERVAL_MS / 60_000);
+  return { on: true, detail: `every ${minutes}m on ${HEARTBEAT_MODEL}` };
+}
+
+function cronFeature(): { on: boolean; detail: string } {
+  if (!CRON_JOBS_ENABLED) return { on: false, detail: 'off' };
+  try {
+    const jobs = readCronJobs();
+    const active = jobs.filter((job) => job.enabled).length;
+    return { on: true, detail: `${active} of ${jobs.length} active` };
+  } catch (error) {
+    return { on: true, detail: `error: ${errorMessage(error)}` };
+  }
 }

@@ -68,6 +68,13 @@ export async function transcribeAudio(
   };
 }
 
+/** Labels of the text-to-speech providers that are configured, in the order tried. */
+export function configuredTextToSpeechProviders(): string[] {
+  return providerOrder(TEXT_TO_SPEECH_PROVIDER)
+    .filter((provider) => textToSpeechProviderConfigured(provider))
+    .map(providerLabel);
+}
+
 export function textToSpeechStatusText(): string {
   const configured = providerOrder(TEXT_TO_SPEECH_PROVIDER).filter((provider) =>
     textToSpeechProviderConfigured(provider),

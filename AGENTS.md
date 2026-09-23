@@ -18,6 +18,7 @@ Key files:
 - `src/telegram.ts` — Telegram Bot API transport plus the HTML fallback ladder; `src/telegram-html.ts` — escaping, sanitizing, tag-aware splitting (pure); `src/telegram-format.ts` — presentational helpers.
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
+- `src/status.ts` — the /status layout, rendered from a plain snapshot (pure, tested); `commands.ts` gathers the snapshot.
 - `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/openai-usage.ts` and `src/elevenlabs-usage.ts` back `/openaiusage` and `/elevenlabsusage`. `src/callback-menu.ts` — the shared inline-keyboard lifecycle (`CallbackMenu`, `dispatchCallbackQuery`); `src/model-menu.ts`, `src/reasoning-menu.ts`, `src/tool-call-menu.ts`, `src/transcript-menu.ts` — the keyboards themselves, each supplying only its prefix, texts, and `select`.
 - `src/discovery.ts` — extension discovery. `src/system-prompt.ts` — system prompt and memory blocks. `src/context-gist.ts` — the shared preferences gist (`CONTEXT_GIST_URL`), fetched once at startup and added to the system prompt.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks; `src/scheduled-tasks.ts` — the agent's tools for them, registered only when `cronJobs` is on.
