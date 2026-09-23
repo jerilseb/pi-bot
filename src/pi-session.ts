@@ -91,7 +91,6 @@ export interface PiRuntime {
    */
   sessionKind: SessionKind;
   getExtensionPaths: () => string[];
-  getSkillPaths: () => string[];
   systemPromptOverride: () => string;
   extensionFactories: Array<(pi: ExtensionAPI) => void>;
   /**
@@ -110,7 +109,6 @@ export async function createPiRuntime(options: {
   sessionPrefix: string;
   sessionKind: SessionKind;
   getExtensionPaths: () => string[];
-  getSkillPaths: () => string[];
   systemPromptOverride: () => string;
   extensionFactories?: Array<(pi: ExtensionAPI) => void>;
   workerExtensionFactories?: Array<(pi: ExtensionAPI) => void>;
@@ -141,7 +139,6 @@ export async function createPiRuntime(options: {
     sessionPrefix: options.sessionPrefix,
     sessionKind: options.sessionKind,
     getExtensionPaths: options.getExtensionPaths,
-    getSkillPaths: options.getSkillPaths,
     systemPromptOverride: options.systemPromptOverride,
     extensionFactories: options.extensionFactories ?? [],
     workerExtensionFactories: options.workerExtensionFactories ?? [],
@@ -152,7 +149,7 @@ export async function createPiRuntime(options: {
 /**
  * Runs one sub-agent worker: a fresh AgentSession with its own transcript that
  * answers a single task and is disposed. Workers share the runtime's model
- * catalogue, settings, extension paths, and skills, but get only the worker
+ * catalogue, settings, and extension paths, but get only the worker
  * extension factories and a caller-supplied system prompt — no Telegram tools,
  * no steering, no transport recovery.
  *
@@ -239,8 +236,8 @@ export async function runWorkerPrompt(
 }
 
 /**
- * The bot's resource loader: nothing from the user's Pi agent directory except
- * skills named explicitly, plus the given factories. Shared by the persistent
+ * The bot's resource loader: no skills and nothing from the user's Pi agent
+ * directory, only the project extensions and the given factories. Shared by the persistent
  * chat and background sessions and by sub-agent workers, which differ only in
  * which factories and system prompt they get.
  */
@@ -258,7 +255,6 @@ async function loadResources(
     noExtensions: true,
     noSkills: true,
     additionalExtensionPaths: runtime.getExtensionPaths(),
-    additionalSkillPaths: runtime.getSkillPaths(),
     extensionFactories: options.extensionFactories,
     systemPromptOverride: options.systemPromptOverride,
   });
@@ -770,7 +766,7 @@ export class SdkPiSession {
     collectResponseEvent(event, chunks, setError);
 
     if (event.type === 'tool_execution_start') {
-      onToolCall?.(formatToolStartNotification(event, session, this.runtime.cwd));
+      onToolCall?.(formatToolStartNotification(event, this.runtime.cwd));
     }
   }
 }

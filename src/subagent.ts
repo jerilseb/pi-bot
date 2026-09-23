@@ -269,7 +269,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     name: 'subagent_run',
     label: 'Run Sub-agents',
     description:
-      'Delegate one or more self-contained tasks to worker agents that run concurrently in fresh sessions with file, shell, web, and skill tools but no access to this conversation. Waits briefly; if every worker finishes in time the results are returned, otherwise the job keeps running, a job ID is returned, and a completion report is delivered to you when it finishes. Use for independent research or implementation chunks that would otherwise take many turns here.',
+      'Delegate one or more self-contained tasks to worker agents that run concurrently in fresh sessions with file, shell, and web tools but no access to this conversation. Waits briefly; if every worker finishes in time the results are returned, otherwise the job keeps running, a job ID is returned, and a completion report is delivered to you when it finishes. Use for independent research or implementation chunks that would otherwise take many turns here.',
     promptSnippet:
       'Delegate independent, self-contained tasks to concurrent worker agents with subagent_run.',
     promptGuidelines: [

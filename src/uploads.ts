@@ -50,7 +50,7 @@ export function telegramImageExtension(pi: ExtensionAPI): void {
     promptSnippet: 'Send an image file to the Telegram user.',
     promptGuidelines: [
       'Call this only when the user should actually see the image — not when merely discussing or analyzing one.',
-      'Pass an absolute path to a file that already exists on disk (e.g. output of the create-image skill).',
+      'Pass an absolute path to a file that already exists on disk (e.g. a generated image).',
       'Provide a brief caption when extra context would help; omit it for an unannotated send.',
       'After sending, keep the accompanying text reply short — the image carries the content.',
     ],

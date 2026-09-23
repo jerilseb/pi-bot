@@ -1,14 +1,14 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { DAILY_MEMORY_DIR, MEMORY_PATH } from './config.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
 import { localDateString } from './util.ts';
 
 /**
  * Formats Pi tool-execution events into short Telegram HTML notifications,
- * with special labels for memory file access and skill reads.
+ * with special labels for memory file access.
  */
 
 type ToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_execution_start' }>;
@@ -39,11 +39,7 @@ function stripLeadingIcon(line: string): string {
   return line.replace(LEADING_ICON_RE, '');
 }
 
-export function formatToolStartNotification(
-  event: ToolExecutionStartEvent,
-  session: AgentSession,
-  cwd: string,
-): string {
+export function formatToolStartNotification(event: ToolExecutionStartEvent, cwd: string): string {
   const firstArgument = formatFirstToolArgument(event.args);
   const appendFirstArgument = (label: string) => {
     if (!firstArgument) return label;
@@ -70,10 +66,7 @@ export function formatToolStartNotification(
     return `🧠 read daily memory (<code>${escapeTelegramHtml(dailyMemoryReadLabel)}</code>)`;
   }
 
-  const skillName = skillNameForReadTool(event, session, cwd);
-  return appendFirstArgument(
-    skillName ? `📗 ${escapeTelegramHtml(skillName)}` : `🛠 ${escapeTelegramHtml(event.toolName)}`,
-  );
+  return appendFirstArgument(`🛠 ${escapeTelegramHtml(event.toolName)}`);
 }
 
 function formatFirstToolArgument(args: unknown): string | null {
@@ -186,24 +179,6 @@ function getDailyMemoryReadLabel(event: ToolExecutionStartEvent, cwd: string): s
 
 function dailyMemoryDateFromPath(filePath: string): string | null {
   return path.basename(filePath).match(/^(\d{4}-\d{2}-\d{2})\.md$/)?.[1] ?? null;
-}
-
-function skillNameForReadTool(
-  event: ToolExecutionStartEvent,
-  session: AgentSession,
-  cwd: string,
-): string | null {
-  if (event.toolName !== 'read') return null;
-
-  const readPath = extractToolPath(event.args);
-  if (!readPath) return null;
-
-  const normalizedReadPath = normalizeFilePath(readPath, cwd);
-  const skill = session.resourceLoader
-    .getSkills()
-    .skills.find((skill) => normalizeFilePath(skill.filePath, cwd) === normalizedReadPath);
-
-  return skill?.name ?? null;
 }
 
 function extractToolPath(args: unknown): string | null {

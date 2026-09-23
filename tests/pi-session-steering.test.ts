@@ -21,7 +21,6 @@ function fixture() {
     sessionPrefix: 'test',
     sessionKind: 'chat',
     getExtensionPaths: () => [],
-    getSkillPaths: () => [],
     systemPromptOverride: () => '',
     extensionFactories: [],
   };

@@ -18,7 +18,7 @@ Most AI tools are either:
 `pi-bot` exists to combine those into one lightweight personal assistant:
 
 - **Available from your phone** — send voice notes, screenshots, PDFs, documents, and quick instructions from Telegram.
-- **Useful on your machine** — it can inspect files, edit code, run tests, use local skills, and work inside a real repository.
+- **Useful on your machine** — it can inspect files, edit code, run tests, and work inside a real repository.
 - **Proactive when needed** — it can schedule future tasks, run recurring checks, and keep heartbeat-style monitoring instructions.
 - **Persistent enough to be personal** — it has long-term memory and daily work notes so context does not vanish every session.
 - **Still under your control** — it answers only the single Telegram chat in `TELEGRAM_ALLOWED_CHAT_ID` and secrets stay in your `.env`.
@@ -65,7 +65,7 @@ Fetch this URL and summarize the key points.
 
 ### Create and inspect rich artifacts
 
-The bot can use skills for PDFs, image generation, browser automation, HTML visualizations, and more.
+The bot can work with PDFs, images, HTML visualizations, and more. No skills are loaded by default; ask it to read a skill's SKILL.md when you need one.
 
 Examples:
 
@@ -115,7 +115,6 @@ That means it can remember stable context without stuffing every temporary detai
 - Model switching with Telegram inline buttons.
 - Tool calls folded into one expandable message per prompt, or streamed, or off.
 - Usage commands for OpenAI Codex and ElevenLabs.
-- Pi skills for browser automation, image generation, HTML visualizations, email via Himalaya, and PDF work.
 - Graceful self-restart through `/restart` or an explicit natural-language restart request.
 
 ## Quick start
@@ -150,7 +149,7 @@ npm run dev
 npm run systemd:install
 ```
 
-The startup logs show the active chat model, background model, enabled extensions, and discovered skills.
+The startup logs show the active chat model, background model, and enabled extensions.
 
 ## Configuration
 
@@ -198,7 +197,7 @@ Heartbeat runs take their model from `HEARTBEAT_MODEL` in `.env`. There is no de
 
 Scheduled tasks are pinned to a model when they are created: by default the chat model `/models` had selected at that moment, so switching models later does not change existing tasks. A task can be given a specific model instead ("schedule this with kimi-k2.6"), which the agent validates against Pi's catalogue at creation time, so a typo or a provider without auth fails there rather than when the task fires. Asking to update a task's model to "default" re-pins it to the current chat model. Each task's model shows in the task list.
 
-Skills are discovered from both the project `skills/` directory and Pi's global `~/.pi/agent/skills/` directory. The latter follows `PI_CODING_AGENT_DIR` when that environment variable overrides Pi's agent directory. Symlinked skill directories and root Markdown skill files are followed, with cycles and duplicate targets ignored.
+No skills are loaded: neither a project `skills/` directory nor Pi's global `~/.pi/agent/skills/`. When a skill is needed, ask the agent to read its SKILL.md.
 
 Model refs use this form:
 
@@ -231,7 +230,7 @@ GOOGLE_GENAI_API_KEY=your-google-genai-key
 TAVILY_API_KEY_1=tvly-your-key
 # TAVILY_API_KEY_2=another-key-if-you-want
 
-# image generation skill
+# image generation (used by an external create-image skill)
 KIE_API_KEY=your-kie-api-key
 
 # optional OpenAI Codex runtime override
@@ -330,7 +329,7 @@ Operational notes:
 - Persistent app state lives under `files/`.
 - Back up `files/` if you care about memory, heartbeat state, or scheduled tasks.
 - Telegram downloads and generated temp files are stored under your system temp directory.
-- After changing extensions, skills, prompts, `src/config.ts`, or environment variables, restart with `npm run systemd:restart`. If the unit file itself needs to change (new node path, new repo location), re-run `npm run systemd:install`.
+- After changing extensions, prompts, `src/config.ts`, or environment variables, restart with `npm run systemd:restart`. If the unit file itself needs to change (new node path, new repo location), re-run `npm run systemd:install`.
 
 ## Memory files
 
@@ -359,6 +358,6 @@ files/settings.json.example      Checked-in reference copy of the above defaults
 
 Because the best assistant is the one you can reach immediately.
 
-Telegram gives you voice notes, screenshots, quick files, mobile access, and a familiar chat interface. `pi-bot` adds local tools, code execution, memory, scheduling, and agent skills behind that interface.
+Telegram gives you voice notes, screenshots, quick files, mobile access, and a familiar chat interface. `pi-bot` adds local tools, code execution, memory, and scheduling behind that interface.
 
 That makes it less like a chatbot and more like a personal operating layer for your work.

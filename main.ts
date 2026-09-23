@@ -6,7 +6,7 @@
  * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID: polls for
  * updates, keeps one foreground and one background Pi SDK session, queues
  * prompts, and sends Pi's final response back. Supports text, images,
- * downloaded files, optional audio transcription, local extensions/skills,
+ * downloaded files, optional audio transcription, local extensions,
  * generated file uploads, model refs across Pi providers, and scheduled heartbeat prompts.
  *
  * This module is the orchestrator: it constructs the runtimes and sessions,
@@ -30,10 +30,8 @@ import {
   ALLOWED_CHAT_ID,
   HEARTBEAT_MODEL,
   MODEL,
-  PI_AGENT_SKILLS_DIR,
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
-  PROJECT_SKILLS_DIR,
   RESTART_EXIT_DELAY_MS,
   SESSIONS_DIR,
   SUBAGENT_SESSIONS_DIR,
@@ -51,7 +49,7 @@ import {
 } from './src/context-gist.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { dispatchCallbackQuery } from './src/callback-menu.ts';
-import { discoverExtensionPaths, discoverSkillPaths } from './src/discovery.ts';
+import { discoverExtensionPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
 import { ingestTelegramMessage } from './src/inbound.ts';
@@ -97,7 +95,6 @@ ensureBotSettingsFile();
 await loadContextGist();
 
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-const SKILL_PATHS = discoverSkillPaths(PROJECT_SKILLS_DIR, PI_AGENT_SKILLS_DIR);
 
 const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
@@ -105,7 +102,6 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   sessionPrefix: 'telegram-chat',
   sessionKind: 'chat',
   getExtensionPaths: () => EXTENSION_PATHS,
-  getSkillPaths: () => SKILL_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
   extensionFactories: [
     contextGistSystemPromptExtension,
@@ -126,7 +122,6 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   sessionPrefix: 'telegram-background',
   sessionKind: 'background',
   getExtensionPaths: () => EXTENSION_PATHS,
-  getSkillPaths: () => SKILL_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
   extensionFactories: [
     contextGistSystemPromptExtension,
@@ -331,7 +326,6 @@ function logStartupBanner(): void {
   console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName ?? NO_MODEL_NAME}`);
   console.log('Pi runtime: SDK');
   console.log(`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(', ') : 'none'}`);
-  console.log(`Skills: ${SKILL_PATHS.length ? SKILL_PATHS.join(', ') : 'none'}`);
   console.log(`Voice note tool: ${voiceStatusText()}`);
   console.log(`Context gist: ${contextGistStatusText()}`);
   console.log(`Tool call messages: ${toolCallMode()}`);

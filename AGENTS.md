@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## Project overview
 
-`pi-bot` is a small Telegram bot that bridges one Telegram chat to a Pi SDK session. It uses long polling, Pi model refs (for example OpenRouter or OpenAI Codex), optional voice features (Google GenAI / ElevenLabs), local Pi extensions, and Pi skills.
+`pi-bot` is a small Telegram bot that bridges one Telegram chat to a Pi SDK session. It uses long polling, Pi model refs (for example OpenRouter or OpenAI Codex), optional voice features (Google GenAI / ElevenLabs), and local Pi extensions. No skills are loaded; when one is needed the user asks the agent to read its SKILL.md.
 
 Key files:
 
@@ -19,7 +19,7 @@ Key files:
 - `src/inbound.ts` — Telegram message/file/photo/audio ingestion, the detached-ingestion epoch, and cleanup of the temp downloads it creates.
 - `src/outbound.ts` — Pi response delivery and noop-sentinel suppression.
 - `src/commands.ts` — slash-command table (menu descriptions, `/help` lines, handlers); `src/openai-usage.ts` and `src/elevenlabs-usage.ts` back `/openaiusage` and `/elevenlabsusage`. `src/callback-menu.ts` — the shared inline-keyboard lifecycle (`CallbackMenu`, `dispatchCallbackQuery`); `src/model-menu.ts`, `src/reasoning-menu.ts`, `src/tool-call-menu.ts`, `src/transcript-menu.ts` — the keyboards themselves, each supplying only its prefix, texts, and `select`.
-- `src/discovery.ts` — extension/skill discovery. `src/system-prompt.ts` — system prompt and memory blocks. `src/context-gist.ts` — the shared preferences gist (`CONTEXT_GIST_URL`), fetched once at startup and added to the system prompt.
+- `src/discovery.ts` — extension discovery. `src/system-prompt.ts` — system prompt and memory blocks. `src/context-gist.ts` — the shared preferences gist (`CONTEXT_GIST_URL`), fetched once at startup and added to the system prompt.
 - `src/heartbeat.ts` — scheduled heartbeat controller. `src/cron.ts` + `src/cron-store.ts` — scheduled tasks; `src/scheduled-tasks.ts` — the agent's tools for them, registered only when `cronJobs` is on.
 - `src/background-bash.ts` — background shell sessions; `src/output-buffer.ts` bounds their output in memory and spills the full output to a temp file. `src/subagent.ts` — sub-agent jobs: concurrent worker sessions with their own transcripts under `sessions/subagent-sessions/`, registered only when `ENABLE_SUBAGENTS=true` in `.env`. `src/job-registry.ts` — the lifecycle bookkeeping both share: IDs, the yield-then-background step, TTL pruning, cancellation, report routing back to the originating session, and dropping a queued report once that session has read the finished result. `src/job-progress.ts` — the silent, self-updating Telegram message a backgrounded job started from the chat keeps until it ends; the bot refreshes it every `JOB_PROGRESS_UPDATE_MS` with no model call. Both job types also have a wait tool (`background_bash_wait`, `subagent_wait`, through `JobRegistry.waitFor`) that blocks the tool rather than the model; `src/steering-signal.ts` ends such a wait as soon as the user steers a message into that turn, so the message is not held until the wait times out. `src/extension-models.ts` — model lookups shared by the tools that pin work to a model.
 - `src/agent-envelope.ts` — shared layout for the internal prompts the bot sends itself (heartbeat, cron, post-restart, background-bash and sub-agent reports).
@@ -27,7 +27,6 @@ Key files:
 - `src/env-guard.ts` — blocks tool access to `.env` files. `src/util.ts` — shared helpers. `src/types.ts` — shared types (Telegram payloads, `IncomingPrompt`). `src/tool-result.ts` — the plain-text tool result helper.
 - `src/restart-tool.ts`, `src/restart-flow.ts` (shared `/restart` + `restart_bot` gate), `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
 - `extensions/` — local Pi extensions (web search, web fetch).
-- `skills/` — Pi skills.
 - `files/` — persistent prompt/memory/heartbeat/schedule state, including `files/subagent.md`, the worker system prompt (created with a default on first start).
 - `scripts/systemd.sh` — installs/removes the systemd `--user` unit. `scripts/smoke.ts` — the smoke check.
 
@@ -48,9 +47,9 @@ Before finishing code changes, run:
 npm run verify
 ```
 
-That runs `npm run lint`, then `npm run typecheck`, then `npm test`, then `npm run smoke` (imports every module, registers every tool, validates env/model/skill config). It is the same gate `/restart` and the `restart_bot` tool use, so a failure there blocks restarts — keep tests fast and free of network or filesystem dependencies. Use `npm run format` to apply Biome formatting; `npm run lint` reports rule violations, which Biome does not fix automatically.
+That runs `npm run lint`, then `npm run typecheck`, then `npm test`, then `npm run smoke` (imports every module, registers every tool, validates env/model config). It is the same gate `/restart` and the `restart_bot` tool use, so a failure there blocks restarts — keep tests fast and free of network or filesystem dependencies. Use `npm run format` to apply Biome formatting; `npm run lint` reports rule violations, which Biome does not fix automatically.
 
-Keep `npm run lint` at zero errors. It went unchecked for a while because no script invoked it, and violations accumulated silently in `src/` and `skills/`.
+Keep `npm run lint` at zero errors. It went unchecked for a while because no script invoked it, and violations accumulated silently in `src/`.
 
 ## Tests
 
@@ -81,9 +80,9 @@ Keep `npm run lint` at zero errors. It went unchecked for a while because no scr
 - Only one running process should poll a given Telegram bot token.
 - Persistent app state lives under `files/`; avoid deleting or rewriting it unless explicitly requested. Chat and background transcripts live in `sessions/`. Every chat transcript shares the ID `telegram-chat-<chatId>` (background: `telegram-background-<chatId>`), and startup resumes the one with the newest message, unless `/new` or `start_new_session` marked it cleared. The SDK writes a new transcript to disk only with its first assistant message, so until then the previous one is still the newest file. Sub-agent worker transcripts under `sessions/subagent-sessions/` are kept indefinitely; each records its parent's transcript path in the session header and a `telegram-bot-subagent` custom entry with the job, task, tool call, and parent leaf entry. `TELEGRAM_ALLOWED_CHAT_ID` in `.env` is the single Telegram chat allowed to use the bot; every other chat is ignored.
 - Temporary downloads/generated files are under the system temp directory.
-- After changing extensions, skills, prompts, or env vars, restart the bot.
+- After changing extensions, prompts, or env vars, restart the bot.
 - Deployment is a systemd `--user` unit written by `scripts/systemd.sh` to `~/.config/systemd/user/pi-bot.service`. It is generated, not checked in: change the script, then re-run `npm run systemd:install`. `Restart=always` is what makes `/restart` and `restart_bot` work — both exit 0 on purpose and rely on the supervisor to bring the process back.
 
 ## Pi-specific work
 
-When modifying Pi SDK usage, extensions, skills, themes, TUI code, or Pi agent behavior, consult the installed Pi documentation/examples before implementing. Follow existing project patterns in `src/pi-session.ts`, `src/discovery.ts`, `src/system-prompt.ts`, `extensions/`, and `skills/`.
+When modifying Pi SDK usage, extensions, themes, TUI code, or Pi agent behavior, consult the installed Pi documentation/examples before implementing. Follow existing project patterns in `src/pi-session.ts`, `src/discovery.ts`, `src/system-prompt.ts`, and `extensions/`.

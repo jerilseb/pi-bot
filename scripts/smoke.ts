@@ -5,15 +5,13 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   HEARTBEAT_MODEL,
   MODEL,
-  PI_AGENT_SKILLS_DIR,
   PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
-  PROJECT_SKILLS_DIR,
   SUBAGENT_SESSIONS_DIR,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
 import { contextGistSystemPromptExtension } from '../src/context-gist.ts';
-import { discoverExtensionPaths, discoverSkillPaths } from '../src/discovery.ts';
+import { discoverExtensionPaths } from '../src/discovery.ts';
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
 import { assertModelUsable, createPiRuntime } from '../src/pi-session.ts';
 import { scheduledTasksExtension } from '../src/scheduled-tasks.ts';
@@ -141,11 +139,10 @@ async function importAndRegisterExtensions(extensionPaths: string[]): Promise<nu
  * auth. The runtimes no longer resolve a model themselves, so these checks are
  * explicit — they mirror validateModels() in main.ts.
  */
-async function createSmokeRuntimes(extensionPaths: string[], skillPaths: string[]): Promise<void> {
+async function createSmokeRuntimes(extensionPaths: string[]): Promise<void> {
   const common = {
     cwd: process.cwd(),
     getExtensionPaths: () => extensionPaths,
-    getSkillPaths: () => skillPaths,
     systemPromptOverride: () => readSystemPrompt(),
     extensionFactories: [
       contextGistSystemPromptExtension,
@@ -240,14 +237,13 @@ async function main(): Promise<void> {
 
   const importedModules = await importAllSourceModules();
   const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-  const skillPaths = discoverSkillPaths(PROJECT_SKILLS_DIR, PI_AGENT_SKILLS_DIR);
   const registeredTools = await importAndRegisterExtensions(extensionPaths);
-  await createSmokeRuntimes(extensionPaths, skillPaths);
+  await createSmokeRuntimes(extensionPaths);
   const scheduledTaskTools = verifyScheduledTaskTools();
   const subagentTools = verifySubagentTools();
 
   console.log(
-    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s), ${skillPaths.length} skill(s).`,
+    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s).`,
   );
 }
 

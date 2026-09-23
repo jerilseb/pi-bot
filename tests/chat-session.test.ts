@@ -18,7 +18,6 @@ function runtime(): PiRuntime {
     sessionPrefix: 'test',
     sessionKind: 'chat',
     getExtensionPaths: () => [],
-    getSkillPaths: () => [],
     systemPromptOverride: () => '',
     extensionFactories: [],
   };
