@@ -11,9 +11,7 @@ export async function sendPiResponse(
   response: PiPromptResult,
   options: { suppressNoop?: boolean; source?: IncomingPrompt['source'] } = {},
 ): Promise<boolean> {
-  // A blank reply from an unattended run is nothing to report, same as the
-  // sentinel: sending "(empty)" would only tell the user the model said nothing.
-  if (options.suppressNoop && (!response.text.trim() || isNoopResponse(response.text))) {
+  if (isSilentResponse(response, options)) {
     console.log('background task completed with no user-visible update');
     return false;
   }
@@ -24,6 +22,18 @@ export async function sendPiResponse(
       : response.text;
   await sendTelegramMessage(text);
   return true;
+}
+
+/**
+ * True when a response has nothing to send: a blank reply from an unattended
+ * run is nothing to report, same as the sentinel — sending "(empty)" would only
+ * tell the user the model said nothing.
+ */
+export function isSilentResponse(
+  response: PiPromptResult,
+  options: { suppressNoop?: boolean },
+): boolean {
+  return Boolean(options.suppressNoop && (!response.text.trim() || isNoopResponse(response.text)));
 }
 
 // Compared against the bare sentinel name so a model that drops the __ wrapper —

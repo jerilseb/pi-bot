@@ -19,7 +19,8 @@ export interface HeartbeatController {
 
 export function createHeartbeatController(options: {
   handleIncoming: (prompt: IncomingPrompt) => Promise<void>;
-  isChatBusy: () => boolean;
+  /** True while the background session is running or has queued a prompt. */
+  isBackgroundBusy: () => boolean;
   isRunning: () => boolean;
 }): HeartbeatController {
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -30,8 +31,10 @@ export function createHeartbeatController(options: {
     const instructions = readHeartbeatInstructions();
     if (!instructions) return;
 
-    if (options.isChatBusy()) {
-      console.log('heartbeat skipped; chat is busy');
+    // Skipped rather than queued behind a run still in progress. The chat is not
+    // waited for: what a run sends is held until the chat is idle.
+    if (options.isBackgroundBusy()) {
+      console.log('heartbeat skipped; background session is busy');
       return;
     }
 

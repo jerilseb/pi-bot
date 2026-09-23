@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
+import { BackgroundOutbox, setBackgroundOutbox } from '../src/background-outbox.ts';
 import { createChatSession } from '../src/chat-session.ts';
 import { CRON_NOOP, MAX_QUEUED_PROMPTS } from '../src/config.ts';
 import type { PiRunPromptOptions, PiRuntime } from '../src/pi-session.ts';
@@ -401,4 +402,48 @@ test('post-restart tasks queue behind an active run instead of steering it', asy
   f.gate.resolve();
   await until(() => !f.queue.isAssistantBusy());
   assert.deepEqual(f.runs, ['first task', 'second task']);
+});
+
+test('a background report waits for the chat cooldown, and is noted only once delivered', async (t) => {
+  const f = setup(t);
+  t.mock.method(f.background.pi, 'useModel', async () => {});
+  t.mock.method(console, 'log', () => {});
+  let clock = 0;
+  const outbox = new BackgroundOutbox({
+    isChatBusy: () => f.chat.processing || f.chat.queue.length > 0,
+    cooldownMs: 1_000,
+    pollMs: 1,
+    now: () => clock,
+  });
+  setBackgroundOutbox(outbox);
+  t.after(() => {
+    outbox.stop();
+    setBackgroundOutbox(null);
+  });
+
+  f.gate.resolve();
+  await f.queue.handleIncoming({
+    text: 'run the check',
+    attachments: [],
+    source: 'cron',
+    suppressNoop: true,
+    model: 'test/cron-model',
+    label: 'Morning check',
+  });
+  await until(() => !f.queue.isAssistantBusy());
+
+  // The run finished, but the chat was active less than a cooldown ago.
+  assert.equal(f.backgroundRuns.length, 1);
+  assert.equal(outbox.heldCount, 1);
+  assert.ok(!f.messages.some((message) => message.includes('background answer')));
+  assert.equal(f.note.mock.callCount(), 0);
+
+  clock = 1_000;
+  // The outbox rechecks on a timer, which setImmediate-based waiting outruns.
+  for (let i = 0; i < 100 && f.note.mock.callCount() === 0; i++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 2));
+  }
+  assert.equal(outbox.heldCount, 0);
+  assert.equal(f.note.mock.callCount(), 1);
+  assert.ok(f.messages.some((message) => message.includes('background answer')));
 });

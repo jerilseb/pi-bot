@@ -317,12 +317,21 @@ export const DOCUMENT_UPLOAD_EXTS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Background work: background bash and sub-agents
+// Background work: background runs, background bash, and sub-agents
 //
 // Every concurrency limit, timeout, TTL, and payload cap for background work
 // belongs in this section — only narrow display widths stay next to the
 // formatter that uses them.
 // ---------------------------------------------------------------------------
+
+/**
+ * How long the chat must be idle — no turn running or queued, no new message —
+ * before anything a background run (scheduled task, heartbeat, or the job
+ * reports they get) sends is delivered. See src/background-outbox.ts.
+ */
+export const BACKGROUND_DELIVERY_COOLDOWN_MS = 5 * 60_000;
+/** How often held background deliveries recheck the chat while it is busy. */
+export const BACKGROUND_DELIVERY_POLL_MS = 15_000;
 
 export const BACKGROUND_BASH_MAX_RUNNING = 12;
 export const BACKGROUND_BASH_DEFAULT_YIELD_MS = 4_000;

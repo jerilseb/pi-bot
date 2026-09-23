@@ -32,7 +32,14 @@ export interface StatusSnapshot {
   context?: StatusContext;
   /** Undefined when no transcript is loaded yet. */
   tokens?: { input: number; cacheRead: number; cacheWrite: number; output: number; cost: number };
-  background: { loaded: boolean; processing: boolean; queue: number; model: string };
+  background: {
+    loaded: boolean;
+    processing: boolean;
+    queue: number;
+    model: string;
+    /** Messages waiting for the chat's idle cooldown (src/background-outbox.ts). */
+    held?: number;
+  };
   features: {
     voice: { on: boolean; detail: string };
     heartbeat: { on: boolean; detail: string };
@@ -108,9 +115,10 @@ function tokenSection(tokens: StatusSnapshot['tokens']): string[] {
 function backgroundSection(background: StatusSnapshot['background']): string[] {
   if (!background.loaded) return ['🌙 <b>Background</b> · 💤 not started'];
   const state = background.processing ? '🟡 working' : '🟢 idle';
+  const held = background.held ? ` · 📬 Held <b>${background.held}</b>` : '';
   return [
     `🌙 <b>Background</b> · ${state}`,
-    `<blockquote>🤖 <code>${escapeTelegramHtml(background.model)}</code> · 📥 Queue <b>${background.queue}</b></blockquote>`,
+    `<blockquote>🤖 <code>${escapeTelegramHtml(background.model)}</code> · 📥 Queue <b>${background.queue}</b>${held}</blockquote>`,
   ];
 }
 

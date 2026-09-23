@@ -30,7 +30,8 @@ export interface CronController {
 
 export function createCronController(options: {
   handleIncoming: (prompt: IncomingPrompt) => Promise<void>;
-  isChatBusy: () => boolean;
+  /** True while the background session is running or has queued a prompt. */
+  isBackgroundBusy: () => boolean;
   isRunning: () => boolean;
 }): CronController {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -92,8 +93,10 @@ export function createCronController(options: {
         continue;
       }
 
-      if (options.isChatBusy()) {
-        console.log(`cron ${job.id} deferred; chat is busy`);
+      // Background runs go one at a time. The chat is not waited for: what a
+      // run sends is held by the background outbox until the chat is idle.
+      if (options.isBackgroundBusy()) {
+        console.log(`cron ${job.id} deferred; background session is busy`);
         jobs[index] = deferCronJob(job, BUSY_DEFER_MS);
         changed = true;
         continue;

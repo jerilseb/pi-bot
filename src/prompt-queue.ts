@@ -1,3 +1,4 @@
+import { backgroundOutbox, deliverToChat } from './background-outbox.ts';
 import type { ChatSession, ChatState } from './chat-session.ts';
 import { handleCommand } from './commands.ts';
 import {
@@ -7,11 +8,11 @@ import {
 } from './config.ts';
 import { cleanupAttachments } from './inbound.ts';
 import type { RunTranscript } from './pi-session.ts';
-import { sendPiResponse } from './outbound.ts';
+import { isSilentResponse, sendPiResponse } from './outbound.ts';
 import { backgroundReportNote } from './session-notes.ts';
 import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
 import { createToolNotifications } from './tool-notification-batch.ts';
-import type { IncomingPrompt } from './types.ts';
+import type { IncomingPrompt, PiPromptResult } from './types.ts';
 import { errorMessage, isBackgroundPrompt, isJobReportPrompt } from './util.ts';
 
 /**
@@ -49,6 +50,9 @@ export function createPromptQueue(options: {
     const session = isBackgroundPrompt(prompt) ? backgroundSession : chatSession;
     const chat = session.get();
     const trimmed = prompt.text.trim();
+    // Anything headed for the chat, commands included, restarts the cooldown
+    // held background messages wait out.
+    if (!isBackgroundPrompt(prompt)) backgroundOutbox()?.noteChatActivity();
 
     if (prompt.attachments.length === 0 && trimmed.startsWith('/')) {
       const handled = await handleCommand(
@@ -133,6 +137,7 @@ export function createPromptQueue(options: {
       chat.processing = true;
 
       const isBackground = isBackgroundPrompt(prompt);
+      if (!isBackground) backgroundOutbox()?.noteChatActivity();
       // Background runs have no user watching, so no typing indicator.
       const typing = isBackground ? { stop: () => undefined } : startTyping();
       // Own state per prompt: background and foreground sessions can overlap.
@@ -164,31 +169,30 @@ export function createPromptQueue(options: {
         // Flush before the response so notifications cannot arrive after the
         // answer they describe.
         await toolNotifications.finish();
-        const delivered = await sendPiResponse(response, {
-          suppressNoop: prompt.suppressNoop,
-          source: prompt.source,
-        });
-        // A background-session run sends its message without the chat agent
-        // ever seeing it. Note it in the chat session so the next chat turn
-        // knows what the user was just sent. Skipped during shutdown so a late
-        // report cannot land after the restart note that marks a clean exit.
-        const note =
-          delivered && isBackground && isRunning()
-            ? backgroundReportNote({
-                source: prompt.source,
-                ...(prompt.label ? { label: prompt.label } : {}),
-                ...(prompt.model ? { model: prompt.model } : {}),
-                report: response.text,
-              })
-            : null;
-        if (note) await chatSession.get().pi.noteEvent(note.kind, note.text);
+        if (isBackground && isSilentResponse(response, prompt)) {
+          console.log('background task completed with no user-visible update');
+        } else if (isBackground) {
+          // Held until the chat has been idle for the cooldown. The note goes
+          // with the message, so the chat agent learns of it only once the
+          // user has actually been sent it.
+          await deliverToChat('background', prompt.source ?? 'report', () =>
+            deliverBackgroundResponse(prompt, response),
+          );
+        } else {
+          await sendPiResponse(response, {
+            suppressNoop: prompt.suppressNoop,
+            source: prompt.source,
+          });
+        }
         enqueuePendingNewSessionTask(chat, prompt);
       } catch (error) {
         const message = errorMessage(error);
         console.error('error:', message);
         await toolNotifications.finish();
         try {
-          await sendTelegramMessage(`❌ ${sanitizeError(message)}`);
+          await deliverToChat(isBackground ? 'background' : 'chat', 'error', () =>
+            sendTelegramMessage(`❌ ${sanitizeError(message)}`),
+          );
         } catch (notificationError) {
           console.error(
             'failed to send prompt error notification:',
@@ -199,8 +203,35 @@ export function createPromptQueue(options: {
         cleanupAttachments(prompt);
         typing.stop();
         chat.processing = false;
+        // The cooldown counts from the end of the chat's last turn.
+        if (!isBackground) backgroundOutbox()?.noteChatActivity();
       }
     }
+  }
+
+  /**
+   * A background run's response and, when the user was sent something, the
+   * note that tells the chat session about it. A background run sends its
+   * message without the chat agent ever seeing it, so the next chat turn would
+   * otherwise not know what the user was just sent. Skipped during shutdown so
+   * a late report cannot land after the restart note that marks a clean exit.
+   */
+  async function deliverBackgroundResponse(
+    prompt: IncomingPrompt,
+    response: PiPromptResult,
+  ): Promise<void> {
+    const delivered = await sendPiResponse(response, {
+      suppressNoop: prompt.suppressNoop,
+      source: prompt.source,
+    });
+    if (!delivered || !isRunning()) return;
+    const note = backgroundReportNote({
+      source: prompt.source,
+      ...(prompt.label ? { label: prompt.label } : {}),
+      ...(prompt.model ? { model: prompt.model } : {}),
+      report: response.text,
+    });
+    if (note) await chatSession.get().pi.noteEvent(note.kind, note.text);
   }
 
   return {

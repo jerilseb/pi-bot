@@ -1,3 +1,4 @@
+import { backgroundOutbox } from './background-outbox.ts';
 import type { ChatSession, ChatState } from './chat-session.ts';
 import {
   CRON_JOBS_ENABLED,
@@ -324,6 +325,7 @@ function collectStatus(
       processing: Boolean(background?.processing),
       queue: background?.queue.length ?? 0,
       model: background?.pi.modelName ?? '',
+      held: backgroundOutbox()?.heldCount ?? 0,
     },
     features: {
       voice: { on: voice.length > 0, detail: voice.length ? voice.join(', ') : 'not configured' },

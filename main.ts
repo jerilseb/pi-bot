@@ -25,6 +25,7 @@ import {
   setBackgroundBashReportHandler,
   stopAllBackgroundSessions,
 } from './src/background-bash.ts';
+import { BackgroundOutbox, setBackgroundOutbox } from './src/background-outbox.ts';
 import { createChatSession } from './src/chat-session.ts';
 import { telegramCommandMenu } from './src/commands.ts';
 import {
@@ -156,22 +157,28 @@ const backgroundSession = createChatSession(BACKGROUND_PI_RUNTIME);
 let offset = 0;
 let running = true;
 
-const { handleIncoming, isAssistantBusy } = createPromptQueue({
+// What background runs send waits until the chat has been idle for
+// BACKGROUND_DELIVERY_COOLDOWN_MS, so a report never interrupts a conversation.
+const outbox = new BackgroundOutbox({ isChatBusy: () => chatSession.isBusy() });
+setBackgroundOutbox(outbox);
+
+const { handleIncoming } = createPromptQueue({
   chatSession,
   backgroundSession,
   restart,
   isRunning: () => running,
 });
 
+// Neither waits for the chat, only for the background run before it.
 const heartbeat = createHeartbeatController({
   handleIncoming,
-  isChatBusy: isAssistantBusy,
+  isBackgroundBusy: () => backgroundSession.isBusy(),
   isRunning: () => running,
 });
 
 const cron = createCronController({
   handleIncoming,
-  isChatBusy: isAssistantBusy,
+  isBackgroundBusy: () => backgroundSession.isBusy(),
   isRunning: () => running,
 });
 
@@ -416,6 +423,7 @@ async function shutdown(): Promise<void> {
   console.log('Shutting down...');
   heartbeat.stop();
   cron.stop();
+  outbox.stop();
   chatSession.clear();
   backgroundSession.clear();
   await stopAllBackgroundSessions();

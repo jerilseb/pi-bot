@@ -7,7 +7,9 @@ import {
   TELEGRAM_VOICE_UPLOAD_LIMIT,
 } from './config.ts';
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
+import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
 import { telegram } from './telegram.ts';
+import type { SessionKind } from './types.ts';
 
 const SendVoiceNoteParams = Type.Object({
   text: Type.String({
@@ -20,7 +22,12 @@ export function voiceStatusText(): string {
   return textToSpeechStatusText();
 }
 
-export function telegramVoiceNoteExtension(pi: ExtensionAPI): void {
+/** send_voice_note for one of the bot's sessions; the background session's sends are held. */
+export function telegramVoiceNoteExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+  return (pi) => registerSendVoiceNote(pi, session);
+}
+
+function registerSendVoiceNote(pi: ExtensionAPI, session: SessionKind): void {
   pi.registerTool({
     name: 'send_voice_note',
     label: 'Send Voice Note',
@@ -36,12 +43,21 @@ export function telegramVoiceNoteExtension(pi: ExtensionAPI): void {
     parameters: SendVoiceNoteParams,
 
     async execute(_toolCallId, params) {
-      const result = await sendTelegramVoiceNote(params.text);
+      // Synthesized now, so a TTS failure still reaches the agent; only the
+      // upload waits when the send is held.
+      const result = await synthesizeVoiceNote(params.text);
+      const outcome = await deliverToChat(session, 'voice note', () =>
+        uploadVoiceNote(result.audio),
+      );
+      const characters = prepareTtsText(params.text).length;
       return {
         content: [
           {
             type: 'text',
-            text: `Voice note sent (${prepareTtsText(params.text).length} characters).`,
+            text:
+              outcome === 'held'
+                ? heldDeliveryNote(`Voice note (${characters} characters)`)
+                : `Voice note sent (${characters} characters).`,
           },
         ],
         details: result,
@@ -50,7 +66,7 @@ export function telegramVoiceNoteExtension(pi: ExtensionAPI): void {
   });
 }
 
-async function sendTelegramVoiceNote(text: string): Promise<TtsAudioResult> {
+async function synthesizeVoiceNote(text: string): Promise<TtsAudioResult> {
   const speechText = prepareTtsText(text);
   if (!speechText) {
     throw new Error('Voice note text is empty after cleanup.');
@@ -62,12 +78,14 @@ async function sendTelegramVoiceNote(text: string): Promise<TtsAudioResult> {
       `Generated voice note is too large: ${(result.audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
     );
   }
+  return result;
+}
 
+async function uploadVoiceNote(audio: TtsAudioResult['audio']): Promise<void> {
   const form = new FormData();
   form.append('chat_id', ALLOWED_CHAT_ID);
-  form.append('voice', new Blob([result.audio], { type: 'audio/ogg' }), 'pi-reply.ogg');
+  form.append('voice', new Blob([audio], { type: 'audio/ogg' }), 'pi-reply.ogg');
   await telegram('sendVoice', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
-  return result;
 }
 
 function prepareTtsText(text: string): string {

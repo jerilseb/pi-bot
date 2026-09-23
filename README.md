@@ -80,7 +80,7 @@ Open this site and test the login flow.
 
 Ask it to do something later, once, repeatedly, or on a cron-like schedule. Requires `"cronJobs": true` in `files/settings.json` — see [Configuration](#configuration).
 
-Scheduled tasks and the heartbeat run in the background, each in a fresh session of its own (transcripts in `sessions/scheduled-tasks-sessions/` and `sessions/heartbeat-sessions/`), so they cannot disturb your conversation or each other, but every report they send you is also noted in the chat session. Asking "what did this morning's report say?" works without the chat agent having to go and read files.
+Scheduled tasks and the heartbeat run in the background, each in a fresh session of its own (transcripts in `sessions/scheduled-tasks-sessions/` and `sessions/heartbeat-sessions/`), so they cannot disturb your conversation or each other, and they run even while you are chatting. What they send you waits until the chat has been idle for 5 minutes (`BACKGROUND_DELIVERY_COOLDOWN_MS` in `src/config.ts`), so a report never interrupts a conversation; `/status` shows how many are waiting. Every report is also noted in the chat session once it is delivered. Asking "what did this morning's report say?" works without the chat agent having to go and read files.
 
 Examples:
 

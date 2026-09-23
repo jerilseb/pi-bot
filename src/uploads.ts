@@ -12,8 +12,10 @@ import {
   TELEGRAM_MEDIA_TIMEOUT_MS,
   TELEGRAM_PHOTO_UPLOAD_LIMIT,
 } from './config.ts';
+import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
 import { telegram } from './telegram.ts';
+import type { SessionKind } from './types.ts';
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
 
@@ -41,7 +43,12 @@ const SendDocumentParams = Type.Object({
   ),
 });
 
-export function telegramImageExtension(pi: ExtensionAPI): void {
+/** send_image for one of the bot's sessions; the background session's sends are held. */
+export function telegramImageExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+  return (pi) => registerSendImage(pi, session);
+}
+
+function registerSendImage(pi: ExtensionAPI, session: SessionKind): void {
   pi.registerTool({
     name: 'send_image',
     label: 'Send Image',
@@ -58,12 +65,17 @@ export function telegramImageExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params) {
       const resolved = resolvePath(params.path);
       validateUpload(resolved, IMAGE_EXTS, LOCAL_IMAGE_UPLOAD_DIRS);
-      await uploadImage(resolved, params.caption);
+      const outcome = await deliverToChat(session, 'image', () =>
+        uploadImage(resolved, params.caption),
+      );
       return {
         content: [
           {
             type: 'text',
-            text: `Sent image: ${path.basename(resolved)}`,
+            text:
+              outcome === 'held'
+                ? heldDeliveryNote(`Image ${path.basename(resolved)}`)
+                : `Sent image: ${path.basename(resolved)}`,
           },
         ],
         details: { path: resolved, caption: params.caption ?? null },
@@ -72,7 +84,12 @@ export function telegramImageExtension(pi: ExtensionAPI): void {
   });
 }
 
-export function telegramDocumentExtension(pi: ExtensionAPI): void {
+/** send_document for one of the bot's sessions; the background session's sends are held. */
+export function telegramDocumentExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+  return (pi) => registerSendDocument(pi, session);
+}
+
+function registerSendDocument(pi: ExtensionAPI, session: SessionKind): void {
   pi.registerTool({
     name: 'send_document',
     label: 'Send Document',
@@ -90,12 +107,17 @@ export function telegramDocumentExtension(pi: ExtensionAPI): void {
       const resolved = resolvePath(params.path);
       const allowedExts = DOCUMENT_UPLOAD_EXTS.map((ext) => `.${ext}`);
       validateUpload(resolved, allowedExts, LOCAL_DOCUMENT_UPLOAD_DIRS);
-      await uploadDocument(resolved, params.caption);
+      const outcome = await deliverToChat(session, 'document', () =>
+        uploadDocument(resolved, params.caption),
+      );
       return {
         content: [
           {
             type: 'text',
-            text: `Sent document: ${path.basename(resolved)}`,
+            text:
+              outcome === 'held'
+                ? heldDeliveryNote(`Document ${path.basename(resolved)}`)
+                : `Sent document: ${path.basename(resolved)}`,
           },
         ],
         details: { path: resolved, caption: params.caption ?? null },

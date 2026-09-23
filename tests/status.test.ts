@@ -86,6 +86,15 @@ describe('renderStatus', () => {
     });
   }
 
+  test('shows background messages held for the chat cooldown, only when there are some', () => {
+    const background = { loaded: true, processing: false, queue: 0, model: 'per-prompt' };
+    assert.match(
+      renderStatus(snapshot({ background: { ...background, held: 2 } })),
+      /📬 Held <b>2<\/b>/,
+    );
+    assert.doesNotMatch(renderStatus(snapshot({ background: { ...background, held: 0 } })), /Held/);
+  });
+
   test('escapes values it did not write', () => {
     const html = renderStatus(SHAPES[5][1]);
     assert.match(html, /&lt;b&gt;x&lt;\/b&gt; &amp; "y"/);

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
 import type { CallbackMenu } from './callback-menu.ts';
 import { sendTelegramInlineKeyboard, type InlineKeyboardButton } from './telegram.ts';
 import { textResult } from './tool-result.ts';
-import type { IncomingPrompt } from './types.ts';
+import type { IncomingPrompt, SessionKind } from './types.ts';
 
 const MENU_CALLBACK_PREFIX = 'menu:';
 const MENU_CALLBACK_CANCEL = 'cancel';
@@ -72,7 +73,12 @@ interface TelegramMenu {
 
 const menus = new Map<string, TelegramMenu>();
 
-export function telegramMenuExtension(pi: ExtensionAPI): void {
+/** send_telegram_menu for one of the bot's sessions; the background session's sends are held. */
+export function telegramMenuExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+  return (pi) => registerSendMenu(pi, session);
+}
+
+function registerSendMenu(pi: ExtensionAPI, session: SessionKind): void {
   pi.registerTool({
     name: 'send_telegram_menu',
     label: 'Send Telegram Menu',
@@ -87,7 +93,21 @@ export function telegramMenuExtension(pi: ExtensionAPI): void {
     ],
     parameters: SendTelegramMenuParams,
     async execute(_toolCallId, params: SendTelegramMenuParamsType) {
-      const menu = await sendTelegramMenu(params);
+      // Built now so invalid options still fail the call; the expiry clock
+      // starts when the menu is actually sent.
+      const prepared = prepareTelegramMenu(params);
+      const outcome = await deliverToChat(session, 'menu', async () => {
+        await sendTelegramMenu(prepared);
+      });
+      if (outcome === 'held') {
+        return textResult(
+          [
+            heldDeliveryNote('Menu'),
+            'The user selection will arrive as a follow-up prompt in the chat, not in this run.',
+          ].join('\n'),
+        );
+      }
+      const menu = prepared.menu;
       return textResult(
         [
           `Sent Telegram menu ${menu.id}.`,
@@ -152,18 +172,30 @@ export function telegramMenuCallbackMenu(
   };
 }
 
-async function sendTelegramMenu(params: SendTelegramMenuParamsType): Promise<TelegramMenu> {
-  const options = normalizeMenuOptions(params.options);
-  const columns = normalizeColumns(params.columns);
-  const allowCancel = params.allow_cancel ?? false;
+interface PreparedMenu {
+  menu: TelegramMenu;
+  columns: number;
+  expiresMinutes: number;
+}
+
+function prepareTelegramMenu(params: SendTelegramMenuParamsType): PreparedMenu {
   const expiresMinutes = normalizeExpiryMinutes(params.expires_minutes);
-  const menu: TelegramMenu = {
-    id: createMenuId(),
-    text: params.text.trim(),
-    options,
-    allowCancel,
-    expiresAt: Date.now() + expiresMinutes * 60_000,
+  return {
+    menu: {
+      id: createMenuId(),
+      text: params.text.trim(),
+      options: normalizeMenuOptions(params.options),
+      allowCancel: params.allow_cancel ?? false,
+      expiresAt: Date.now() + expiresMinutes * 60_000,
+    },
+    columns: normalizeColumns(params.columns),
+    expiresMinutes,
   };
+}
+
+async function sendTelegramMenu(prepared: PreparedMenu): Promise<TelegramMenu> {
+  const { menu, columns, expiresMinutes } = prepared;
+  menu.expiresAt = Date.now() + expiresMinutes * 60_000;
 
   menus.set(menu.id, menu);
 

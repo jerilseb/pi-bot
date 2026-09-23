@@ -819,8 +819,8 @@ export class SdkPiSession {
         // Withheld when cron is off, so the agent cannot create jobs that would
         // never fire.
         ...(CRON_JOBS_ENABLED ? [scheduledTasksExtension] : []),
-        telegramMenuExtension,
-        telegramVoiceNoteExtension,
+        telegramMenuExtension(this.runtime.sessionKind),
+        telegramVoiceNoteExtension(this.runtime.sessionKind),
         backgroundBashExtension(this.runtime.sessionKind),
         // Withheld when sub-agents are off, so the agent cannot claim to have
         // delegated work.
@@ -832,8 +832,8 @@ export class SdkPiSession {
               }),
             ]
           : []),
-        ...(SEND_LOCAL_IMAGES ? [telegramImageExtension] : []),
-        ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension] : []),
+        ...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.runtime.sessionKind)] : []),
+        ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension(this.runtime.sessionKind)] : []),
       ],
       systemPromptOverride: this.runtime.systemPromptOverride,
     });
