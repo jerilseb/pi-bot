@@ -244,6 +244,13 @@ export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
 export const TOOL_CALL_COLLAPSED_MAX_CHARS = 3_500;
 
 // ---------------------------------------------------------------------------
+// Usage commands (/openaiusage, /elevenlabsusage)
+// ---------------------------------------------------------------------------
+
+/** Deadline for each provider usage request, unless the caller passes a signal. */
+export const USAGE_FETCH_TIMEOUT_MS = 30_000;
+
+// ---------------------------------------------------------------------------
 // Restart lifecycle
 // ---------------------------------------------------------------------------
 

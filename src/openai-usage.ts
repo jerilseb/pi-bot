@@ -1,11 +1,11 @@
+import { USAGE_FETCH_TIMEOUT_MS } from './config.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
-import { telegramCode as code, titleCase, usageBar } from './telegram-format.ts';
+import { telegramCode as code, formatPercent, titleCase, usageBar } from './telegram-format.ts';
 import { errorMessage, isRecord } from './util.ts';
 
 const OPENAI_CODEX_PROVIDER = 'openai-codex';
 const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const JWT_CLAIM_PATH = 'https://api.openai.com/auth';
-const FETCH_TIMEOUT_MS = 30_000;
 
 export { OPENAI_CODEX_PROVIDER };
 
@@ -74,11 +74,6 @@ function getAccountId(accessToken: string): string {
     throw new Error('Could not find chatgpt_account_id in the OpenAI Codex access token.');
   }
   return accountId;
-}
-
-function formatPercent(value: number | undefined): string {
-  if (value === undefined) return '—';
-  return `${value.toFixed(value < 10 && value !== 0 ? 1 : 0)}%`;
 }
 
 function formatWindow(minutes: number | undefined): string {
@@ -230,7 +225,7 @@ export async function fetchOpenAIUsage(
       originator: 'pi',
       'user-agent': 'pi-bot',
     },
-    signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: signal ?? AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS),
   });
 
   const body = await response.text().catch(() => '');

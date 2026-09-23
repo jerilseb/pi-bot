@@ -1,7 +1,7 @@
-import { telegramCode as code, titleCase, usageBar } from './telegram-format.ts';
+import { USAGE_FETCH_TIMEOUT_MS } from './config.ts';
+import { telegramCode as code, formatPercent, titleCase, usageBar } from './telegram-format.ts';
 
 const ELEVENLABS_SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
-const FETCH_TIMEOUT_MS = 30_000;
 
 interface MoneyAmount {
   amount?: string;
@@ -36,7 +36,7 @@ export async function fetchElevenLabsUsage(
       'xi-api-key': apiKey,
       Accept: 'application/json',
     },
-    signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: signal ?? AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -52,11 +52,6 @@ export async function fetchElevenLabsUsage(
 function formatNumber(value: number | undefined | null): string {
   if (value === undefined || value === null) return '—';
   return new Intl.NumberFormat('en-US').format(value);
-}
-
-function formatPercent(value: number | undefined): string {
-  if (value === undefined || !Number.isFinite(value)) return '—';
-  return `${value.toFixed(value < 10 && value !== 0 ? 1 : 0)}%`;
 }
 
 function formatResetAt(unixSeconds: number | null | undefined): string {

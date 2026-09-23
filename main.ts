@@ -96,6 +96,16 @@ await loadContextGist();
 
 const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
 
+// Both sessions get the same extensions, so one cannot quietly lack a guard or a
+// system-prompt block the other has. Sub-agent workers get only the env guard.
+const SESSION_EXTENSION_FACTORIES = [
+  contextGistSystemPromptExtension,
+  memorySystemPromptExtension,
+  activeModelSystemPromptExtension,
+  protectedEnvToolAccessExtension,
+];
+const WORKER_EXTENSION_FACTORIES = [protectedEnvToolAccessExtension];
+
 const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: MODEL,
@@ -103,13 +113,8 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   sessionKind: 'chat',
   getExtensionPaths: () => EXTENSION_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
-  extensionFactories: [
-    contextGistSystemPromptExtension,
-    memorySystemPromptExtension,
-    activeModelSystemPromptExtension,
-    protectedEnvToolAccessExtension,
-  ],
-  workerExtensionFactories: [protectedEnvToolAccessExtension],
+  extensionFactories: SESSION_EXTENSION_FACTORIES,
+  workerExtensionFactories: WORKER_EXTENSION_FACTORIES,
   requestRestart: restart,
 });
 
@@ -123,13 +128,8 @@ const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   sessionKind: 'background',
   getExtensionPaths: () => EXTENSION_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
-  extensionFactories: [
-    contextGistSystemPromptExtension,
-    memorySystemPromptExtension,
-    activeModelSystemPromptExtension,
-    protectedEnvToolAccessExtension,
-  ],
-  workerExtensionFactories: [protectedEnvToolAccessExtension],
+  extensionFactories: SESSION_EXTENSION_FACTORIES,
+  workerExtensionFactories: WORKER_EXTENSION_FACTORIES,
 });
 
 validateModels();
