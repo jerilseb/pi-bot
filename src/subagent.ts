@@ -29,6 +29,7 @@ import {
 import {
   formatSubagentProgress,
   type SubagentProgressTask,
+  TOOL_CALLS_SHOWN,
   type SubagentTaskStatus,
 } from './subagent-progress.ts';
 import { readSubagentSystemPrompt } from './system-prompt.ts';
@@ -104,8 +105,7 @@ interface SubagentTask extends SubagentProgressTask {
   cwd: string;
   sessionId: string;
   sessionFile: string | null;
-  result: string | null;
-  error: string | null;
+  toolCalls: string[];
   /** This task's own stop, for its Stop button. Its worker also stops with the job. */
   abort: AbortController;
 }
@@ -153,7 +153,7 @@ const registry = new JobRegistry<SubagentTerminalStatus, SubagentJob, SubagentRe
   cancelledStatus: 'stopped',
   signalCancel: (job) => job.abort.abort(),
   describeStatus,
-  renderProgress: (job) => formatSubagentProgress(job),
+  renderProgress: (job) => formatSubagentProgress(job, { toolCalls: showToolCalls() }),
   buildReport: (job) => ({
     jobId: job.id,
     origin: job.origin,
@@ -165,6 +165,17 @@ const registry = new JobRegistry<SubagentTerminalStatus, SubagentJob, SubagentRe
 /** Wires completion reports into the bot's incoming-prompt pipeline. Called from main.ts. */
 export function setSubagentReportHandler(handler: (report: SubagentReport) => Promise<void>): void {
   registry.setReportHandler(handler);
+}
+
+/** Whether progress messages show each worker's tool calls; off until main.ts wires the setting. */
+let showToolCalls: () => boolean = () => false;
+
+/**
+ * Wires the `subagentToolCalls` setting into the progress message, read at every
+ * render. Called from main.ts, so tests never read files/settings.json.
+ */
+export function setSubagentToolCallsSetting(read: () => boolean): void {
+  showToolCalls = read;
 }
 
 /** Stops every running worker regardless of origin. Called from main.ts on shutdown. */
@@ -561,8 +572,7 @@ function startJob(
       status: 'queued',
       abort: new AbortController(),
       stopRequested: false,
-      activity: null,
-      activityAt: null,
+      toolCalls: [],
       toolUses: 0,
       result: null,
       error: null,
@@ -675,8 +685,8 @@ async function runTask(
         task.sessionFile = file;
       },
       onToolStart: ({ toolName, args }) => {
-        task.activity = describeToolCall(toolName, args);
-        task.activityAt = Date.now();
+        task.toolCalls.push(describeToolCall(toolName, args));
+        if (task.toolCalls.length > TOOL_CALLS_SHOWN) task.toolCalls.shift();
         task.toolUses++;
         registry.refreshProgress(job);
       },

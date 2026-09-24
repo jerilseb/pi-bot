@@ -43,6 +43,7 @@ import {
   TMP_DIR,
   ensureBotSettingsFile,
   isAllowedTelegramChat,
+  subagentToolCallsEnabled,
   toolCallMode,
 } from './src/config.ts';
 import { collectConfigProblems } from './src/config-validation.ts';
@@ -69,6 +70,7 @@ import {
   formatPostRestartTask,
   type PostRestartTask,
 } from './src/post-restart-tasks.ts';
+import { subagentToolCallCallbackMenu } from './src/subagent-tool-call-menu.ts';
 import { telegramMenuCallbackMenu } from './src/telegram-menu.ts';
 import {
   assertModelUsable,
@@ -80,6 +82,7 @@ import {
   interruptedSubagentsNote,
   runningSubagentOriginFiles,
   setSubagentReportHandler,
+  setSubagentToolCallsSetting,
   stopAllSubagents,
   subagentReportPrompt,
   subagentStatusText,
@@ -189,6 +192,7 @@ const CALLBACK_MENUS = [
   reasoningCallbackMenu(chatSession),
   toolCallCallbackMenu,
   transcriptCallbackMenu,
+  subagentToolCallCallbackMenu,
   telegramMenuCallbackMenu(handleIncoming),
 ];
 // Buttons on messages the bot keeps editing itself: the live job messages' Stop buttons.
@@ -203,6 +207,7 @@ setBackgroundBashReportHandler(async (report) => {
 setSubagentReportHandler(async (report) => {
   await handleIncoming(subagentReportPrompt(report));
 });
+setSubagentToolCallsSetting(subagentToolCallsEnabled);
 
 function validateConfiguration(): void {
   const problems = collectConfigProblems();

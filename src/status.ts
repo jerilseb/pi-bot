@@ -47,6 +47,8 @@ export interface StatusSnapshot {
     subagents: boolean;
     toolCalls: string;
     transcripts: boolean;
+    /** Whether sub-agent progress messages show each worker's tool calls. */
+    subagentToolCalls: boolean;
   };
 }
 
@@ -131,6 +133,7 @@ function featureSection(features: StatusSnapshot['features']): string[] {
     line(features.heartbeat.on, 'Heartbeat', features.heartbeat.detail),
     line(features.cron.on, 'Scheduled tasks', features.cron.detail),
     line(features.subagents, 'Sub-agents'),
+    line(features.subagentToolCalls, 'Sub-agent tool calls'),
     line(features.transcripts, 'Voice transcripts'),
     `🛠 Tool calls · <i>${escapeTelegramHtml(features.toolCalls)}</i>`,
   ];

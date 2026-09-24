@@ -109,6 +109,7 @@ interface BotSettings {
   cronJobs?: unknown;
   toolCalls?: unknown;
   showTranscripts?: unknown;
+  subagentToolCalls?: unknown;
 }
 
 function readBotSettings(): BotSettings {
@@ -157,6 +158,7 @@ export function ensureBotSettingsFile(): void {
         cronJobs: false,
         toolCalls: DEFAULT_TOOL_CALL_MODE,
         showTranscripts: false,
+        subagentToolCalls: false,
       },
       null,
       2,
@@ -240,6 +242,26 @@ export function showTranscriptsEnabled(): boolean {
 
 export function setShowTranscripts(enabled: boolean): void {
   updateBotSettings({ showTranscripts: enabled });
+}
+
+/**
+ * Whether a sub-agent job's progress message shows each worker's tool calls,
+ * replaced by its result once it finishes. Off by default, which keeps the
+ * message to one line per task. Persisted in files/settings.json as
+ * `subagentToolCalls` and switched from Telegram with /subagent_toolcalls; read
+ * at every render, so a switch reaches running jobs too.
+ */
+export function subagentToolCallsEnabled(): boolean {
+  try {
+    return readBotSettings().subagentToolCalls === true;
+  } catch (error) {
+    console.error('failed to read the sub-agent tool call setting:', error);
+    return false;
+  }
+}
+
+export function setSubagentToolCalls(enabled: boolean): void {
+  updateBotSettings({ subagentToolCalls: enabled });
 }
 
 export const TOOL_CALL_BATCH_MS = 10_000;

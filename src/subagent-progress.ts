@@ -8,13 +8,17 @@ import { formatDuration } from './util.ts';
  * subagent_run call), rendered from the job's plain state. Pure, so every state
  * it passes through can be tested; src/job-progress.ts keeps it current.
  *
- * Kept small on purpose: the agent's own reply carries the results, so the
+ * Kept small by default: the agent's own reply carries the results, so the
  * message only has to say how the job is going. While it runs, each task is one
- * line (status, number, title, and a short detail), followed by the latest tool
- * call any worker made, and a row of numbered Stop buttons, one per unfinished
- * task. Stopping ends that worker alone: the rest of the job carries on. Once
- * every task has ended, the message shrinks to a one-line summary with the
- * task lines folded into an expandable quote.
+ * line (status, number, title, and a short detail), with a row of numbered Stop
+ * buttons, one per unfinished task. Stopping ends that worker alone: the rest
+ * of the job carries on. Once every task has ended, the message shrinks to a
+ * one-line summary with the task lines folded into an expandable quote.
+ *
+ * With the `subagentToolCalls` setting on, each task's line is followed by an
+ * expandable quote of its worker's recent tool calls, newest first, so the
+ * folded quote shows what the worker is doing now. When the task finishes, its
+ * result replaces them (or its error, if it failed).
  */
 
 export type SubagentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'stopped';
@@ -31,11 +35,11 @@ export interface SubagentProgressTask {
   status: SubagentTaskStatus;
   /** The user tapped this task's Stop button; set before the abort. */
   stopRequested: boolean;
-  /** The worker's latest tool call, as one line of plain text. */
-  activity: string | null;
-  /** When that tool call started, so the message can show the latest across workers. */
-  activityAt: number | null;
+  /** The worker's recent tool calls, oldest first, each one line of plain text. */
+  toolCalls: readonly string[];
   toolUses: number;
+  result: string | null;
+  error: string | null;
   startedAt: number | null;
   endedAt: number | null;
 }
@@ -46,6 +50,12 @@ export interface SubagentProgressJob {
   startedAt: number;
   endedAt: number | null;
   tasks: readonly SubagentProgressTask[];
+}
+
+export interface SubagentProgressOptions {
+  /** Show each worker's tool calls, then its result: the `subagentToolCalls` setting. */
+  toolCalls?: boolean;
+  now?: number;
 }
 
 /** How a task's line reads. A stop in flight is its own state until the worker has ended. */
@@ -63,9 +73,15 @@ interface Row {
  */
 const MESSAGE_MAX_CHARS = 3_900;
 const TITLE_MAX_CHARS = 40;
-const ACTIVITY_MAX_CHARS = 56;
+const TOOL_CALL_MAX_CHARS = 56;
 const MODEL_MAX_CHARS = 24;
+const ERROR_MAX_CHARS = 160;
+const RESULT_MAX_CHARS = 2_000;
+/** A result squeezed below this is left out rather than shown as a stub. */
+const RESULT_MIN_CHARS = 120;
 const BUTTONS_PER_LINE = 4;
+/** How many of a worker's tool calls its task keeps for the message. */
+export const TOOL_CALLS_SHOWN = 8;
 
 const STATE_ICON: Record<RowState, string> = {
   queued: '⏸',
@@ -86,13 +102,13 @@ const SUMMARY_ORDER: Array<[state: RowState, label: string]> = [
 /** The message for a job: the HTML and the Stop buttons of its unfinished tasks. */
 export function formatSubagentProgress(
   job: SubagentProgressJob,
-  now: number = Date.now(),
+  options: SubagentProgressOptions = {},
 ): ProgressContent {
+  const now = options.now ?? Date.now();
   const rows = job.tasks.map((task) => ({ task, state: rowState(job, task) }));
-  const [only] = rows;
-  const html =
-    rows.length === 1 && only ? renderSingle(job, only, now) : renderMany(job, rows, now);
-  return { html, keyboard: stopKeyboard(job, rows) };
+  // The detailed form falls back to the compact one when it cannot fit.
+  const detailed = options.toolCalls ? renderDetailed(job, rows, now) : null;
+  return { html: detailed ?? renderCompact(job, rows, now), keyboard: stopKeyboard(job, rows) };
 }
 
 function rowState(job: SubagentProgressJob, task: SubagentProgressTask): RowState {
@@ -103,37 +119,94 @@ function rowState(job: SubagentProgressJob, task: SubagentProgressTask): RowStat
   return task.stopRequested ? 'stopping' : task.status;
 }
 
-/** A one-task job is one line, plus what its worker is doing while it runs. */
-function renderSingle(job: SubagentProgressJob, row: Row, now: number): string {
+/** One line per task; once every task has ended, a summary with the lines folded. */
+function renderCompact(job: SubagentProgressJob, rows: Row[], now: number): string {
+  const [only] = rows;
+  if (rows.length === 1 && only) return singleLine(job, only, now);
+  const header = manyHeader(job, rows, now);
+  const lines = taskLines(job, rows, now);
+  if (allEnded(rows)) {
+    // The agent's reply follows with the results: one line says the job is over,
+    // and the task lines stay available folded.
+    const room = MESSAGE_MAX_CHARS - header.length - QUOTE_OVERHEAD;
+    return `${header}\n${quote(fitFirst(lines, room))}`;
+  }
+  return `${header}\n${fitFirst(lines, MESSAGE_MAX_CHARS - header.length - 1)}`;
+}
+
+/**
+ * Each task's line followed by a folded quote: its worker's recent tool calls
+ * while it runs, then its result or error. Results share the room the rest
+ * leaves. Null when even the lines and tool calls do not fit, which only a job
+ * with far more tasks than the default limit could reach.
+ */
+function renderDetailed(job: SubagentProgressJob, rows: Row[], now: number): string | null {
+  const [only] = rows;
+  const header = rows.length === 1 ? null : manyHeader(job, rows, now);
+  const lines =
+    rows.length === 1 && only ? [singleLine(job, only, now)] : taskLines(job, rows, now);
+  const blocks = rows.map((row, i) => {
+    const body = fixedQuoteBody(row);
+    return body ? `${lines[i]}\n${quote(body)}` : `${lines[i]}`;
+  });
+  const join = (parts: string[]): string => (header ? [header, ...parts] : parts).join('\n');
+  const base = join(blocks).length;
+  if (base > MESSAGE_MAX_CHARS) return null;
+
+  const results = rows.map(({ task, state }) =>
+    state === 'succeeded' ? plainResult(task.result ?? '') : '',
+  );
+  const shown = results.filter(Boolean).length;
+  if (shown === 0) return join(blocks);
+  const allowance = Math.min(
+    RESULT_MAX_CHARS,
+    Math.floor((MESSAGE_MAX_CHARS - base) / shown) - QUOTE_OVERHEAD,
+  );
+  if (allowance < RESULT_MIN_CHARS) return join(blocks);
+  return join(
+    blocks.map((block, i) => {
+      const result = results[i];
+      return result ? `${block}\n${quote(clipEscapedTelegramHtml(result, allowance))}` : block;
+    }),
+  );
+}
+
+/** The quote a task keeps whatever the room: its tool calls while it runs, or its error. */
+function fixedQuoteBody({ task, state }: Row): string | null {
+  if ((state === 'running' || state === 'stopping') && task.toolCalls.length > 0) {
+    return task.toolCalls
+      .slice(-TOOL_CALLS_SHOWN)
+      .reverse()
+      .map((call) => clipEscapedTelegramHtml(oneLine(call), TOOL_CALL_MAX_CHARS))
+      .join('\n');
+  }
+  if (state === 'failed' && task.error) {
+    return clipEscapedTelegramHtml(oneLine(task.error), ERROR_MAX_CHARS);
+  }
+  return null;
+}
+
+/** The header of a job with several tasks: its clock while it runs, then a summary. */
+function manyHeader(job: SubagentProgressJob, rows: Row[], now: number): string {
+  if (!allEnded(rows)) return `🤖 <b>Sub-agents</b> · ${formatDuration(now - job.startedAt)}`;
+  const total = formatDuration((job.endedAt ?? now) - job.startedAt);
+  return `🤖 <b>Sub-agents</b> · ${summary(rows)} · ⏱ ${total}`;
+}
+
+function taskLines(job: SubagentProgressJob, rows: Row[], now: number): string[] {
+  const showModels = new Set(rows.map(({ task }) => task.model)).size > 1;
+  return rows.map((row) => renderRow(job, row, now, showModels));
+}
+
+/** A one-task job's line: the job and its task at once. */
+function singleLine(job: SubagentProgressJob, row: Row, now: number): string {
   const { task, state } = row;
   const parts = [`${STATE_ICON[state]} <b>Sub-agent</b>`, title(task)];
   if (state === 'running') parts.push(formatDuration(now - job.startedAt));
   const detail = rowDetail(job, row, now) ?? (state === 'queued' ? 'queued' : null);
   if (detail) parts.push(detail);
-  const lines = [parts.join(' · ')];
-  if (state === 'running' && task.activity) lines.push(activityLine(task.activity));
-  return lines.join('\n');
+  return parts.join(' · ');
 }
-
-function renderMany(job: SubagentProgressJob, rows: Row[], now: number): string {
-  const showModels = new Set(rows.map(({ task }) => task.model)).size > 1;
-  const lines = rows.map((row) => renderRow(job, row, now, showModels));
-  if (rows.every(({ state }) => isEnded(state))) {
-    // The agent's reply follows with the results: one line says the job is over,
-    // and the task lines stay available folded.
-    const total = formatDuration((job.endedAt ?? now) - job.startedAt);
-    const header = `🤖 <b>Sub-agents</b> · ${summary(rows)} · ⏱ ${total}`;
-    const room = MESSAGE_MAX_CHARS - header.length - QUOTE_OVERHEAD;
-    return `${header}\n<blockquote expandable>${fitFirst(lines, room)}</blockquote>`;
-  }
-  const header = `🤖 <b>Sub-agents</b> · ${formatDuration(now - job.startedAt)}`;
-  const latest = latestActivity(rows);
-  const footer = latest ? activityLine(latest.activity, latest.number) : null;
-  const room = MESSAGE_MAX_CHARS - header.length - 1 - (footer ? footer.length + 1 : 0);
-  return [header, fitFirst(lines, room), ...(footer ? [footer] : [])].join('\n');
-}
-
-const QUOTE_OVERHEAD = '\n<blockquote expandable></blockquote>'.length;
 
 function renderRow(job: SubagentProgressJob, row: Row, now: number, showModel: boolean): string {
   const { task, state } = row;
@@ -179,22 +252,11 @@ function summary(rows: Row[]): string {
   }).join(' · ');
 }
 
-/** The most recent tool call among the tasks still running, with the task's number. */
-function latestActivity(rows: Row[]): { activity: string; number: number } | null {
-  let latest: { activity: string; number: number; at: number } | null = null;
-  for (const { task, state } of rows) {
-    if (state !== 'running' || !task.activity || task.activityAt === null) continue;
-    if (!latest || task.activityAt > latest.at) {
-      latest = { activity: task.activity, number: task.index + 1, at: task.activityAt };
-    }
-  }
-  return latest;
+function quote(html: string): string {
+  return `<blockquote expandable>${html}</blockquote>`;
 }
 
-function activityLine(activity: string, number?: number): string {
-  const text = clipEscapedTelegramHtml(oneLine(activity), ACTIVITY_MAX_CHARS);
-  return `<i>↳ ${number === undefined ? '' : `${number}: `}${text}</i>`;
-}
+const QUOTE_OVERHEAD = `\n${quote('')}`.length;
 
 /** Keeps the first lines that fit in `room`, noting how many were left out. */
 function fitFirst(lines: string[], room: number): string {
@@ -252,6 +314,21 @@ function modelName(model: string): string {
 
 function isEnded(state: RowState): boolean {
   return state === 'succeeded' || state === 'failed' || state === 'stopped';
+}
+
+function allEnded(rows: Row[]): boolean {
+  return rows.every(({ state }) => isEnded(state));
+}
+
+/** Results arrive as Markdown; inside a quote they read better as plain text. */
+function plainResult(text: string): string {
+  return text
+    .replace(/^```.*$/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function oneLine(text: string): string {

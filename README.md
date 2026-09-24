@@ -189,7 +189,17 @@ The same file also holds how tool calls reach the chat, switched from Telegram w
 
 Unlike `heartbeat` and `cronJobs`, this one is read fresh at the start of every prompt, so a switch applies from the next prompt and needs no restart.
 
-`files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`. Writes from `/toolcalls` merge the same way.
+Sub-agent jobs the chat starts get a live progress message of their own, with a Stop button per unfinished task. By default it is one line per task, since the agent's reply carries the results. `/subagent_toolcalls` switches on `subagentToolCalls`, which folds each worker's recent tool calls into a quote under its task, replaced by its result when it finishes:
+
+```json
+{
+  "subagentToolCalls": false
+}
+```
+
+It is read every time the message is redrawn, so a switch reaches jobs that are already running.
+
+`files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`. Writes from `/toolcalls` and `/subagent_toolcalls` merge the same way.
 
 The file is gitignored, but `files/settings.json.example` is checked in and shows the defaults the bot writes on first start. You do not need to copy it — startup creates `files/settings.json` if it is missing — it is there to document the shape.
 
@@ -271,6 +281,7 @@ Inside Telegram:
 | `/models` | Choose an allowed chat model |
 | `/reasoning` | Choose the chat reasoning level |
 | `/toolcalls` | Choose how tool calls are shown: collapsed, stream, or off |
+| `/subagent_toolcalls` | Choose whether sub-agent progress messages show each worker's tool calls |
 | `/openaiusage` | Show OpenAI Codex usage windows and reset times |
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |
 | `/abort` | Stop the current response and clear queued/steering messages |

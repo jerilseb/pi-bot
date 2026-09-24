@@ -37,6 +37,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       subagents: false,
       toolCalls: 'Collapsed',
       transcripts: true,
+      subagentToolCalls: false,
     },
     ...overrides,
   };
@@ -93,6 +94,15 @@ describe('renderStatus', () => {
       /📬 Held <b>2<\/b>/,
     );
     assert.doesNotMatch(renderStatus(snapshot({ background: { ...background, held: 0 } })), /Held/);
+  });
+
+  test('says whether sub-agent progress shows tool calls', () => {
+    const features = snapshot().features;
+    assert.match(renderStatus(snapshot()), /\n⛔ Sub-agent tool calls\n/);
+    assert.match(
+      renderStatus(snapshot({ features: { ...features, subagentToolCalls: true } })),
+      /\n✅ Sub-agent tool calls\n/,
+    );
   });
 
   test('escapes values it did not write', () => {

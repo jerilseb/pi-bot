@@ -13,6 +13,7 @@ import {
   runningSubagentOriginFiles,
   type RunWorker,
   setSubagentReportHandler,
+  setSubagentToolCallsSetting,
   stopAllSubagents,
   SUBAGENT_SESSION_ENTRY_TYPE,
   type SubagentReport,
@@ -460,7 +461,7 @@ test('a stop from Telegram ends that task alone, and the report says the user st
   const tapped = f.telegram.find((call) => call.method === 'editMessageText');
   assert.match(
     tapped?.text ?? '',
-    /\n⏳ 1\. Map the cron scheduler · 2 tools\n⏹ 2\. Survey every module · stopped by you\n⏳ 3\. Check the tests\.\n<i>↳ 1: grep \(cron\)<\/i>$/,
+    /\n⏳ 1\. Map the cron scheduler · 2 tools\n⏹ 2\. Survey every module · stopped by you\n⏳ 3\. Check the tests\.$/,
   );
   assert.deepEqual(
     tapped?.keyboard?.map((line) => line.map((button) => button.callback_data)),
@@ -581,4 +582,40 @@ test('the task description names the worker transcript', async (t) => {
   assert.equal(f.worker.requests[0]?.sessionName, 'Short title');
   f.worker.finish(0, 'ok');
   await result;
+});
+
+test('with the tool call setting on, the message shows what each worker is doing, then its result', async (t) => {
+  const f = setup(t);
+  setSubagentToolCallsSetting(() => true);
+  t.after(() => setSubagentToolCallsSetting(() => false));
+  const jobId = jobIdIn(
+    await f.text(
+      f.call('subagent_run', {
+        tasks: [
+          { task: 'Map the cron scheduler.', description: 'Map cron' },
+          { task: 'Survey the tests.', description: 'Survey tests' },
+        ],
+        yield_time_ms: 5,
+      }),
+    ),
+  );
+  f.worker.toolStart(0, 'read', { path: 'src/cron.ts' });
+  f.worker.toolStart(0, 'grep', { pattern: 'schedule' });
+  f.worker.toolStart(1, 'bash', { command: 'npm test' });
+
+  // A tap refreshes the message at once, which shows the tool calls gathered so far.
+  tapStop(jobId, 2);
+  await until(() => f.telegram.some((call) => call.method === 'editMessageText'));
+  const tapped = f.telegram.find((call) => call.method === 'editMessageText');
+  assert.match(
+    tapped?.text ?? '',
+    /\n⏳ 1\. Map cron · 2 tools\n<blockquote expandable>grep \(schedule\)\nread \(src\/cron\.ts\)<\/blockquote>\n⏹ 2\. Survey tests · stopped by you$/,
+  );
+
+  f.worker.finish(0, 'The scheduler lives in src/cron.ts.');
+  await until(() => f.reports.length === 1);
+  assert.match(
+    f.telegram.at(-1)?.text ?? '',
+    /\n✅ 1\. Map cron · \d+s\n<blockquote expandable>The scheduler lives in src\/cron\.ts\.<\/blockquote>\n⏹ 2\. Survey tests · stopped by you$/,
+  );
 });

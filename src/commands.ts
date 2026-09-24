@@ -8,6 +8,7 @@ import {
   HEARTBEAT_MODEL,
   SUBAGENTS_ENABLED,
   showTranscriptsEnabled,
+  subagentToolCallsEnabled,
   toolCallMode,
 } from './config.ts';
 import { readCronJobs } from './cron-store.ts';
@@ -16,6 +17,10 @@ import { renderStatus, type StatusSnapshot } from './status.ts';
 import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
 import { buildModelInlineKeyboard } from './model-menu.ts';
 import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
+import {
+  buildSubagentToolCallInlineKeyboard,
+  describeSubagentToolCallSetting,
+} from './subagent-tool-call-menu.ts';
 import { buildToolCallInlineKeyboard, describeToolCallMode } from './tool-call-menu.ts';
 import { buildTranscriptInlineKeyboard, describeTranscriptSetting } from './transcript-menu.ts';
 import {
@@ -163,6 +168,21 @@ const BOT_COMMANDS: BotCommand[] = [
           'Send the voice note transcript back to the chat?',
         ].join('\n'),
         buildTranscriptInlineKeyboard(),
+      );
+    },
+  },
+
+  {
+    name: 'subagent_toolcalls',
+    description: 'Choose whether sub-agent progress shows tool calls',
+    help: 'choose whether a sub-agent job’s progress message shows each worker’s tool calls, then its result',
+    handler: async () => {
+      await sendTelegramInlineKeyboard(
+        [
+          `Current: ${describeSubagentToolCallSetting(subagentToolCallsEnabled())}`,
+          'Show each worker’s tool calls in the sub-agent progress message?',
+        ].join('\n'),
+        buildSubagentToolCallInlineKeyboard(),
       );
     },
   },
@@ -335,6 +355,7 @@ function collectStatus(
       subagents: SUBAGENTS_ENABLED,
       toolCalls: describeToolCallMode(toolCallMode()),
       transcripts: showTranscriptsEnabled(),
+      subagentToolCalls: subagentToolCallsEnabled(),
     },
   };
 }
