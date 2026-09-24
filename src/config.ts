@@ -392,7 +392,7 @@ export const SUBAGENT_MAX_TASKS_PER_JOB = 4;
  * free slots starts what it can and runs the rest as slots open.
  */
 export const SUBAGENT_MAX_CONCURRENT_WORKERS = 4;
-export const SUBAGENT_DEFAULT_YIELD_MS = 20_000;
+export const SUBAGENT_DEFAULT_YIELD_MS = 30_000;
 export const SUBAGENT_MAX_YIELD_MS = 120_000;
 export const SUBAGENT_DEFAULT_MAX_RUNTIME_MS = 15 * 60_000;
 export const SUBAGENT_MAX_RUNTIME_CAP_MS = 2 * 60 * 60_000;
