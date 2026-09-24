@@ -225,9 +225,9 @@ const BOT_COMMANDS: BotCommand[] = [
     handler: async ({ chat }) => {
       discardPendingIngestion();
       for (const prompt of chat.queue.splice(0)) cleanupAttachments(prompt);
-      const wasRunning = chat.processing;
-      chat.pi.abort();
-      if (wasRunning) {
+      // False when nothing had reached the model yet (the session was still
+      // starting) or the reply was already done: no turn was cut short.
+      if (chat.pi.abort()) {
         // Without this the transcript just stops mid-thought, with no way to
         // tell an interruption from a turn that chose to end there.
         await chat.pi.noteEvent('abort', 'The user aborted your previous turn before it finished.');
@@ -247,8 +247,8 @@ const BOT_COMMANDS: BotCommand[] = [
       for (const prompt of chat.queue.splice(0)) cleanupAttachments(prompt);
       // Never force chat.processing or dispose a streaming session here: abort the
       // in-flight response and queue the session swap, which runPrompt applies in
-      // its finally. When the chat is idle there is no finally coming, so apply
-      // the reset immediately.
+      // its finally, or at the start of the next run if the reply is still being
+      // delivered. When the chat is idle, apply the reset immediately.
       chat.pi.abort();
       await chat.pi.requestNewSession();
       if (!chat.processing) chat.pi.reset();

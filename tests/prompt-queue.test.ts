@@ -187,6 +187,18 @@ for (const command of ['/abort', '/new']) {
   });
 }
 
+for (const interrupted of [true, false]) {
+  test(`/abort notes a cut-short turn only when one was under way (${interrupted})`, async (t) => {
+    const f = setup(t);
+    await f.send('first');
+    // False when the session was still starting or the reply was already done.
+    f.abort.mock.mockImplementation(() => interrupted);
+    await f.send('/abort');
+    const notes = f.note.mock.calls.filter((call) => call.arguments[0] === 'abort');
+    assert.equal(notes.length, interrupted ? 1 : 0);
+  });
+}
+
 test('pending steering counts toward the existing queue limit', async (t) => {
   const f = setup(t);
   await f.send('first');

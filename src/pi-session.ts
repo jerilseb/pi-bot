@@ -202,46 +202,71 @@ export async function runWorkerPrompt(
     id: request.sessionId,
     ...(request.parentSession ? { parentSession: request.parentSession } : {}),
   });
+  return driveWorkerSession(request, sessionManager, async () => {
+    const resourceLoader = await loadResources(runtime, {
+      extensionFactories: runtime.workerExtensionFactories ?? [],
+      systemPromptOverride: () => request.systemPrompt,
+    });
+    const { session } = await createAgentSession({
+      cwd: request.cwd,
+      model,
+      modelRuntime: runtime.modelRuntime,
+      resourceLoader,
+      sessionManager,
+      settingsManager: runtime.settingsManager,
+    });
+    return session;
+  });
+}
+
+type WorkerOutcome = { status: 'succeeded' | 'failed' | 'aborted'; error?: string };
+
+/**
+ * The part of runWorkerPrompt once the worker's transcript exists: frames it,
+ * creates the session, and sends the task. Exported so tests can drive it with
+ * a fake session.
+ *
+ * The abort listener goes on before the session is created, and the signal is
+ * checked again before the task is sent: a stop that lands while the session is
+ * still loading must not let the worker run its whole task first.
+ */
+export async function driveWorkerSession(
+  request: WorkerRunRequest,
+  sessionManager: SessionManager,
+  createSession: () => Promise<AgentSession>,
+): Promise<WorkerRunResult> {
   const sessionFile = sessionManager.getSessionFile();
   sessionManager.appendCustomEntry(request.customType, { event: 'start', ...request.metadata });
   sessionManager.appendSessionInfo(request.sessionName);
   if (sessionFile) request.onSessionFile?.(sessionFile);
 
-  const resourceLoader = await loadResources(runtime, {
-    extensionFactories: runtime.workerExtensionFactories ?? [],
-    systemPromptOverride: () => request.systemPrompt,
-  });
-  const { session } = await createAgentSession({
-    cwd: request.cwd,
-    model,
-    modelRuntime: runtime.modelRuntime,
-    resourceLoader,
-    sessionManager,
-    settingsManager: runtime.settingsManager,
-  });
-
-  const chunks: string[] = [];
-  let promptError = '';
-  const unsubscribe = session.subscribe((event) => {
-    if (event.type === 'auto_retry_start') {
-      chunks.length = 0;
-      promptError = '';
-    }
-    collectResponseEvent(event, chunks, (message) => {
-      promptError = message;
-    });
-  });
-  const onAbort = (): void => void session.abort();
+  let session: AgentSession | null = null;
+  const onAbort = (): void => void session?.abort();
   request.signal.addEventListener('abort', onAbort, { once: true });
-
-  let outcome: { status: 'succeeded' | 'failed' | 'aborted'; error?: string } = {
-    status: 'succeeded',
-  };
+  let unsubscribe = (): void => {};
+  let outcome: WorkerOutcome | null = null;
   try {
-    try {
-      await session.prompt(request.task);
-    } catch (error) {
-      promptError ||= getErrorMessage(error);
+    const live = await createSession();
+    session = live;
+    const chunks: string[] = [];
+    let promptError = '';
+    unsubscribe = live.subscribe((event) => {
+      abortOnRunStart(live, event, request.signal.aborted);
+      if (event.type === 'auto_retry_start') {
+        chunks.length = 0;
+        promptError = '';
+      }
+      collectResponseEvent(event, chunks, (message) => {
+        promptError = message;
+      });
+    });
+
+    if (!request.signal.aborted) {
+      try {
+        await live.prompt(request.task);
+      } catch (error) {
+        promptError ||= getErrorMessage(error);
+      }
     }
     if (request.signal.aborted) {
       outcome = { status: 'aborted' };
@@ -251,7 +276,13 @@ export async function runWorkerPrompt(
       outcome = { status: 'failed', error: promptError };
       throw new Error(promptError);
     }
+    outcome = { status: 'succeeded' };
     return { text: chunks.join('').trim() || '(no response)', sessionFile };
+  } catch (error) {
+    outcome ??= request.signal.aborted
+      ? { status: 'aborted' }
+      : { status: 'failed', error: getErrorMessage(error) };
+    throw error;
   } finally {
     request.signal.removeEventListener('abort', onAbort);
     unsubscribe();
@@ -264,9 +295,21 @@ export async function runWorkerPrompt(
     } catch (error) {
       console.error('Failed to close worker transcript:', getErrorMessage(error));
     }
-    session.dispose();
+    session?.dispose();
   }
 }
+
+/**
+ * session.prompt() does async setup before the agent run exists (input hooks,
+ * the auth check, compaction, before_agent_start), and session.abort() in that
+ * window has no run to stop. Aborting again once the run starts closes the gap.
+ */
+function abortOnRunStart(session: AgentSession, event: AgentSessionEvent, aborted: boolean): void {
+  if (event.type === 'agent_start' && aborted) void session.abort();
+}
+
+/** The SDK's wording for an aborted request, so a run stopped before its prompt reads the same. */
+const PROMPT_ABORTED_MESSAGE = 'Request was aborted';
 
 /**
  * The bot's resource loader: no skills and nothing from the user's Pi agent
@@ -361,6 +404,12 @@ export class SdkPiSession {
   private pendingNewSessionTask: string | null = null;
   private steering: PromptSteering | null = null;
   private transportRecoveryAbortController: AbortController | null = null;
+  /**
+   * Bumped by every abort(). A run compares it with the value it began with, so
+   * an abort that lands before there is anything to abort, while the session is
+   * still starting, still stops the run.
+   */
+  private abortGeneration = 0;
   /** Session-per-prompt only: what the next start() opens or creates. */
   private nextRun: { resumeSessionFile?: string; transcript?: RunTranscript } = {};
 
@@ -449,6 +498,12 @@ export class SdkPiSession {
     attachments: Attachment[],
     options: PiRunPromptOptions = {},
   ): Promise<PiPromptResult> {
+    const generation = this.abortGeneration;
+    const aborted = () => this.abortGeneration !== generation;
+    // A /new that arrived after the previous run returned, while its reply was
+    // still being delivered, was only queued; this message belongs to the new
+    // conversation.
+    this.applyPendingNewSession();
     if (this.runtime.sessionPerPrompt) {
       // Whatever a previous run left behind is not this run's conversation.
       this.cleanup();
@@ -483,6 +538,7 @@ export class SdkPiSession {
       }
     };
     const unsubscribe = session.subscribe((event) => {
+      abortOnRunStart(session, event, aborted());
       steering.observe(event);
       if (event.type === 'auto_retry_start') {
         // Discard partial text and the superseded error before the SDK retries.
@@ -505,6 +561,8 @@ export class SdkPiSession {
       let nextText = text;
       let nextAttachments = attachments;
       while (true) {
+        // Starting the session, or waiting to recover, may have outlasted an abort.
+        if (aborted()) throw new Error(PROMPT_ABORTED_MESSAGE);
         promptError = '';
         const prompt = buildPiPrompt(nextText, nextAttachments);
         try {
@@ -618,11 +676,19 @@ export class SdkPiSession {
     return this.session?.getContextUsage();
   }
 
-  abort(): void {
+  /**
+   * Stops the current run, including one whose session is still starting, which
+   * then never sends its prompt. Returns true when a turn was under way: false
+   * when idle, still starting, or delivering a reply that had already finished.
+   */
+  abort(): boolean {
+    this.abortGeneration++;
+    const turnUnderWay = this.steering !== null;
     this.transportRecoveryAbortController?.abort();
     this.steering?.cancel();
     this.session?.clearQueue();
     void this.session?.abort();
+    return turnUnderWay;
   }
 
   /**
