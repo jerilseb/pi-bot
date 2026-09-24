@@ -9,8 +9,9 @@ import { sanitizeTelegramHtml } from '../src/telegram-html.ts';
 
 /**
  * The live sub-agent message is edited in place for as long as a job runs, so
- * every state it passes through has to stay valid Telegram HTML, fit in one
- * message, and keep each Stop button pointing at its task.
+ * every state it passes through has to stay valid Telegram HTML, stay small
+ * (the agent's reply carries the results), and keep each Stop button pointing
+ * at its task.
  */
 
 function task(
@@ -22,9 +23,8 @@ function task(
     model: 'test/model',
     stopRequested: false,
     activity: null,
+    activityAt: null,
     toolUses: 0,
-    result: null,
-    error: null,
     startedAt: 0,
     endedAt: null,
     ...fields,
@@ -38,7 +38,7 @@ function job(
   return { id: 'sub_1a2b3c', status: 'running', startedAt: 0, endedAt: null, tasks, ...fields };
 }
 
-test('shows what running workers are doing, a queued task, and a finished one’s result', () => {
+test('a running job is one line per task, the latest tool call, and numbered Stop buttons', () => {
   const message = formatSubagentProgress(
     job([
       task({
@@ -46,13 +46,15 @@ test('shows what running workers are doing, a queued task, and a finished one’
         description: 'Map the cron scheduler',
         status: 'running',
         activity: 'read (src/cron.ts)',
+        activityAt: 79_000,
         toolUses: 14,
       }),
       task({
         index: 1,
         task: 'Survey every module\nand report back.',
         status: 'running',
-        startedAt: 2_000,
+        activity: 'bash (npm test)',
+        activityAt: 78_000,
         toolUses: 1,
       }),
       task({ index: 2, description: 'Check the tests', status: 'queued', startedAt: null }),
@@ -63,7 +65,6 @@ test('shows what running workers are doing, a queued task, and a finished one’
         startedAt: 10_000,
         endedAt: 55_000,
         toolUses: 7,
-        result: '## Plan\n**Steps:** run `migrate` <then> verify & ship',
       }),
     ]),
     80_000,
@@ -71,53 +72,42 @@ test('shows what running workers are doing, a queued task, and a finished one’
   assert.equal(
     message.html,
     [
-      '🤖 <b>Sub-agents</b> · 2 running · 1 queued · 1 done',
-      '',
-      '⏳ <b>1. Map the cron scheduler</b>',
-      '1m 20s · 14 tools',
-      '↳ <i>read (src/cron.ts)</i>',
-      '',
-      '⏳ <b>2. Survey every module</b>',
-      '1m 18s · 1 tool',
-      '↳ <i>starting…</i>',
-      '',
-      '⏸ <b>3. Check the tests</b>',
-      'waiting for a free worker',
-      '',
-      '✅ <b>4. Draft the migration</b>',
-      '45s · 7 tools',
-      '<blockquote expandable>Plan\nSteps: run migrate &lt;then&gt; verify &amp; ship</blockquote>',
+      '🤖 <b>Sub-agents</b> · 1m 20s',
+      '⏳ 1. Map the cron scheduler · 14 tools',
+      '⏳ 2. Survey every module · 1 tool',
+      '⏸ 3. Check the tests',
+      '✅ 4. Draft the migration · 45s',
+      '<i>↳ 1: read (src/cron.ts)</i>',
     ].join('\n'),
   );
   // Running and queued tasks can be stopped; a finished one cannot.
   assert.deepEqual(message.keyboard, [
-    [{ text: '⏹ Stop 1 · Map the cron scheduler', callback_data: 'stop:sub_1a2b3c:1' }],
-    [{ text: '⏹ Stop 2 · Survey every module', callback_data: 'stop:sub_1a2b3c:2' }],
-    [{ text: '⏹ Stop 3 · Check the tests', callback_data: 'stop:sub_1a2b3c:3' }],
-  ]);
-});
-
-test('more than three stoppable tasks get numbered buttons, three to a line', () => {
-  const tasks = Array.from({ length: 4 }, (_, index) => task({ index, status: 'running' }));
-  assert.deepEqual(formatSubagentProgress(job(tasks), 1_000).keyboard, [
     [
-      { text: '⏹ Stop 1', callback_data: 'stop:sub_1a2b3c:1' },
-      { text: '⏹ Stop 2', callback_data: 'stop:sub_1a2b3c:2' },
-      { text: '⏹ Stop 3', callback_data: 'stop:sub_1a2b3c:3' },
+      { text: '⏹ 1', callback_data: 'stop:sub_1a2b3c:1' },
+      { text: '⏹ 2', callback_data: 'stop:sub_1a2b3c:2' },
+      { text: '⏹ 3', callback_data: 'stop:sub_1a2b3c:3' },
     ],
-    [{ text: '⏹ Stop 4', callback_data: 'stop:sub_1a2b3c:4' }],
   ]);
 });
 
-test('a stop in flight reads stopping and loses its button; a lone task gets a singular header', () => {
+test('a task with a stop in flight reads stopping, loses its button, and is not the latest activity', () => {
   const message = formatSubagentProgress(
     job([
       task({
         index: 0,
+        description: 'Map the cron scheduler',
+        status: 'running',
+        activity: 'grep (cron)',
+        activityAt: 10_000,
+        toolUses: 2,
+      }),
+      task({
+        index: 1,
         description: 'Survey every module',
         status: 'running',
         stopRequested: true,
-        activity: 'grep (cron)',
+        activity: 'read (a.ts)',
+        activityAt: 19_000,
         toolUses: 5,
       }),
     ]),
@@ -126,51 +116,43 @@ test('a stop in flight reads stopping and loses its button; a lone task gets a s
   assert.equal(
     message.html,
     [
-      '🤖 <b>Sub-agent</b> · stopping',
-      '',
-      '⏳ <b>1. Survey every module</b>',
-      '20s · 5 tools · stopping…',
-      '↳ <i>grep (cron)</i>',
+      '🤖 <b>Sub-agents</b> · 20s',
+      '⏳ 1. Map the cron scheduler · 2 tools',
+      '⏳ 2. Survey every module · stopping…',
+      '<i>↳ 1: grep (cron)</i>',
     ].join('\n'),
   );
-  assert.deepEqual(message.keyboard, []);
+  assert.deepEqual(message.keyboard, [[{ text: '⏹ 1', callback_data: 'stop:sub_1a2b3c:1' }]]);
 });
 
-test('up to three stoppable tasks get full-width buttons that name them', () => {
-  const message = formatSubagentProgress(
-    job([
-      task({ index: 0, description: 'Map the cron scheduler and its store', status: 'running' }),
-      task({ index: 1, status: 'succeeded', endedAt: 1_000, result: 'ok' }),
-      task({ index: 2, description: 'Check the tests', status: 'queued', startedAt: null }),
-    ]),
-    5_000,
+test('no activity line until a running worker has called a tool', () => {
+  const { html } = formatSubagentProgress(
+    job([task({ index: 0, status: 'running' }), task({ index: 1, status: 'running' })]),
+    3_000,
   );
-  assert.deepEqual(message.keyboard, [
-    [{ text: '⏹ Stop 1 · Map the cron scheduler and…', callback_data: 'stop:sub_1a2b3c:1' }],
-    [{ text: '⏹ Stop 3 · Check the tests', callback_data: 'stop:sub_1a2b3c:3' }],
-  ]);
+  assert.equal(
+    html,
+    ['🤖 <b>Sub-agents</b> · 3s', '⏳ 1. Task text 1', '⏳ 2. Task text 2'].join('\n'),
+  );
 });
 
-test('totals the time once every task has ended, and says how each one ended', () => {
+test('once every task has ended, the message is a one-line summary with the tasks folded', () => {
   const message = formatSubagentProgress(
     job(
       [
         task({
           index: 0,
           description: 'Map the cron scheduler',
-          status: 'stopped',
-          stopRequested: true,
+          status: 'succeeded',
           toolUses: 3,
-          endedAt: 20_000,
+          endedAt: 53_000,
         }),
         task({
           index: 1,
           description: 'Trace <cron> & co',
           status: 'failed',
-          toolUses: 1,
           startedAt: 1_000,
           endedAt: 31_000,
-          error: 'API error:\n  overloaded',
         }),
         task({
           index: 2,
@@ -189,20 +171,11 @@ test('totals the time once every task has ended, and says how each one ended', (
   assert.equal(
     message.html,
     [
-      '🤖 <b>Sub-agents</b> · 1 failed · 3 stopped · ⏱ 1m 5s',
-      '',
-      '⏹ <b>1. Map the cron scheduler</b>',
-      'stopped by you after 20s · 3 tools',
-      '',
-      '❌ <b>2. Trace &lt;cron&gt; &amp; co</b>',
-      'failed after 30s · 1 tool',
-      '<i>API error: overloaded</i>',
-      '',
-      '⏹ <b>3. Check the tests</b>',
-      'stopped by you before it started',
-      '',
-      '⏹ <b>4. Stopped by the agent</b>',
-      'stopped after 9s',
+      '🤖 <b>Sub-agents</b> · 1 done · 1 failed · 2 stopped · ⏱ 1m 5s',
+      '<blockquote expandable>✅ 1. Map the cron scheduler · 53s',
+      '❌ 2. Trace &lt;cron&gt; &amp; co · failed after 30s',
+      '⏹ 3. Check the tests · stopped by you',
+      '⏹ 4. Stopped by the agent · stopped</blockquote>',
     ].join('\n'),
   );
   assert.deepEqual(message.keyboard, []);
@@ -213,7 +186,7 @@ test('a task still winding down when the job ended shows as stopped, with no but
   const message = formatSubagentProgress(
     job(
       [
-        task({ index: 0, status: 'running', activity: 'bash (sleep 60)' }),
+        task({ index: 0, status: 'running', activity: 'bash (sleep 60)', activityAt: 1_000 }),
         task({ index: 1, status: 'queued', startedAt: null }),
       ],
       { status: 'stopped', endedAt: 12_000 },
@@ -224,18 +197,82 @@ test('a task still winding down when the job ended shows as stopped, with no but
     message.html,
     [
       '🤖 <b>Sub-agents</b> · 2 stopped · ⏱ 12s',
-      '',
-      '⏹ <b>1. Task text 1</b>',
-      'stopped after 12s',
-      '',
-      '⏹ <b>2. Task text 2</b>',
-      'stopped before it started',
+      '<blockquote expandable>⏹ 1. Task text 1 · stopped',
+      '⏹ 2. Task text 2 · stopped</blockquote>',
     ].join('\n'),
   );
   assert.deepEqual(message.keyboard, []);
 });
 
-test('each row names its model only when the tasks run on different ones', () => {
+test('a one-task job is one line with a plain Stop button', () => {
+  const running = formatSubagentProgress(
+    job([
+      task({
+        index: 0,
+        description: 'Compare the two bots',
+        status: 'running',
+        activity: 'read (src/subagent.ts)',
+        activityAt: 40_000,
+        toolUses: 6,
+      }),
+    ]),
+    42_000,
+  );
+  assert.equal(
+    running.html,
+    [
+      '⏳ <b>Sub-agent</b> · Compare the two bots · 42s · 6 tools',
+      '<i>↳ read (src/subagent.ts)</i>',
+    ].join('\n'),
+  );
+  assert.deepEqual(running.keyboard, [[{ text: '⏹ Stop', callback_data: 'stop:sub_1a2b3c:1' }]]);
+
+  const queued = formatSubagentProgress(
+    job([task({ index: 0, status: 'queued', startedAt: null })]),
+  );
+  assert.equal(queued.html, '⏸ <b>Sub-agent</b> · Task text 1 · queued');
+
+  const stopping = formatSubagentProgress(
+    job([task({ index: 0, status: 'running', stopRequested: true })]),
+  );
+  assert.equal(stopping.html, '⏳ <b>Sub-agent</b> · Task text 1 · stopping…');
+  assert.deepEqual(stopping.keyboard, []);
+});
+
+test('a one-task job ends on one line saying how it ended', () => {
+  const ended = (fields: Partial<SubagentProgressTask>, status: SubagentProgressJob['status']) =>
+    formatSubagentProgress(
+      job([task({ index: 0, status: 'succeeded', endedAt: 53_000, ...fields })], {
+        status,
+        endedAt: 53_000,
+      }),
+    );
+  const done = ended({ toolUses: 12 }, 'succeeded');
+  assert.equal(done.html, '✅ <b>Sub-agent</b> · Task text 1 · 53s');
+  assert.deepEqual(done.keyboard, []);
+  assert.equal(
+    ended({ status: 'failed' }, 'failed').html,
+    '❌ <b>Sub-agent</b> · Task text 1 · failed after 53s',
+  );
+  assert.equal(
+    ended({ status: 'stopped', stopRequested: true }, 'stopped').html,
+    '⏹ <b>Sub-agent</b> · Task text 1 · stopped by you',
+  );
+});
+
+test('buttons wrap four to a line', () => {
+  const tasks = Array.from({ length: 6 }, (_, index) => task({ index, status: 'running' }));
+  const { keyboard } = formatSubagentProgress(job(tasks), 1_000);
+  assert.deepEqual(
+    keyboard.map((line) => line.map((button) => button.text)),
+    [
+      ['⏹ 1', '⏹ 2', '⏹ 3', '⏹ 4'],
+      ['⏹ 5', '⏹ 6'],
+    ],
+  );
+});
+
+test('each line names its model only when the tasks run on different ones', () => {
   const same = formatSubagentProgress(
     job([task({ index: 0, status: 'running' }), task({ index: 1, status: 'running' })]),
     1_000,
@@ -244,52 +281,38 @@ test('each row names its model only when the tasks run on different ones', () =>
   const mixed = formatSubagentProgress(
     job([
       task({ index: 0, status: 'running' }),
-      task({ index: 1, status: 'queued', startedAt: null, model: 'openrouter/other' }),
+      task({ index: 1, status: 'queued', startedAt: null, model: 'openrouter/vendor/other' }),
     ]),
     1_000,
   );
-  assert.match(mixed.html, /<b>1\. Task text 1<\/b>\n<code>test\/model<\/code> · 1s\n/);
-  assert.match(
-    mixed.html,
-    /<b>2\. Task text 2<\/b>\n<code>openrouter\/other<\/code> · waiting for a free worker/,
-  );
+  assert.match(mixed.html, /\n⏳ 1\. Task text 1 · <code>model<\/code>\n/);
+  assert.match(mixed.html, /\n⏸ 2\. Task text 2 · <code>other<\/code>$/);
 });
 
-test('four huge results share the room and the message stays one well-formed piece', () => {
-  const huge = `${'<b>Result</b> & detail\n'.repeat(700)}`;
-  const tasks = Array.from({ length: 4 }, (_, index) =>
-    task({ index, status: 'succeeded', endedAt: 10_000, result: huge }),
-  );
-  const { html } = formatSubagentProgress(job(tasks, { status: 'succeeded', endedAt: 10_000 }));
-  assert.ok(html.length <= 3_900, `${html.length} chars`);
-  assert.equal((html.match(/<blockquote expandable>/g) ?? []).length, 4, 'every result is shown');
-  assert.equal(sanitizeTelegramHtml(html), html, 'balanced tags, whole entities');
-});
-
-test('titles, activity and errors are clipped after escaping, so no row can overflow', () => {
+test('titles and activity are clipped after escaping, so a line stays short and well formed', () => {
   const heavy = '<&>'.repeat(400);
   const tasks = Array.from({ length: 4 }, (_, index) =>
-    task({ index, description: heavy, status: 'running', activity: heavy, error: heavy }),
+    task({ index, description: heavy, status: 'running', activity: heavy, activityAt: index }),
   );
   const { html } = formatSubagentProgress(job(tasks), 1_000);
-  assert.ok(html.length <= 3_900, `${html.length} chars`);
+  assert.ok(html.length < 1_000, `${html.length} chars`);
   assert.equal(sanitizeTelegramHtml(html), html);
-  assert.match(html, /<b>1\. (&lt;|&amp;|&gt;)+…<\/b>/);
+  assert.match(html, /\n⏳ 1\. (&lt;|&amp;|&gt;)+…\n/);
+  assert.match(html, /<i>↳ 4: (&lt;|&amp;|&gt;)+…<\/i>$/);
 });
 
-test('a job too large for full rows falls back to one line per task', () => {
-  const tasks = Array.from({ length: 100 }, (_, index) =>
+test('a job with more tasks than fit keeps the first lines and says how many were left out', () => {
+  const tasks = Array.from({ length: 150 }, (_, index) =>
     task({
       index,
       description: `Task number ${index + 1} with a long enough title`,
       status: 'failed',
       endedAt: 5_000,
-      error: 'x'.repeat(200),
     }),
   );
   const { html } = formatSubagentProgress(job(tasks, { status: 'failed', endedAt: 5_000 }));
   assert.ok(html.length <= 3_900, `${html.length} chars`);
-  assert.match(html, /\n❌ <b>1\.<\/b> Task number 1 with a long enoug… · 5s\n/);
-  assert.match(html, /<i>\+ \d+ more not shown<\/i>$/);
+  assert.match(html, /<blockquote expandable>❌ 1\. Task number 1 with a long enough title · /);
+  assert.match(html, /<i>\+ \d+ more not shown<\/i><\/blockquote>$/);
   assert.equal(sanitizeTelegramHtml(html), html);
 });

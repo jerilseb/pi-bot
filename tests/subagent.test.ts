@@ -225,14 +225,21 @@ test('a job still running after the yield is backgrounded and reports once when 
     ['sendMessage', 'editMessageText'],
   );
   const [sent, final] = f.telegram;
-  assert.match(sent?.text ?? '', /^🤖 <b>Sub-agents<\/b> · 2 running\n\n⏳ <b>1\. first task<\/b>/);
+  assert.match(
+    sent?.text ?? '',
+    /^🤖 <b>Sub-agents<\/b> · \d+s\n⏳ 1\. first task\n⏳ 2\. second task$/,
+  );
   assert.doesNotMatch(sent?.text ?? '', /sub_[0-9a-f]+/);
   assert.deepEqual(
     sent?.keyboard?.map((line) => line.map((button) => button.text)),
-    [['⏹ Stop 1 · first task'], ['⏹ Stop 2 · second task']],
+    [['⏹ 1', '⏹ 2']],
   );
-  assert.match(final?.text ?? '', /^🤖 <b>Sub-agents<\/b> · 2 done · ⏱ /);
-  assert.match(final?.text ?? '', /<blockquote expandable>second result<\/blockquote>/);
+  // The agent's reply carries the results; the message only sums the job up.
+  assert.match(
+    final?.text ?? '',
+    /^🤖 <b>Sub-agents<\/b> · 2 done · ⏱ \d+s\n<blockquote expandable>/,
+  );
+  assert.doesNotMatch(final?.text ?? '', /second result/);
   assert.deepEqual(final?.keyboard, [], 'the final message has no buttons');
   assert.equal(prompt.isSuperseded?.(), true, 'the queued report is no longer needed');
 });
@@ -265,7 +272,7 @@ test('a failed worker fails the job and its error is in the report', async (t) =
   assert.equal(f.reports[0].tasks[0]?.output, 'Error: boom');
   assert.match(
     f.telegram.at(-1)?.text ?? '',
-    /^🤖 <b>Sub-agent<\/b> · failed\n\n❌ <b>1\. fragile<\/b>\nfailed after \d+s\n<i>boom<\/i>$/,
+    /^❌ <b>Sub-agent<\/b> · fragile · failed after \d+s$/,
   );
 });
 
@@ -284,10 +291,7 @@ test('subagent_stop aborts the workers and sends no report', async (t) => {
   assert.equal(f.reports.length, 0);
   assert.match(await f.text(f.call('subagent_stop', { job_id: jobId })), /not running/);
   // The stop is shown even though no report follows.
-  assert.match(
-    f.telegram.at(-1)?.text ?? '',
-    /^🤖 <b>Sub-agent<\/b> · stopped\n\n⏹ <b>1\. slow<\/b>\nstopped after/,
-  );
+  assert.match(f.telegram.at(-1)?.text ?? '', /^⏹ <b>Sub-agent<\/b> · slow · stopped$/);
 });
 
 test('aborting the turn during the yield window stops the job', async (t) => {
@@ -456,15 +460,11 @@ test('a stop from Telegram ends that task alone, and the report says the user st
   const tapped = f.telegram.find((call) => call.method === 'editMessageText');
   assert.match(
     tapped?.text ?? '',
-    /⏳ <b>1\. Map the cron scheduler<\/b>\n\d+s · 2 tools\n↳ <i>grep \(cron\)<\/i>/,
-  );
-  assert.match(
-    tapped?.text ?? '',
-    /⏹ <b>2\. Survey every module<\/b>\nstopped by you after \d+s · 1 tool/,
+    /\n⏳ 1\. Map the cron scheduler · 2 tools\n⏹ 2\. Survey every module · stopped by you\n⏳ 3\. Check the tests\.\n<i>↳ 1: grep \(cron\)<\/i>$/,
   );
   assert.deepEqual(
     tapped?.keyboard?.map((line) => line.map((button) => button.callback_data)),
-    [[`stop:${jobId}:1`], [`stop:${jobId}:3`]],
+    [[`stop:${jobId}:1`, `stop:${jobId}:3`]],
   );
 
   const running = await f.text(f.call('subagent_read', { job_id: jobId }));
@@ -483,11 +483,8 @@ test('a stop from Telegram ends that task alone, and the report says the user st
   assert.match(prompt, /The user stopped task 2 from Telegram on purpose\. Do not start it again/);
 
   const final = f.telegram.at(-1);
-  assert.match(final?.text ?? '', /🤖 <b>Sub-agents<\/b> · 2 done · 1 stopped · ⏱ /);
-  assert.match(
-    final?.text ?? '',
-    /⏹ <b>2\. Survey every module<\/b>\nstopped by you after \d+s · 1 tool/,
-  );
+  assert.match(final?.text ?? '', /^🤖 <b>Sub-agents<\/b> · 2 done · 1 stopped · ⏱ /);
+  assert.match(final?.text ?? '', /\n⏹ 2\. Survey every module · stopped by you\n/);
   assert.deepEqual(final?.keyboard, []);
   assert.equal(tapStop(jobId, 1), 'That job is no longer running.');
 });
@@ -549,7 +546,7 @@ test('a queued task stopped from Telegram never starts', async (t) => {
   assert.equal(f.reports[0]?.tasks[0]?.runtime, 'not started');
 
   const final = f.telegram.filter((call) => call.method === 'editMessageText').at(-1);
-  assert.match(final?.text ?? '', /⏹ <b>1\. waiting<\/b>\nstopped by you before it started/);
+  assert.equal(final?.text, '⏹ <b>Sub-agent</b> · waiting · stopped by you');
 
   f.worker.finish(0, 'done');
   await until(() => f.worker.requests.length === SUBAGENT_MAX_CONCURRENT_WORKERS);

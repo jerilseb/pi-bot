@@ -104,6 +104,8 @@ interface SubagentTask extends SubagentProgressTask {
   cwd: string;
   sessionId: string;
   sessionFile: string | null;
+  result: string | null;
+  error: string | null;
   /** This task's own stop, for its Stop button. Its worker also stops with the job. */
   abort: AbortController;
 }
@@ -560,6 +562,7 @@ function startJob(
       abort: new AbortController(),
       stopRequested: false,
       activity: null,
+      activityAt: null,
       toolUses: 0,
       result: null,
       error: null,
@@ -673,6 +676,7 @@ async function runTask(
       },
       onToolStart: ({ toolName, args }) => {
         task.activity = describeToolCall(toolName, args);
+        task.activityAt = Date.now();
         task.toolUses++;
         registry.refreshProgress(job);
       },
