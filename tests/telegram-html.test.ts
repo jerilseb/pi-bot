@@ -16,22 +16,31 @@ import {
  * src/ and would otherwise execute them during the smoke check.
  */
 
-/** Text content with all tags removed, for checking split() loses no content. */
+/**
+ * Telegram's own tags, lowercase with an optional quoted attribute list, as the
+ * sanitizer recognises them. Other tag-shaped text, such as `vector<int>`, is
+ * content.
+ */
+const TELEGRAM_TAG_RE =
+  /<(\/?)(b|strong|i|em|u|ins|s|strike|del|a|code|pre|blockquote|tg-spoiler|tg-emoji|span)((?:\s+[\w-]+(?:="[^"]*")?)*)\s*>/g;
+
+/** Half of a surrogate pair, as left behind by cutting an emoji in two. */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Text content with Telegram's tags removed, for checking split() loses no content. */
 function textContentOf(html: string): string {
-  return html.replace(/<[^>]*>/g, '');
+  return html.replace(TELEGRAM_TAG_RE, '');
 }
 
-/** True when every open tag in `html` is closed, in order, with no stray closes. */
+/** True when every Telegram tag in `html` is closed, in order, with no stray closes. */
 function isBalanced(html: string): boolean {
   const stack: string[] = [];
-  for (const match of html.matchAll(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/g)) {
+  for (const match of html.matchAll(TELEGRAM_TAG_RE)) {
     const [, slash, name] = match;
-    const lower = name.toLowerCase();
-    if (lower === 'br') continue;
     if (slash === '/') {
-      if (stack.pop() !== lower) return false;
+      if (stack.pop() !== name) return false;
     } else {
-      stack.push(lower);
+      stack.push(name);
     }
   }
   return stack.length === 0;
@@ -98,8 +107,12 @@ describe('sanitizeTelegramHtml', () => {
     );
   });
 
-  test('lowercases tag names', () => {
-    assert.equal(sanitizeTelegramHtml('<B>x</B>'), '<b>x</b>');
+  test('treats uppercase tag names as text, since generics like Option<U> are uppercase', () => {
+    assert.equal(sanitizeTelegramHtml('<B>x</B>'), '&lt;B&gt;x&lt;/B&gt;');
+    assert.equal(
+      sanitizeTelegramHtml('fn map<U>(self) -> Option<U>'),
+      'fn map&lt;U&gt;(self) -&gt; Option&lt;U&gt;',
+    );
   });
 
   test('output is always balanced for adversarial input', () => {
@@ -110,8 +123,24 @@ describe('sanitizeTelegramHtml', () => {
       '<pre><code>x</pre></code>',
       '<b>',
       '<b></b></b><i>',
+      '<code><b>x</code></b>',
+      '<pre>a<i>b</pre></i>',
+      'if a<b and c>d <b>real</b>',
     ]) {
       assert.ok(isBalanced(sanitizeTelegramHtml(html)), `not balanced for: ${html}`);
+    }
+  });
+
+  test('sanitizing its own output changes nothing', () => {
+    for (const html of [
+      '<b>a</b> <div>x</div> 5 < 6 &nbsp;',
+      '<a href="https://x.test/?a=1&b=2" target="_blank">q</a>',
+      '<pre><code class="language-ts">let v: Vec<u8> = f::<i32>();</code></pre>',
+      '<blockquote expandable>Map<K, V> and <i>it</i></blockquote>',
+      'a<b <i>c</i>',
+    ]) {
+      const once = sanitizeTelegramHtml(html);
+      assert.equal(sanitizeTelegramHtml(once), once, `not idempotent for: ${html}`);
     }
   });
 
@@ -138,6 +167,45 @@ describe('sanitizeTelegramHtml', () => {
 
     test('escapes unknown entities so Telegram does not reject the message', () => {
       assert.equal(sanitizeTelegramHtml('&nbsp;'), '&amp;nbsp;');
+    });
+  });
+
+  describe('tag-shaped text', () => {
+    test('escapes generics inside code rather than dropping them', () => {
+      assert.equal(
+        sanitizeTelegramHtml('<code>Promise<void></code>'),
+        '<code>Promise&lt;void&gt;</code>',
+      );
+    });
+
+    test('escapes an include, generics and a comparison in plain text', () => {
+      assert.equal(sanitizeTelegramHtml('#include <stdio.h>'), '#include &lt;stdio.h&gt;');
+      assert.equal(
+        sanitizeTelegramHtml('Map<string, number> and Vec<T>'),
+        'Map&lt;string, number&gt; and Vec&lt;T&gt;',
+      );
+      assert.equal(sanitizeTelegramHtml('if a<b and c>d then'), 'if a&lt;b and c&gt;d then');
+    });
+
+    test('shows every tag inside a code block as written', () => {
+      assert.equal(
+        sanitizeTelegramHtml(
+          '<pre><code class="language-html"><div><b>hi</b><br></div></code></pre>',
+        ),
+        '<pre><code class="language-html">&lt;div&gt;&lt;b&gt;hi&lt;/b&gt;&lt;br&gt;&lt;/div&gt;</code></pre>',
+      );
+      assert.equal(
+        sanitizeTelegramHtml('<pre>x <i>y</i></pre>'),
+        '<pre>x &lt;i&gt;y&lt;/i&gt;</pre>',
+      );
+    });
+
+    test('does not let text with a stray < swallow the tag after it', () => {
+      assert.equal(sanitizeTelegramHtml('a<b <i>c</i>'), 'a&lt;b <i>c</i>');
+    });
+
+    test('escapes a close tag with junk after its name', () => {
+      assert.equal(sanitizeTelegramHtml('<b>x</b y>'), '<b>x&lt;/b y&gt;</b>');
     });
   });
 
@@ -237,6 +305,16 @@ describe('splitTelegramMessage', () => {
       ['entity run', '&amp;'.repeat(2_000)],
       ['mixed markup', '<b>a</b> plain <code>c</code> &amp; more\n'.repeat(300)],
       ['tags at boundary', `${'x'.repeat(TELEGRAM_MAX_MESSAGE - 2)}<b>y</b>${'z'.repeat(100)}`],
+      // Once hung the splitter until the heap ran out: every <int> was an open tag.
+      ['generics in a pre block', `<pre>${'std::vector<int> v;\n'.repeat(450)}</pre>`],
+      ['tag-shaped text', 'Vec<T>, #include <stdio.h> and Map<string, number>\n'.repeat(300)],
+      // Also ran out of heap: the reopened tags alone filled every chunk.
+      ['thousands of unclosed tags', '<b>x'.repeat(3_000)],
+      [
+        'a tag longer than a message',
+        `<a href="https://x.test/${'p'.repeat(5_000)}">link</a> ${'tail '.repeat(1_000)}`,
+      ],
+      ['emoji run', `a${'😀'.repeat(2_100)}`],
     ];
 
     for (const [name, text] of cases) {
@@ -258,6 +336,16 @@ describe('splitTelegramMessage', () => {
       test(`${name}: no chunk is empty`, () => {
         for (const chunk of splitTelegramMessage(text)) {
           assert.notEqual(chunk.length, 0);
+        }
+      });
+
+      test(`${name}: no chunk cuts a surrogate pair`, () => {
+        for (const chunk of splitTelegramMessage(text)) {
+          assert.doesNotMatch(
+            chunk,
+            LONE_SURROGATE_RE,
+            'a chunk starts or ends with half an emoji',
+          );
         }
       });
 
@@ -311,6 +399,29 @@ describe('splitTelegramMessage', () => {
     // Each chunk must be a whole number of entities, or Telegram rejects it.
     for (const chunk of splitTelegramMessage('&amp;'.repeat(2_000))) {
       assert.match(chunk, /^(?:&amp;)+$/);
+    }
+  });
+
+  test('keeps tag-shaped text inside code as text, so sanitizing a chunk keeps its own tags', () => {
+    // If the splitter carried <b> as a tag here, the sanitizer would escape the
+    // </b> it adds at each boundary, since nothing nests inside code.
+    const chunks = splitTelegramMessage(
+      `<pre><code>${'<b>x</b> vector<int>\n'.repeat(500)}</code></pre>`,
+    );
+    assert.ok(chunks.length > 1);
+    for (const chunk of chunks) {
+      const sanitized = sanitizeTelegramHtml(chunk);
+      assert.ok(sanitized.startsWith('<pre><code>'), `lost the reopen: ${sanitized.slice(0, 40)}`);
+      assert.ok(sanitized.endsWith('</code></pre>'), `lost the close: ${sanitized.slice(-40)}`);
+      assert.doesNotMatch(sanitized, /<b>|&lt;\/(?:code|pre)&gt;/);
+    }
+  });
+
+  test('stops carrying tags once they would crowd out the content', () => {
+    const chunks = splitTelegramMessage('<b>x'.repeat(3_000));
+    assert.ok(chunks.length > 1);
+    for (const chunk of chunks.slice(0, -1)) {
+      assert.ok(textContentOf(chunk).length >= TELEGRAM_MAX_MESSAGE / 4, 'chunk is mostly tags');
     }
   });
 

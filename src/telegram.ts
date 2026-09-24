@@ -132,7 +132,8 @@ export async function sendTelegramHtmlMessage(
 /**
  * Tries the HTML as written, then sanitized, then fully escaped. Only a Telegram
  * entity-parse error moves on to the next attempt; anything else propagates.
- * Escaped text has no entities to reject, so the last rung is final.
+ * Escaped text has no entities to reject, so the last rung is final. Each step
+ * down is logged with Telegram's reason, since the user sees degraded markup.
  */
 async function withHtmlParseFallback<T>(
   html: string,
@@ -142,11 +143,13 @@ async function withHtmlParseFallback<T>(
     return await post(html);
   } catch (error) {
     if (!isTelegramHtmlParseError(error)) throw error;
+    console.warn('Telegram rejected the HTML; retrying sanitized:', errorMessage(error));
   }
   try {
     return await post(sanitizeTelegramHtml(html));
   } catch (error) {
     if (!isTelegramHtmlParseError(error)) throw error;
+    console.warn('Telegram rejected the sanitized HTML; sending it escaped:', errorMessage(error));
   }
   return post(escapeTelegramHtml(html));
 }
