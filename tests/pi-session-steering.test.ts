@@ -39,6 +39,8 @@ function fixture() {
   let aborted = false;
   const sdk = {
     isStreaming: false,
+    thinkingLevel: 'medium',
+    getAvailableThinkingLevels: () => ['off', 'low', 'medium', 'high'],
     subscribe(listener: (event: AgentSessionEvent) => void) {
       listeners.add(listener);
       return () => {

@@ -250,12 +250,13 @@ const BOT_COMMANDS: BotCommand[] = [
       // its finally, or at the start of the next run if the reply is still being
       // delivered. When the chat is idle, apply the reset immediately.
       chat.pi.abort();
+      const thinking = await chat.pi.getThinkingState();
       await chat.pi.requestNewSession();
       if (!chat.processing) chat.pi.reset();
       chat.messageCount = 0;
       chat.startedAt = Date.now();
       await sendTelegramMessage(
-        `🔄 Started a new conversation using <code>${escapeTelegramHtml(chat.pi.modelName)}</code>.`,
+        `🔄 Started a new conversation using <code>${escapeTelegramHtml(chat.pi.modelName)}</code>. Reasoning: <b>${escapeTelegramHtml(thinking.level)}</b>.`,
       );
     },
   },

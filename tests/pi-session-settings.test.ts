@@ -34,6 +34,7 @@ function fixture() {
   const session = {
     isStreaming: false,
     thinkingLevel: 'low' as ThinkingLevel,
+    getAvailableThinkingLevels: () => ['off', 'low', 'medium', 'high'],
     async setModel(next: Model<Api>, options?: { persist?: boolean }) {
       assert.equal(options?.persist, true);
       calls.push('model');
@@ -141,7 +142,20 @@ test('requesting a new session marks the live conversation cleared', async () =>
   const { pi, session } = fixture();
   const sessionManager = SessionManager.inMemory('/work');
   Object.assign(session, { sessionManager });
-  await pi.requestNewSession('follow-up');
+  assert.equal(
+    await pi.requestNewSession('follow-up'),
+    'Fresh session queued using test/old (reasoning: low). The provided task will run automatically in the new Pi conversation after the current response finishes.',
+  );
   assert.equal(isConversationCleared(sessionManager), true);
   assert.equal(pi.consumePendingNewSessionTask(), 'follow-up');
+});
+
+test('new session without a task reports the effective reasoning level', async () => {
+  const { pi, session } = fixture();
+  session.thinkingLevel = 'high';
+  Object.assign(session, { sessionManager: SessionManager.inMemory('/work') });
+  assert.equal(
+    await pi.requestNewSession(),
+    'Fresh session queued using test/old (reasoning: high). The next user message will start a new Pi conversation.',
+  );
 });

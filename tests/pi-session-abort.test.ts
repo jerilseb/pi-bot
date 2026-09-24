@@ -51,6 +51,8 @@ function fakeSession(setup: Promise<void> = Promise.resolve()) {
     disposed: false,
     cleared: false,
     isStreaming: false,
+    thinkingLevel: 'medium',
+    getAvailableThinkingLevels: () => ['off', 'low', 'medium', 'high'],
     sessionManager: {
       getEntries: () => [],
       appendCustomEntry: (type: string) => {

@@ -117,6 +117,10 @@ function setup(t: TestContext) {
   const backgroundSteer = t.mock.method(background.pi, 'trySteer', async () => true);
   const abort = t.mock.method(chat.pi, 'abort', () => {});
   const note = t.mock.method(chat.pi, 'noteEvent', async () => {});
+  t.mock.method(chat.pi, 'getThinkingState', async () => ({
+    level: 'medium' as const,
+    availableLevels: ['medium' as const],
+  }));
   t.mock.method(chat.pi, 'requestNewSession', async () => 'reset');
   const queue = createPromptQueue({
     chatSession,
@@ -214,6 +218,9 @@ for (const command of ['/abort', '/new']) {
     f.options()?.onSteeringSettled?.({ text: 'late steer', attachments: [] }, 'deferred');
     assert.equal(f.chat.queue.length, 1);
     await f.send(command);
+    if (command === '/new') {
+      assert.ok(f.messages.some((message) => message.includes('Reasoning: <b>medium</b>')));
+    }
     assert.equal(f.abort.mock.callCount(), 1);
     assert.equal(f.steer.mock.callCount(), 0);
     assert.deepEqual(f.chat.queue, []);

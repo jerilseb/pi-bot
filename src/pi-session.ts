@@ -687,12 +687,13 @@ export class SdkPiSession {
   }
 
   async requestNewSession(task?: string): Promise<string> {
+    const { level } = await this.getThinkingState();
     this.pendingNewSessionRequest = true;
     this.pendingNewSessionTask = task?.trim() || null;
     await this.markConversationCleared();
     return this.pendingNewSessionTask
-      ? `Fresh session queued using ${this.modelName}. The provided task will run automatically in the new Pi conversation after the current response finishes.`
-      : `Fresh session queued using ${this.modelName}. The next user message will start a new Pi conversation.`;
+      ? `Fresh session queued using ${this.modelName} (reasoning: ${level}). The provided task will run automatically in the new Pi conversation after the current response finishes.`
+      : `Fresh session queued using ${this.modelName} (reasoning: ${level}). The next user message will start a new Pi conversation.`;
   }
 
   consumePendingNewSessionTask(): string | null {
