@@ -20,7 +20,6 @@ import {
   subagentReportPrompt,
   type WorkerRunRequest,
 } from '../src/subagent.ts';
-import { notifySteeringMessage } from '../src/steering-signal.ts';
 import type { SessionKind } from '../src/types.ts';
 
 /**
@@ -190,8 +189,7 @@ test('a job still running after the yield is backgrounded and reports once when 
   );
   const jobId = jobIdIn(started);
   assert.match(started, /still running after/);
-  assert.match(started, /If it should finish within 3m, wait for it with subagent_wait/);
-  assert.match(started, /If it may run longer, end your turn now/);
+  assert.match(started, /End your turn once you have nothing else to do meanwhile/);
   assert.match(started, /Task 1: running/);
 
   const running = await f.text(f.call('subagent_read', { job_id: jobId }));
@@ -401,45 +399,25 @@ test('each background run gets an interrupted note for its own jobs only', async
   assert.deepEqual(runningSubagentOriginFiles('background'), []);
 });
 
-test('the guidance says to end the turn rather than wait out a long job', (t) => {
+test('a backgrounded job ends the turn: there is no tool to wait for it', (t) => {
   const f = setup(t);
+  assert.deepEqual([...f.tools.keys()].sort(), [
+    'subagent_list',
+    'subagent_read',
+    'subagent_run',
+    'subagent_stop',
+    'subagent_stop_all',
+  ]);
   const guidelines = f.tools.get('subagent_run')?.promptGuidelines?.join('\n') ?? '';
-  assert.match(guidelines, /may run longer than 3m in total[^\n]*end your turn instead of waiting/);
-  assert.match(guidelines, /expected to finish within 3m, call subagent_wait/);
-  assert.match(guidelines, /Never wait by polling subagent_read or by sleeping in bash/);
-});
-
-test('subagent_wait returns the results as soon as the job finishes, and no report is needed', async (t) => {
-  const f = setup(t);
-  const jobId = jobIdIn(
-    await f.text(f.call('subagent_run', { tasks: [{ task: 'look it up' }], yield_time_ms: 5 })),
-  );
-  const waiting = f.text(f.call('subagent_wait', { job_id: jobId }));
-  setTimeout(() => f.worker.finish(0, 'found it'), 5);
-  const result = await waiting;
-  assert.match(result, /succeeded \(1\/1 tasks\)/);
-  assert.match(result, /found it/);
-  await until(() => f.reports.length === 1);
-  assert.equal(subagentReportPrompt(f.reports[0]).isSuperseded?.(), true);
-});
-
-test('subagent_wait ends early when the user sends a message, leaving the job running', async (t) => {
-  const f = setup(t);
-  const jobId = jobIdIn(
-    await f.text(f.call('subagent_run', { tasks: [{ task: 'slow' }], yield_time_ms: 5 })),
-  );
-  const waiting = f.text(f.call('subagent_wait', { job_id: jobId }));
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  notifySteeringMessage('chat');
-  const result = await waiting;
   assert.match(
-    result,
-    /the user sent a message, which follows this result; the job is still running/,
+    guidelines,
+    /If the job is still running when subagent_run returns[^\n]*end your turn/,
   );
-  assert.match(result, /Task 1: running/);
-  f.worker.finish(0, 'done later');
-  await until(() => f.reports.length === 1);
-  assert.equal(subagentReportPrompt(f.reports[0]).isSuperseded?.(), false);
+  assert.match(guidelines, /Never wait for a job by polling subagent_read or by sleeping in bash/);
+  const everything = [...f.tools.values()]
+    .map((tool) => [tool.description, ...(tool.promptGuidelines ?? [])].join('\n'))
+    .join('\n');
+  assert.doesNotMatch(everything, /subagent_wait/);
 });
 
 /** Taps the Stop button for `taskNumber` on the job's progress message, as Telegram would. */

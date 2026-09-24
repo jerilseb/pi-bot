@@ -364,16 +364,18 @@ export const JOB_PROGRESS_MIN_EDIT_MS = 3_000;
  */
 export const JOB_PROGRESS_GLOBAL_MIN_GAP_MS = 1_000;
 /**
- * Guidance, not a limit: a background job the agent expects to run longer than
- * this, or that is still running after it, should end the agent's turn, with the
- * completion report resuming the work in the same conversation. Shorter waits
- * may poll. Stated to the agent in the background bash and sub-agent tools.
+ * Guidance, not a limit: a background command the agent expects to run longer
+ * than this, or that is still running after it, should end the agent's turn,
+ * with the completion report resuming the work in the same conversation. Shorter
+ * ones may be waited for. Stated to the agent in the background bash tools; a
+ * backgrounded sub-agent job always ends the turn, so the chat is free while
+ * its workers run.
  */
 export const BACKGROUND_JOB_END_TURN_AFTER_MS = 3 * 60_000;
 /**
- * Longest (and default) background_bash_wait / subagent_wait. Equal to the
- * end-your-turn threshold: a job worth waiting for in the turn is one expected
- * to finish within it, and one that outlasts the wait should end the turn.
+ * Longest (and default) background_bash_wait. Equal to the end-your-turn
+ * threshold: a command worth waiting for in the turn is one expected to finish
+ * within it, and one that outlasts the wait should end the turn.
  */
 export const BACKGROUND_WAIT_MAX_MS = BACKGROUND_JOB_END_TURN_AFTER_MS;
 /** How often a wait with an `until` pattern checks the command's new output. */

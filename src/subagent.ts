@@ -3,8 +3,6 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type, type Static } from 'typebox';
 import { buildAgentEnvelope } from './agent-envelope.ts';
 import {
-  BACKGROUND_JOB_END_TURN_AFTER_MS,
-  BACKGROUND_WAIT_MAX_MS,
   SUBAGENT_COMPLETED_TTL_MS,
   SUBAGENT_DEFAULT_MAX_RUNTIME_MS,
   SUBAGENT_DEFAULT_YIELD_MS,
@@ -27,7 +25,6 @@ import {
   type JobOrigin,
   JobRegistry,
   jobReportPrompt,
-  type WaitOutcome,
 } from './job-registry.ts';
 import {
   formatSubagentProgress,
@@ -67,9 +64,6 @@ import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
  * Lifecycle bookkeeping lives in src/job-registry.ts. Tuning knobs live in
  * src/config.ts under "Background work".
  */
-
-/** The end-your-turn threshold, as the agent reads it (e.g. "3m"). */
-const END_TURN_AFTER = formatDuration(BACKGROUND_JOB_END_TURN_AFTER_MS);
 
 /** Custom entry type framing a worker transcript: a start entry with metadata, an end entry with the outcome. */
 export const SUBAGENT_SESSION_ENTRY_TYPE = 'telegram-bot-subagent';
@@ -297,15 +291,6 @@ const JobIdParams = Type.Object({
   job_id: Type.String({ description: 'Job ID returned by subagent_run.' }),
 });
 
-const WaitParams = Type.Object({
-  job_id: Type.String({ description: 'Job ID returned by subagent_run.' }),
-  timeout_ms: Type.Optional(
-    Type.Number({
-      description: `Longest to wait (default and max ${BACKGROUND_WAIT_MAX_MS}ms).`,
-    }),
-  ),
-});
-
 const NoParams = Type.Object({});
 
 /**
@@ -331,9 +316,8 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     promptGuidelines: [
       'Use subagent_run for work that splits into independent pieces, or for a long investigation whose details you do not need in this conversation. Do the work yourself when it is short or depends on back-and-forth with the user.',
       'Workers see only their task text. Put every fact, path, constraint, and the expected shape of the answer into each task; never assume a worker knows what the user said.',
-      `If a backgrounded job may run longer than ${END_TURN_AFTER} in total, or is still running after that, end your turn instead of waiting: tell the user briefly what the workers are doing and what you will do with their results, then stop. The [subagent-report] resumes you in this conversation with the results; continue the remaining steps then.`,
-      `To wait for a job expected to finish within ${END_TURN_AFTER}, call subagent_wait: it blocks without polling until every worker has finished or the user sends a message, and returns the results. If the wait times out with the job still running, end your turn as above.`,
-      'Never wait by polling subagent_read or by sleeping in bash; subagent_read is for checking progress. Once a read or a wait has shown the finished results, no completion report follows.',
+      'If the job is still running when subagent_run returns, finish anything else you can do meanwhile, then end your turn: tell the user briefly what the workers are doing and what you will do with their results. The [subagent-report] resumes you in this conversation with the results; continue the remaining steps then.',
+      'Never wait for a job by polling subagent_read or by sleeping in bash; subagent_read is for checking progress. Once a read has shown the finished results, no completion report follows.',
       "The user sees a live progress message for jobs started from the chat, so do not post progress updates yourself. Give each task a short description; it is the task's title there.",
       'That message has a Stop button for each unfinished task. A task the user stopped with it was stopped on purpose, and the result says so: do not start it again unless they ask.',
       'Workers cannot contact the user and cannot start sub-agents of their own. Relay their results to the user yourself.',
@@ -412,7 +396,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
             text: [
               `Started sub-agent job ${job.id} with ${job.tasks.length} task${job.tasks.length === 1 ? '' : 's'}; still running after ${formatDuration(yieldTimeMs)}.`,
               `Max runtime: ${formatDuration(maxRuntimeMs)}.`,
-              `If it should finish within ${END_TURN_AFTER}, wait for it with subagent_wait using job_id "${job.id}". If it may run longer, end your turn now: an internal [subagent-report] message with the results resumes you when it finishes.`,
+              'End your turn once you have nothing else to do meanwhile: an internal [subagent-report] message with the results resumes you when it finishes.',
               '',
               formatTaskStatusList(job),
             ].join('\n'),
@@ -427,7 +411,7 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
     name: 'subagent_read',
     label: 'Read Sub-agent Job',
     description:
-      'Read the status and any results so far of a sub-agent job started with subagent_run. For checking progress; to wait for the job, use subagent_wait.',
+      'Read the status and any results so far of a sub-agent job started with subagent_run. For checking progress only: the [subagent-report] brings the results when the job finishes.',
     parameters: JobIdParams,
 
     async execute(_toolCallId, params: Static<typeof JobIdParams>) {
@@ -441,41 +425,6 @@ function registerSubagentTools(pi: ExtensionAPI, origin: SessionKind, runWorker:
       // The same clipped results the report would carry.
       registry.markResultRead(job, origin);
       return textResult(formatJobResult(job));
-    },
-  });
-
-  pi.registerTool({
-    name: 'subagent_wait',
-    label: 'Wait for Sub-agent Job',
-    description: `Wait for a sub-agent job without polling. Returns as soon as every worker has finished, the user sends a message, or the timeout passes (default and max ${END_TURN_AFTER}): the results once the job has finished, otherwise the status of each task.`,
-    parameters: WaitParams,
-
-    async execute(_toolCallId, params: Static<typeof WaitParams>, signal) {
-      const job = registry.get(params.job_id);
-      if (!job) return textResult(registry.unknownJobMessage(params.job_id));
-      const timeoutMs = clamp(
-        params.timeout_ms ?? BACKGROUND_WAIT_MAX_MS,
-        1_000,
-        BACKGROUND_WAIT_MAX_MS,
-      );
-      const outcome = await registry.waitFor(job, {
-        timeoutMs,
-        session: origin,
-        ...(signal ? { signal } : {}),
-      });
-      if (job.status !== 'running') {
-        // The same clipped results the report would carry.
-        registry.markResultRead(job, origin);
-        return textResult(formatJobResult(job));
-      }
-      return textResult(
-        [
-          `Job ${job.id}: ${describeWaitOutcome(outcome, timeoutMs)}`,
-          registry.statusLine(job),
-          '',
-          formatTaskStatusList(job),
-        ].join('\n'),
-      );
     },
   });
 
@@ -745,18 +694,6 @@ async function runTask(
     release?.();
     task.endedAt = Date.now();
     registry.refreshProgress(job);
-  }
-}
-
-/** Why a wait returned with the job still running. */
-function describeWaitOutcome(outcome: WaitOutcome, timeoutMs: number): string {
-  switch (outcome) {
-    case 'interrupted':
-      return 'the user sent a message, which follows this result; the job is still running. Answer the user, then wait again or end your turn.';
-    case 'aborted':
-      return 'the wait was aborted; the job is still running.';
-    default:
-      return `still running after waiting ${formatDuration(timeoutMs)}. End your turn now, saying what you will do with the results; the [subagent-report] resumes you then. Do not wait again unless it is about to finish.`;
   }
 }
 
