@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { TELEGRAM_MAX_MESSAGE } from '../src/config.ts';
 import {
+  clipEscapedTelegramHtml,
   escapeTelegramHtml,
   sanitizeTelegramHtml,
   splitTelegramMessage,
@@ -431,6 +432,22 @@ describe('splitTelegramMessage', () => {
     // A newline split means no chunk ends mid-word.
     for (const chunk of chunks.slice(0, -1)) {
       assert.match(chunk, /(?:text|\n)$/);
+    }
+  });
+});
+
+describe('clipEscapedTelegramHtml', () => {
+  test('leaves text that fits once escaped alone', () => {
+    assert.equal(clipEscapedTelegramHtml('a < b', 10), 'a &lt; b');
+  });
+
+  test('measures after escaping and never cuts an entity or a surrogate pair', () => {
+    for (let max = 2; max < 40; max++) {
+      const clipped = clipEscapedTelegramHtml('<&>😀'.repeat(20), max);
+      assert.ok(clipped.length <= max, `${clipped.length} > ${max}`);
+      assert.ok(clipped.endsWith('…'));
+      assert.equal(sanitizeTelegramHtml(clipped), clipped);
+      assert.doesNotMatch(clipped, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/, 'no lone high surrogate');
     }
   });
 });

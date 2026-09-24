@@ -69,6 +69,16 @@ export function formatToolStartNotification(event: ToolExecutionStartEvent, cwd:
   return appendFirstArgument(`🛠 ${escapeTelegramHtml(event.toolName)}`);
 }
 
+/**
+ * A tool call as one line of plain text, e.g. `read (~/Code/pi-bot/src/cron.ts)`:
+ * the tool and its first argument, as the 🛠 note shows them but without the
+ * icon or markup. Used for what a sub-agent worker is doing now.
+ */
+export function describeToolCall(toolName: string, args: unknown): string {
+  const firstArgument = formatFirstToolArgument(args);
+  return firstArgument ? `${toolName} (${firstArgument})` : toolName;
+}
+
 function formatFirstToolArgument(args: unknown): string | null {
   const firstArgument = extractFirstToolArgument(args);
   if (!firstArgument) return null;

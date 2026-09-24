@@ -47,6 +47,11 @@ export interface SendMessageOptions {
   silent?: boolean;
 }
 
+export interface SendHtmlMessageOptions extends SendMessageOptions {
+  /** Buttons under the message. A message split into pieces carries them on the last one. */
+  keyboard?: InlineKeyboardButton[][];
+}
+
 export async function sendTelegramMessage(
   text: string,
   options: SendMessageOptions = {},
@@ -90,8 +95,16 @@ export async function editTelegramMessageText(messageId: number, text: string): 
  * Replaces a sent message's HTML, degrading the markup on the same ladder as a
  * send. Editing to identical content is a Telegram error rather than a change,
  * so that one is treated as success.
+ *
+ * An edit without a keyboard drops the message's buttons, which is how a menu
+ * clears itself. A message that keeps its buttons must pass them on every edit;
+ * an empty keyboard removes them.
  */
-export async function editTelegramMessageHtml(messageId: number, html: string): Promise<void> {
+export async function editTelegramMessageHtml(
+  messageId: number,
+  html: string,
+  keyboard?: InlineKeyboardButton[][],
+): Promise<void> {
   await withHtmlParseFallback(html, async (candidate) => {
     try {
       await telegram('editMessageText', {
@@ -102,6 +115,7 @@ export async function editTelegramMessageHtml(messageId: number, html: string): 
           message_id: messageId,
           text: candidate,
           parse_mode: 'HTML',
+          ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
         }),
       });
     } catch (error) {
@@ -114,16 +128,24 @@ export async function editTelegramMessageHtml(messageId: number, html: string): 
  * Sends one chunk that fits in a single Telegram message and returns its ID, so
  * the caller can edit it later. A degraded fallback (sanitized or escaped) can
  * grow past the limit — escaping turns every `<` into four characters — so each
- * rung is re-split and the ID of the last piece is returned.
+ * rung is re-split and the ID of the last piece is returned. That piece is the
+ * one a caller edits, so it is the one that carries the keyboard.
  */
 export async function sendTelegramHtmlMessage(
   html: string,
-  options: SendMessageOptions = {},
+  options: SendHtmlMessageOptions = {},
 ): Promise<number> {
+  const { keyboard, ...sendOptions } = options;
   return withHtmlParseFallback(html, async (candidate) => {
+    const pieces = splitTelegramMessage(candidate);
     let messageId = 0;
-    for (const piece of splitTelegramMessage(candidate)) {
-      messageId = await postTelegramHtmlMessage(piece, options);
+    for (const [index, piece] of pieces.entries()) {
+      const last = index === pieces.length - 1;
+      messageId = await postTelegramHtmlMessage(
+        piece,
+        sendOptions,
+        last && keyboard ? { inline_keyboard: keyboard } : undefined,
+      );
     }
     return messageId;
   });

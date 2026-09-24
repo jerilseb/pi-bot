@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { renderCollapsedToolCalls } from '../src/tool-notifications.ts';
+import { describeToolCall, renderCollapsedToolCalls } from '../src/tool-notifications.ts';
 
 test('renders one tool call under a singular header', () => {
   assert.equal(
@@ -35,4 +35,10 @@ test('counts hidden lines in the header', () => {
 
 test('renders a header alone when every line was dropped', () => {
   assert.equal(renderCollapsedToolCalls([], 3), '🛠 <b>3 tool calls</b> <i>(3 not shown)</i>');
+});
+
+test('a tool call reads as plain text for a worker’s progress row', () => {
+  assert.equal(describeToolCall('read', { path: 'src/cron.ts', offset: 3 }), 'read (src/cron.ts)');
+  assert.equal(describeToolCall('bash', { command: 'echo <a>\n  && ls' }), 'bash (echo <a> && ls)');
+  assert.equal(describeToolCall('list', {}), 'list');
 });

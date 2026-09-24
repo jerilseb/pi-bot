@@ -8,7 +8,8 @@ import type { WorkerRunRequest } from '../src/subagent.ts';
  * Aborts that land before there is anything to abort: while a session is still
  * starting, during the SDK's own setup inside prompt(), or after a run returned
  * but before its reply was delivered. Driven through the real runPrompt, abort,
- * requestNewSession and driveWorkerSession against fake SDK sessions.
+ * requestNewSession and driveWorkerSession against fake SDK sessions, which also
+ * carry the tool-start hook a worker's live progress row is built from.
  */
 
 function runtime(): PiRuntime {
@@ -235,4 +236,33 @@ test('a worker whose session fails to load closes its transcript as failed', asy
     { status: ends.at(-1)?.status, error: ends.at(-1)?.error },
     { status: 'failed', error: 'no extensions' },
   );
+});
+
+test('a worker reports each tool call it starts, for its progress row', async () => {
+  const session = fakeSession();
+  // Keeps the driver's listener, so the task can emit a tool call before the run ends.
+  let listener: ((event: AgentSessionEvent) => void) | undefined;
+  const subscribe = session.subscribe.bind(session);
+  session.subscribe = (added) => {
+    listener = added;
+    return subscribe(added);
+  };
+  const prompt = session.prompt.bind(session);
+  session.prompt = async (text: string) => {
+    listener?.({
+      type: 'tool_execution_start',
+      toolCallId: 'c1',
+      toolName: 'read',
+      args: { path: 'src/cron.ts' },
+    } as AgentSessionEvent);
+    await prompt(text);
+  };
+  const started: Array<{ toolName: string; args: unknown }> = [];
+
+  await driveWorkerSession(
+    { ...workerRequest(new AbortController().signal), onToolStart: (event) => started.push(event) },
+    workerTranscript().manager,
+    async () => session as never,
+  );
+  assert.deepEqual(started, [{ toolName: 'read', args: { path: 'src/cron.ts' } }]);
 });

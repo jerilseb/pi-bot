@@ -19,6 +19,10 @@ import { errorMessage } from './util.ts';
  *
  * Replies are best-effort: once the value has been applied, a failed toast or
  * edit is logged, never reported as a failed switch.
+ *
+ * A CallbackAction is the other kind of button: one on a message the bot keeps
+ * editing itself, such as a Stop button on a live job message. It answers the
+ * tap and leaves the message alone.
  */
 
 /** The `<prefix>cancel` value every menu with a Cancel button uses. */
@@ -49,12 +53,32 @@ export interface CallbackMenu {
   select(value: string): Promise<CallbackMenuReply | null>;
 }
 
-/** Routes a callback query to the menu owning its prefix. Unknown taps are still answered. */
+/**
+ * A button that acts without replacing its message. The polling loop waits for
+ * every tap, so answer must return at once, leaving slow work detached; its
+ * return value is the toast.
+ */
+export interface CallbackAction {
+  /** Callback-data prefix, including its trailing colon, e.g. `stop:`. */
+  prefix: string;
+  answer(value: string): string;
+}
+
+/**
+ * Routes a callback query to the action or menu owning its prefix. Unknown taps
+ * are still answered.
+ */
 export async function dispatchCallbackQuery(
   query: TelegramCallbackQuery,
   menus: readonly CallbackMenu[],
+  actions: readonly CallbackAction[] = [],
 ): Promise<void> {
   const data = query.data ?? '';
+  const action = actions.find((candidate) => data.startsWith(candidate.prefix));
+  if (action) {
+    await handleCallbackAction(action, query, data.slice(action.prefix.length));
+    return;
+  }
   const menu = menus.find((candidate) => data.startsWith(candidate.prefix));
   if (!menu) {
     await answerBestEffort(query.id, 'Unknown action.');
@@ -102,6 +126,27 @@ async function handleCallbackMenu(
     return;
   }
   await reply(outcome ?? { toast: 'Unknown option.', text: menu.unknownOptionText });
+}
+
+async function handleCallbackAction(
+  action: CallbackAction,
+  query: TelegramCallbackQuery,
+  value: string,
+): Promise<void> {
+  const message = query.message;
+  if (!message || !isAllowedTelegramChat(String(message.chat.id))) {
+    await answerBestEffort(query.id, 'This button is no longer valid.');
+    return;
+  }
+  let toast: string;
+  try {
+    toast = action.answer(value);
+  } catch (error) {
+    // Toasts are capped at 200 characters, so the error itself goes to the log.
+    console.error(`failed to handle the ${action.prefix} button:`, errorMessage(error));
+    toast = 'Something went wrong; see the bot log.';
+  }
+  await answerBestEffort(query.id, toast);
 }
 
 async function answerBestEffort(callbackQueryId: string, toast: string): Promise<void> {

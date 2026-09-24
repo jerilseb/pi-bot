@@ -57,6 +57,7 @@ import { discoverExtensionPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
 import { ingestTelegramMessage } from './src/inbound.ts';
+import { jobStopCallbackAction } from './src/job-stop-action.ts';
 import { modelCallbackMenu } from './src/model-menu.ts';
 import { createPromptQueue } from './src/prompt-queue.ts';
 import { reasoningCallbackMenu } from './src/reasoning-menu.ts';
@@ -190,6 +191,8 @@ const CALLBACK_MENUS = [
   transcriptCallbackMenu,
   telegramMenuCallbackMenu(handleIncoming),
 ];
+// Buttons on messages the bot keeps editing itself: the live job messages' Stop buttons.
+const CALLBACK_ACTIONS = [jobStopCallbackAction];
 
 // Backgrounded bash sessions report back to the agent that started them as
 // internal background-bash-report prompts that go through the normal prompt
@@ -320,7 +323,7 @@ async function pollTelegram(): Promise<void> {
         offset = update.update_id + 1;
 
         if (update.callback_query) {
-          await dispatchCallbackQuery(update.callback_query, CALLBACK_MENUS);
+          await dispatchCallbackQuery(update.callback_query, CALLBACK_MENUS, CALLBACK_ACTIONS);
           continue;
         }
 

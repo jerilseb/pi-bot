@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import type { ProgressTransport } from '../src/job-progress.ts';
+import { createWriteGate, type ProgressTransport } from '../src/job-progress.ts';
 import { captureJobOrigin, type Job, JobRegistry, jobReportPrompt } from '../src/job-registry.ts';
 import { notifySteeringMessage } from '../src/steering-signal.ts';
 import type { SessionKind } from '../src/types.ts';
 
 /**
  * The parts of a background job that background bash and sub-agents share:
- * where a report goes back to, and the yield-then-background step that decides
- * whether a report is ever sent at all.
+ * where a report goes back to, the yield-then-background step that decides
+ * whether a report is ever sent at all, which stops report and which do not,
+ * and the progress message a job the chat started keeps from start to end.
  */
 
 type Terminal = 'done' | 'cancelled';
@@ -39,17 +40,25 @@ function registry(
 function progressRegistry() {
   const calls: Array<[method: string, text: string]> = [];
   const transport: ProgressTransport = {
-    async send(html) {
+    async send({ html }) {
       calls.push(['send', html]);
       return 1;
     },
-    async edit(_id, html) {
+    async edit(_id, { html }) {
       calls.push(['edit', html]);
     },
   };
   const reg = registry({
-    renderProgress: (job) => `${job.id} ${job.status}`,
-    progressOptions: { transport, intervalMs: 60_000 },
+    renderProgress: (job) => ({
+      html: [job.id, job.status, job.statusDetail].filter(Boolean).join(' '),
+      keyboard: [],
+    }),
+    progressOptions: {
+      transport,
+      minIntervalMs: 1,
+      heartbeatMs: 60_000,
+      gate: createWriteGate(0),
+    },
   });
   const reports: string[] = [];
   reg.setReportHandler(async (report) => {
@@ -75,6 +84,7 @@ function job(
     startedAt: Date.now(),
     endedAt: null,
     backgrounded: false,
+    cancelled: false,
     resultRead: false,
     done,
     finish() {
@@ -200,13 +210,35 @@ test('a backgrounded chat job shows progress that ends on its outcome before the
   assert.deepEqual(reports, [`${j.id} after ${j.id} done`]);
 });
 
-test('a job that settles within the yield never gets a progress message', async () => {
+test('the progress message is sent when the job starts, before any yield', async () => {
   const { reg, calls } = progressRegistry();
   const j = job(reg);
-  setTimeout(() => j.finish(), 1);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(calls, [['send', `${j.id} running`]]);
+  j.finish();
+  await reg.settled(j);
+});
+
+test('a job that settles within the yield keeps its message, in its final state', async () => {
+  const { reg, calls, reports } = progressRegistry();
+  const j = job(reg);
+  setTimeout(() => j.finish(), 5);
   assert.equal(await reg.settleOrBackground(j, 1_000), false);
   await reg.settled(j);
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls.at(-1), ['edit', `${j.id} done`]);
+  assert.deepEqual(reports, [], 'its result went back inline');
+});
+
+test('refreshProgress edits the message with the state as it is then', async () => {
+  const { reg, calls } = progressRegistry();
+  const j = job(reg);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  j.statusDetail = 'busy';
+  reg.refreshProgress(j);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(calls.at(-1), ['edit', `${j.id} running busy`]);
+  j.finish();
+  await reg.settled(j);
 });
 
 test('a job the background session started runs without a progress message', async () => {
@@ -216,6 +248,27 @@ test('a job the background session started runs without a progress message', asy
   j.finish();
   await reg.settled(j);
   assert.deepEqual(calls, []);
+});
+
+test('a job that settles as stopped without cancel() still reports: the user stopped it', async () => {
+  const { reg, reports } = progressRegistry();
+  const j = job(reg);
+  assert.equal(await reg.settleOrBackground(j, 5), true);
+  // The job's own stop path, as a Stop tap takes it: terminal status, no cancel().
+  j.status = 'cancelled';
+  j.finish();
+  await reg.settled(j);
+  assert.equal(reports.length, 1);
+});
+
+test('cancel() marks the job cancelled, and a cancelled job never reports', async () => {
+  const { reg, reports } = progressRegistry();
+  const j = job(reg);
+  assert.equal(await reg.settleOrBackground(j, 5), true);
+  await reg.cancel([j]);
+  assert.equal(j.cancelled, true);
+  await reg.settled(j);
+  assert.deepEqual(reports, []);
 });
 
 test('cancelling shows the stop even if the runner never settles in time', async () => {

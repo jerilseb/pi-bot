@@ -7,6 +7,7 @@ import type {
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import { SUBAGENT_MAX_CONCURRENT_WORKERS, SUBAGENT_MAX_TASKS_PER_JOB } from '../src/config.ts';
+import { jobStopCallbackAction } from '../src/job-stop-action.ts';
 import {
   interruptedSubagentsNote,
   runningSubagentOriginFiles,
@@ -78,7 +79,17 @@ function fakeWorker() {
     fail(index: number, message: string) {
       pending[index]?.reject(new Error(message));
     },
+    /** The worker started by the index-th request calls a tool. */
+    toolStart(index: number, toolName: string, args: unknown) {
+      requests[index]?.onToolStart?.({ toolName, args });
+    },
   };
+}
+
+interface TelegramCall {
+  method: string;
+  text: string;
+  keyboard?: Array<Array<{ text: string; callback_data: string }>>;
 }
 
 type Tools = Map<string, ToolDefinition>;
@@ -96,11 +107,18 @@ function setup(t: TestContext, origin: SessionKind = 'chat') {
   setSubagentReportHandler(async (report) => {
     reports.push(report);
   });
-  // Backgrounded chat jobs keep a progress message; capture it instead of sending.
-  const telegram: Array<{ method: string; text: string }> = [];
+  // Chat jobs keep a progress message; capture it instead of sending.
+  const telegram: TelegramCall[] = [];
   t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
-    const payload = JSON.parse(String(init?.body ?? '{}')) as { text?: string };
-    telegram.push({ method: String(url).split('/').pop() ?? '', text: payload.text ?? '' });
+    const payload = JSON.parse(String(init?.body ?? '{}')) as {
+      text?: string;
+      reply_markup?: { inline_keyboard: TelegramCall['keyboard'] };
+    };
+    telegram.push({
+      method: String(url).split('/').pop() ?? '',
+      text: payload.text ?? '',
+      ...(payload.reply_markup ? { keyboard: payload.reply_markup.inline_keyboard } : {}),
+    });
     return Response.json({ ok: true, result: { message_id: telegram.length } });
   });
   t.after(() => stopAllSubagents());
@@ -202,16 +220,22 @@ test('a job still running after the yield is backgrounded and reports once when 
   const done = await f.text(f.call('subagent_read', { job_id: jobId }));
   assert.match(done, /### Task 2 — succeeded/);
 
-  // One progress message, sent when the job was backgrounded and edited to the
-  // outcome before the report was delivered.
+  // One progress message, sent when the job started and edited to the outcome
+  // before the report was delivered.
   assert.deepEqual(
     f.telegram.map((call) => call.method),
     ['sendMessage', 'editMessageText'],
   );
-  assert.match(f.telegram[0]?.text ?? '', /^⏳ <b>Sub-agents<\/b> · running \(0\/2 tasks done\)/);
-  assert.match(f.telegram[0]?.text ?? '', /\n<code>first task \(\+1 more\)<\/code>$/);
-  assert.doesNotMatch(f.telegram[0]?.text ?? '', /sub_[0-9a-f]+/);
-  assert.match(f.telegram[1]?.text ?? '', /^✅ <b>Sub-agents<\/b> · succeeded \(2\/2 tasks\)/);
+  const [sent, final] = f.telegram;
+  assert.match(sent?.text ?? '', /^🤖 <b>Sub-agents<\/b> · 2 running\n\n⏳ <b>1\. first task<\/b>/);
+  assert.doesNotMatch(sent?.text ?? '', /sub_[0-9a-f]+/);
+  assert.deepEqual(
+    sent?.keyboard?.map((line) => line.map((button) => button.text)),
+    [['⏹ Stop 1 · first task'], ['⏹ Stop 2 · second task']],
+  );
+  assert.match(final?.text ?? '', /^🤖 <b>Sub-agents<\/b> · 2 done · ⏱ /);
+  assert.match(final?.text ?? '', /<blockquote expandable>second result<\/blockquote>/);
+  assert.deepEqual(final?.keyboard, [], 'the final message has no buttons');
   assert.equal(prompt.isSuperseded?.(), true, 'the queued report is no longer needed');
 });
 
@@ -243,7 +267,7 @@ test('a failed worker fails the job and its error is in the report', async (t) =
   assert.equal(f.reports[0].tasks[0]?.output, 'Error: boom');
   assert.match(
     f.telegram.at(-1)?.text ?? '',
-    /^❌ <b>Sub-agents<\/b> · failed \(1 of 1 task failed\)/,
+    /^🤖 <b>Sub-agent<\/b> · failed\n\n❌ <b>1\. fragile<\/b>\nfailed after \d+s\n<i>boom<\/i>$/,
   );
 });
 
@@ -262,7 +286,10 @@ test('subagent_stop aborts the workers and sends no report', async (t) => {
   assert.equal(f.reports.length, 0);
   assert.match(await f.text(f.call('subagent_stop', { job_id: jobId })), /not running/);
   // The stop is shown even though no report follows.
-  assert.match(f.telegram.at(-1)?.text ?? '', /^⏹ <b>Sub-agents<\/b> · stopped/);
+  assert.match(
+    f.telegram.at(-1)?.text ?? '',
+    /^🤖 <b>Sub-agent<\/b> · stopped\n\n⏹ <b>1\. slow<\/b>\nstopped after/,
+  );
 });
 
 test('aborting the turn during the yield window stops the job', async (t) => {
@@ -413,4 +440,170 @@ test('subagent_wait ends early when the user sends a message, leaving the job ru
   f.worker.finish(0, 'done later');
   await until(() => f.reports.length === 1);
   assert.equal(subagentReportPrompt(f.reports[0]).isSuperseded?.(), false);
+});
+
+/** Taps the Stop button for `taskNumber` on the job's progress message, as Telegram would. */
+function tapStop(jobId: string, taskNumber: number): string {
+  return jobStopCallbackAction.answer(`${jobId}:${taskNumber}`);
+}
+
+test('a stop from Telegram ends that task alone, and the report says the user stopped it', async (t) => {
+  const f = setup(t);
+  const jobId = jobIdIn(
+    await f.text(
+      f.call('subagent_run', {
+        tasks: [
+          { task: 'Map the cron scheduler in detail.', description: 'Map the cron scheduler' },
+          { task: 'Survey every module.', description: 'Survey every module' },
+          { task: 'Check the tests.' },
+        ],
+        yield_time_ms: 5,
+      }),
+    ),
+  );
+  f.worker.toolStart(1, 'read', { path: 'src/cron.ts' });
+  f.worker.toolStart(0, 'bash', { command: 'npm test' });
+  f.worker.toolStart(0, 'grep', { pattern: 'cron' });
+
+  assert.equal(tapStop(jobId, 2), 'Stopping sub-agent 2…');
+  assert.equal(tapStop(jobId, 2), 'Already stopping…');
+  assert.equal(f.worker.requests[1]?.signal.aborted, true);
+  assert.equal(f.worker.requests[0]?.signal.aborted, false, 'the other workers carry on');
+  assert.equal(f.worker.requests[2]?.signal.aborted, false);
+
+  // The tap refreshes the message at once: the row shows the stop (the fake
+  // worker ends the moment it is aborted), its button is gone, and the others
+  // show what their workers are doing.
+  await until(() => f.telegram.some((call) => call.method === 'editMessageText'));
+  const tapped = f.telegram.find((call) => call.method === 'editMessageText');
+  assert.match(
+    tapped?.text ?? '',
+    /⏳ <b>1\. Map the cron scheduler<\/b>\n\d+s · 2 tools\n↳ <i>grep \(cron\)<\/i>/,
+  );
+  assert.match(
+    tapped?.text ?? '',
+    /⏹ <b>2\. Survey every module<\/b>\nstopped by you after \d+s · 1 tool/,
+  );
+  assert.deepEqual(
+    tapped?.keyboard?.map((line) => line.map((button) => button.callback_data)),
+    [[`stop:${jobId}:1`], [`stop:${jobId}:3`]],
+  );
+
+  const running = await f.text(f.call('subagent_read', { job_id: jobId }));
+  assert.match(running, /Task 2: stopped by the user, \d+s — Survey every module\./);
+
+  f.worker.finish(0, 'cron result');
+  f.worker.finish(2, 'tests result');
+  await until(() => f.reports.length === 1);
+  const report = f.reports[0];
+  assert.ok(report);
+  assert.match(report.outcome, /^succeeded \(2\/3 tasks; 1 stopped by the user\) after /);
+  assert.equal(report.tasks[1]?.status, 'stopped');
+  assert.equal(report.tasks[1]?.stoppedByUser, true);
+  assert.equal(report.tasks[1]?.output, 'Stopped by the user from Telegram before it finished.');
+  const prompt = subagentReportPrompt(report).text;
+  assert.match(prompt, /The user stopped task 2 from Telegram on purpose\. Do not start it again/);
+
+  const final = f.telegram.at(-1);
+  assert.match(final?.text ?? '', /🤖 <b>Sub-agents<\/b> · 2 done · 1 stopped · ⏱ /);
+  assert.match(
+    final?.text ?? '',
+    /⏹ <b>2\. Survey every module<\/b>\nstopped by you after \d+s · 1 tool/,
+  );
+  assert.deepEqual(final?.keyboard, []);
+  assert.equal(tapStop(jobId, 1), 'That job is no longer running.');
+});
+
+test('a job whose every task the user stopped settles stopped, and still reports', async (t) => {
+  const f = setup(t);
+  const jobId = jobIdIn(
+    await f.text(
+      f.call('subagent_run', {
+        tasks: [{ task: 'one' }, { task: 'two' }],
+        yield_time_ms: 5,
+      }),
+    ),
+  );
+  tapStop(jobId, 1);
+  tapStop(jobId, 2);
+  await until(() => f.reports.length === 1);
+  assert.match(f.reports[0]?.outcome ?? '', /^stopped \(every task, by the user\) after /);
+  const prompt = subagentReportPrompt(f.reports[0] as SubagentReport).text;
+  assert.match(
+    prompt,
+    /The user stopped every task from Telegram on purpose\. Do not start them again/,
+  );
+});
+
+test('a failed task and a stopped one are counted apart', async (t) => {
+  const f = setup(t);
+  const jobId = jobIdIn(
+    await f.text(
+      f.call('subagent_run', {
+        tasks: [{ task: 'fragile' }, { task: 'unwanted' }, { task: 'fine' }],
+        yield_time_ms: 5,
+      }),
+    ),
+  );
+  tapStop(jobId, 2);
+  f.worker.fail(0, 'boom');
+  f.worker.finish(2, 'ok');
+  await until(() => f.reports.length === 1);
+  assert.match(
+    f.reports[0]?.outcome ?? '',
+    /^failed \(1 of 3 tasks failed, 1 stopped by the user\) after /,
+  );
+});
+
+test('a queued task stopped from Telegram never starts', async (t) => {
+  const f = setup(t);
+  const tasks = Array.from({ length: SUBAGENT_MAX_CONCURRENT_WORKERS }, (_, i) => ({
+    task: `busy ${i}`,
+  }));
+  jobIdIn(await f.text(f.call('subagent_run', { tasks, yield_time_ms: 5 })));
+  const queuedJob = jobIdIn(
+    await f.text(f.call('subagent_run', { tasks: [{ task: 'waiting' }], yield_time_ms: 5 })),
+  );
+  assert.equal(f.worker.requests.length, SUBAGENT_MAX_CONCURRENT_WORKERS);
+  assert.equal(tapStop(queuedJob, 1), 'Stopping sub-agent 1…');
+  await until(() => f.reports.length === 1);
+  assert.match(f.reports[0]?.outcome ?? '', /^stopped \(by the user\) after /);
+  assert.equal(f.reports[0]?.tasks[0]?.runtime, 'not started');
+
+  const final = f.telegram.filter((call) => call.method === 'editMessageText').at(-1);
+  assert.match(final?.text ?? '', /⏹ <b>1\. waiting<\/b>\nstopped by you before it started/);
+
+  f.worker.finish(0, 'done');
+  await until(() => f.worker.requests.length === SUBAGENT_MAX_CONCURRENT_WORKERS);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(
+    f.worker.requests.length,
+    SUBAGENT_MAX_CONCURRENT_WORKERS,
+    'the freed slot does not go to the stopped task',
+  );
+});
+
+test('a stale Stop button says the job is no longer running', async (t) => {
+  const f = setup(t);
+  assert.equal(tapStop('sub_000000', 1), 'That job is no longer running.');
+  const jobId = jobIdIn(
+    await f.text(f.call('subagent_run', { tasks: [{ task: 'only one' }], yield_time_ms: 5 })),
+  );
+  assert.equal(tapStop(jobId, 2), 'That job is no longer running.', 'no such task');
+  f.worker.finish(0, 'done');
+  await until(() => f.reports.length === 1);
+  assert.equal(tapStop(jobId, 1), 'That job is no longer running.');
+  assert.equal(jobStopCallbackAction.answer('nonsense'), 'Unknown action.');
+});
+
+test('the task description names the worker transcript', async (t) => {
+  const f = setup(t);
+  const result = f.call('subagent_run', {
+    tasks: [{ task: 'A long task text that goes on.', description: 'Short title' }],
+    yield_time_ms: 2_000,
+  });
+  await until(() => f.worker.requests.length === 1);
+  assert.equal(f.worker.requests[0]?.sessionName, 'Short title');
+  f.worker.finish(0, 'ok');
+  await result;
 });

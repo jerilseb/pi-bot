@@ -343,11 +343,26 @@ export const BACKGROUND_BASH_COMPLETED_TTL_MS = 30 * 60_000;
 /** How long background_bash_stop waits for a signalled session to settle. */
 export const BACKGROUND_BASH_STOP_WAIT_MS = 5_000;
 /**
- * How often the progress message of a backgrounded job started from the chat is
- * refreshed (src/job-progress.ts). Each refresh is at most one Telegram edit and
- * no model call; the elapsed time it shows means most refreshes do edit.
+ * The heartbeat of the live progress message a job started from the chat keeps
+ * (src/job-progress.ts): it is re-rendered this often even when nothing
+ * happened, so its clock moves. Each refresh is at most one Telegram edit and no
+ * model call. Also how long a message waits after a failed write before trying
+ * again, so a Telegram rate limit does not use up its retries in seconds.
  */
 export const JOB_PROGRESS_UPDATE_MS = 20_000;
+/**
+ * Shortest gap between two routine writes of one live progress message. Changes
+ * in between (a worker's tool call, a line of output) are coalesced into the
+ * next write, which renders the state as it is then.
+ */
+export const JOB_PROGRESS_MIN_EDIT_MS = 3_000;
+/**
+ * Shortest gap between routine writes across all live progress messages, since
+ * the per-message gap does not bound the total when many jobs run at once. With
+ * no Telegram 429 handling, this and the two intervals above are the only rate
+ * protection.
+ */
+export const JOB_PROGRESS_GLOBAL_MIN_GAP_MS = 1_000;
 /**
  * Guidance, not a limit: a background job the agent expects to run longer than
  * this, or that is still running after it, should end the agent's turn, with the

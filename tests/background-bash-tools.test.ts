@@ -12,6 +12,13 @@ import {
   setBackgroundBashReportHandler,
   stopAllBackgroundSessions,
 } from '../src/background-bash.ts';
+import { jobStopCallbackAction } from '../src/job-stop-action.ts';
+
+interface TelegramCall {
+  method: string;
+  text: string;
+  keyboard?: Array<Array<{ text: string; callback_data: string }>>;
+}
 
 /**
  * background_bash_wait and background_bash_read against real, short shell
@@ -29,10 +36,20 @@ function setup(t: TestContext) {
   setBackgroundBashReportHandler(async (report) => {
     reports.push(report);
   });
-  // Backgrounded chat jobs keep a progress message; answer it without sending.
-  t.mock.method(globalThis, 'fetch', async () =>
-    Response.json({ ok: true, result: { message_id: 1 } }),
-  );
+  // Chat jobs keep a progress message; capture it instead of sending.
+  const telegram: TelegramCall[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    const payload = JSON.parse(String(init?.body ?? '{}')) as {
+      text?: string;
+      reply_markup?: { inline_keyboard: TelegramCall['keyboard'] };
+    };
+    telegram.push({
+      method: String(url).split('/').pop() ?? '',
+      text: payload.text ?? '',
+      ...(payload.reply_markup ? { keyboard: payload.reply_markup.inline_keyboard } : {}),
+    });
+    return Response.json({ ok: true, result: { message_id: 1 } });
+  });
   t.after(() => stopAllBackgroundSessions());
   const ctx = { model: undefined } as unknown as ExtensionContext;
   const call = async (name: string, params: unknown): Promise<string> => {
@@ -47,7 +64,14 @@ function setup(t: TestContext) {
     assert.ok(id, `session id in: ${started}`);
     return id;
   };
-  return { call, start, reports };
+  /** Taps the Stop button the progress message was first sent with. */
+  const tapStop = (): string => {
+    const data = telegram.find((c) => c.method === 'sendMessage')?.keyboard?.[0]?.[0]
+      ?.callback_data;
+    assert.ok(data, 'the progress message has a Stop button');
+    return jobStopCallbackAction.answer(data.slice(jobStopCallbackAction.prefix.length));
+  };
+  return { call, start, reports, telegram, tapStop };
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -122,4 +146,64 @@ test('mode tail returns the whole buffered output again', async (t) => {
   assert.match(tail, /\nOutput:\none\ntwo$/);
   // A tail read counts as seeing everything, so the next default read is empty.
   assert.match(await f.call('background_bash_read', { session_id: id }), /no new output/);
+});
+
+test('a stop from Telegram kills the command and reports that the user stopped it', async (t) => {
+  const f = setup(t);
+  const id = await f.start('sleep 30');
+  assert.equal(f.tapStop(), 'Stopping the command…');
+  assert.equal(f.tapStop(), 'Already stopping…');
+  await until(() => f.reports.length === 1);
+
+  const report = f.reports[0];
+  assert.ok(report);
+  assert.equal(report.stoppedByUser, true);
+  assert.match(report.outcome, /^stopped by the user from Telegram after /);
+  const prompt = backgroundBashReportPrompt(report).text;
+  assert.match(prompt, /The user stopped this command from Telegram on purpose/);
+  assert.match(prompt, /__BACKGROUND_BASH_NOOP__/);
+
+  const read = await f.call('background_bash_read', { session_id: id });
+  assert.match(read, /Status: stopped by the user from Telegram, ran for/);
+  assert.equal(f.tapStop(), 'That job is no longer running.');
+
+  // The message ends on the stop, with its button gone.
+  const last = f.telegram.at(-1);
+  assert.equal(last?.method, 'editMessageText');
+  assert.match(last?.text ?? '', /^⏹ <b>Background bash<\/b> · stopped by you · /);
+  assert.deepEqual(last?.keyboard, []);
+});
+
+test('background_bash_stop still sends no report', async (t) => {
+  const f = setup(t);
+  const id = await f.start('sleep 30');
+  assert.match(await f.call('background_bash_stop', { session_id: id }), /^Stopped session/);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(f.reports, []);
+  const read = await f.call('background_bash_read', { session_id: id });
+  assert.match(read, /Status: stopped, ran for/);
+});
+
+test('a wait in progress when the user stops the command returns it, and the report is not needed', async (t) => {
+  const f = setup(t);
+  const id = await f.start('sleep 30');
+  const waiting = f.call('background_bash_wait', { session_id: id });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  f.tapStop();
+  const result = await waiting;
+  assert.match(result, new RegExp(`^Session ${id}: finished\\.`));
+  assert.match(result, /stopped by the user from Telegram/);
+  await until(() => f.reports.length === 1);
+  assert.equal(backgroundBashReportPrompt(f.reports[0]).isSuperseded?.(), true);
+});
+
+test('a stop during the yield returns the stop inline, with no report to follow', async (t) => {
+  const f = setup(t);
+  const starting = f.call('background_bash_start', { command: 'sleep 30', yield_time_ms: 10_000 });
+  await until(() => f.telegram.some((c) => c.method === 'sendMessage'));
+  f.tapStop();
+  const result = await starting;
+  assert.match(result, /^Command stopped by the user from Telegram after /);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(f.reports, []);
 });

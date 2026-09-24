@@ -11,7 +11,10 @@ import {
 import { BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS } from '../src/config.ts';
 import type { OutputSnapshot } from '../src/output-buffer.ts';
 
-function report(origin: BackgroundBashReport['origin']): BackgroundBashReport {
+function report(
+  origin: BackgroundBashReport['origin'],
+  overrides: Partial<BackgroundBashReport> = {},
+): BackgroundBashReport {
   return {
     sessionId: 'bg_abc123',
     command: 'npm test',
@@ -19,6 +22,8 @@ function report(origin: BackgroundBashReport['origin']): BackgroundBashReport {
     origin,
     outcome: 'finished with exit code 1 in 3m',
     output: 'FAIL',
+    stoppedByUser: false,
+    ...overrides,
   };
 }
 
@@ -121,17 +126,23 @@ test('a JSON result field is reported on its own', () => {
   assert.equal(formatReportOutput(snapshot(content), 'bg_1'), 'the answer');
 });
 
-function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
+function progress(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
   return formatBackgroundBashProgress({
+    id: 'bg_abc123',
     command: 'uv pip install\n  "vllm==0.16.0"',
     status: 'running',
     exitCode: null,
     statusDetail: null,
     startedAt: Date.now() - 372_000,
     endedAt: null,
+    stopRequested: false,
     output: { lastLine: () => 'Downloading vllm (484.8MiB)' },
     ...overrides,
   });
+}
+
+function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
+  return progress(overrides).html;
 }
 
 test('the progress message shows status, runtime, the command in an expandable quote, and the latest output', () => {
@@ -147,12 +158,39 @@ test('the progress message shows status, runtime, the command in an expandable q
   assert.equal(lines[3], '<i>Downloading vllm (484.8MiB)</i>');
 });
 
-test('the command in the progress message is escaped and capped', () => {
+test('the command in the progress message is escaped, and capped after escaping', () => {
   const escaped = progressSession({ command: 'echo "<a>" && ls' });
   assert.match(escaped, /<code>echo "&lt;a&gt;" &amp;&amp; ls<\/code>/);
   const long = progressSession({ command: 'x'.repeat(10_000) });
-  assert.ok(long.length < 4096);
+  assert.ok(long.length <= 3_900);
   assert.match(long, /x…<\/code><\/blockquote>/);
+  // Every `<` grows to four characters once escaped: a cap on the raw command
+  // would let this one split the message and strand its Stop button.
+  const angled = progressSession({
+    command: '<'.repeat(3_000),
+    output: { lastLine: () => '&'.repeat(500) },
+  });
+  assert.ok(angled.length <= 3_900, `${angled.length} chars`);
+  assert.match(angled, /(&lt;)+…<\/code><\/blockquote>/, 'no entity is cut in half');
+});
+
+test('a running command has a Stop button, and none once a stop is on its way or it has ended', () => {
+  assert.deepEqual(progress({}).keyboard, [[{ text: '⏹ Stop', callback_data: 'stop:bg_abc123' }]]);
+
+  const stopping = progress({ stopRequested: true });
+  assert.deepEqual(stopping.keyboard, []);
+  assert.match(stopping.html, /^⏳ <b>Background bash<\/b> · stopping… · 6m 12s/);
+
+  const ended = { startedAt: 0, endedAt: 67_000 };
+  const stoppedByYou = progress({
+    ...ended,
+    status: 'stopped',
+    stopRequested: true,
+    statusDetail: 'stopped by the user from Telegram',
+  });
+  assert.deepEqual(stoppedByYou.keyboard, []);
+  assert.match(stoppedByYou.html, /^⏹ <b>Background bash<\/b> · stopped by you · 1m 7s/);
+  assert.deepEqual(progress({ ...ended, status: 'exited', exitCode: 0 }).keyboard, []);
 });
 
 test('the progress message ends on the outcome', () => {
@@ -173,6 +211,25 @@ test('output in the progress message is escaped, and absent until there is some'
   const html = progressSession({ output: { lastLine: () => '<b>1 < 2</b> & more' } });
   assert.match(html, /<i>&lt;b&gt;1 &lt; 2&lt;\/b&gt; &amp; more<\/i>$/);
   assert.doesNotMatch(progressSession({ output: { lastLine: () => '' } }), /<i>/);
+});
+
+test('a report of a command the user stopped says so, and not to start it again', () => {
+  const stopped = backgroundBashReportPrompt(
+    report(
+      { session: 'chat' },
+      { outcome: 'stopped by the user from Telegram after 2m 3s', stoppedByUser: true },
+    ),
+  ).text;
+  assert.match(
+    stopped,
+    /^\[background-bash-report\] Background bash bg_abc123 stopped by the user/,
+  );
+  assert.match(stopped, /The user stopped this command from Telegram on purpose\./);
+  assert.match(stopped, /Do not start it again unless they ask/);
+  assert.match(stopped, /__BACKGROUND_BASH_NOOP__/);
+
+  const finished = backgroundBashReportPrompt(report({ session: 'chat' })).text;
+  assert.doesNotMatch(finished, /stopped this command/);
 });
 
 test('the guidance says to end the turn rather than wait out a long command', () => {

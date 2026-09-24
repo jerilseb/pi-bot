@@ -252,6 +252,9 @@ export async function driveWorkerSession(
     let promptError = '';
     unsubscribe = live.subscribe((event) => {
       abortOnRunStart(live, event, request.signal.aborted);
+      if (event.type === 'tool_execution_start') {
+        request.onToolStart?.({ toolName: event.toolName, args: event.args });
+      }
       if (event.type === 'auto_retry_start') {
         reply.dropLast();
         promptError = '';

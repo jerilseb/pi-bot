@@ -19,6 +19,24 @@ export function escapeTelegramHtml(text: string): string {
 }
 
 /**
+ * `text` escaped, and cut with an ellipsis so the escaped form stays within
+ * maxChars. Measured after escaping, since every `<` grows to four characters:
+ * a cap on the raw text does not bound the message. Never splits an entity or a
+ * surrogate pair.
+ */
+export function clipEscapedTelegramHtml(text: string, maxChars: number): string {
+  const escaped = escapeTelegramHtml(text);
+  if (escaped.length <= maxChars) return escaped;
+  let clipped = '';
+  for (const char of text) {
+    const piece = escapeTelegramHtml(char);
+    if (clipped.length + piece.length > maxChars - 1) break;
+    clipped += piece;
+  }
+  return `${clipped.trimEnd()}…`;
+}
+
+/**
  * The tags Telegram renders. Names match in lowercase only: model HTML is
  * lowercase, while code generics such as `Option<U>` or `impl<S>` are the
  * uppercase text that would otherwise turn into underline or strikethrough.

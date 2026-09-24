@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { TELEGRAM_MAX_MESSAGE } from '../src/config.ts';
-import { sendTelegramHtmlMessage, sendTelegramMessage } from '../src/telegram.ts';
+import {
+  editTelegramMessageHtml,
+  sendTelegramHtmlMessage,
+  sendTelegramMessage,
+} from '../src/telegram.ts';
 
 const PARSE_ERROR = "Bad Request: can't parse entities: Unsupported start tag";
 
@@ -66,4 +70,48 @@ test('a long code reply with unescaped generics arrives intact and escaped', asy
   }
   const shown = sent.map((piece) => piece.slice('<pre>'.length, -'</pre>'.length)).join('');
   assert.equal(shown.replace(/\n/g, ''), 'std::vector&lt;int&gt; v;'.repeat(450));
+});
+
+const STOP = [[{ text: '⏹ Stop', callback_data: 'stop:bg_1' }]];
+
+/** Records each call's text and buttons. */
+function recordMarkup(t: TestContext) {
+  const calls: Array<{ method: string; text: string; markup?: unknown }> = [];
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    const payload = JSON.parse(String(init?.body)) as { text: string; reply_markup?: unknown };
+    calls.push({
+      method: String(url).split('/').at(-1) ?? '',
+      text: payload.text,
+      ...(payload.reply_markup ? { markup: payload.reply_markup } : {}),
+    });
+    return Response.json({ ok: true, result: { message_id: calls.length } });
+  });
+  return calls;
+}
+
+test('a message split into pieces carries its buttons on the last one, the one edited later', async (t) => {
+  const calls = recordMarkup(t);
+  const html = 'word '.repeat(Math.ceil((TELEGRAM_MAX_MESSAGE * 1.5) / 5));
+
+  const lastId = await sendTelegramHtmlMessage(html, { silent: true, keyboard: STOP });
+
+  assert.ok(calls.length > 1);
+  assert.equal(lastId, calls.length);
+  assert.deepEqual(
+    calls.map((call) => call.markup),
+    [...Array(calls.length - 1).fill(undefined), { inline_keyboard: STOP }],
+  );
+});
+
+test('an edit passes its buttons along, and an empty keyboard clears them', async (t) => {
+  const calls = recordMarkup(t);
+
+  await editTelegramMessageHtml(7, 'running', STOP);
+  await editTelegramMessageHtml(7, 'done', []);
+  await editTelegramMessageHtml(7, 'plain');
+
+  assert.deepEqual(
+    calls.map((call) => call.markup),
+    [{ inline_keyboard: STOP }, { inline_keyboard: [] }, undefined],
+  );
 });

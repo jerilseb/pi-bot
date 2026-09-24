@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { type CallbackMenu, dispatchCallbackQuery } from '../src/callback-menu.ts';
+import {
+  type CallbackAction,
+  type CallbackMenu,
+  dispatchCallbackQuery,
+} from '../src/callback-menu.ts';
 import { ALLOWED_CHAT_ID } from '../src/config.ts';
 import type { TelegramCallbackQuery } from '../src/types.ts';
 
@@ -139,4 +143,43 @@ test('a failed edit after a successful select is logged, not reported as a failu
 
   assert.deepEqual(toasts(calls), ['Applied.']);
   assert.equal(errors.mock.callCount(), 1);
+});
+
+test('an action answers the tap with its toast and leaves the message alone', async (t) => {
+  const calls = fakeTelegram(t);
+  const answer = t.mock.fn((value: string) => `Stopping ${value}…`);
+  const action: CallbackAction = { prefix: 'stop:', answer };
+  const m = menu(t);
+
+  await dispatchCallbackQuery(tap('stop:bg_1'), [m.definition], [action]);
+
+  assert.deepEqual(answer.mock.calls[0]?.arguments, ['bg_1']);
+  assert.deepEqual(toasts(calls), ['Stopping bg_1…']);
+  assert.deepEqual(edits(calls), [], 'the live message is the bot’s to edit, not the tap’s');
+  assert.equal(m.select.mock.callCount(), 0);
+});
+
+test('an action refuses a tap from another chat before it runs', async (t) => {
+  const calls = fakeTelegram(t);
+  const answer = t.mock.fn(() => 'Stopping…');
+
+  await dispatchCallbackQuery(tap('stop:bg_1', 999), [], [{ prefix: 'stop:', answer }]);
+
+  assert.equal(answer.mock.callCount(), 0);
+  assert.deepEqual(toasts(calls), ['This button is no longer valid.']);
+});
+
+test('an action that throws still has its tap answered', async (t) => {
+  const calls = fakeTelegram(t);
+  t.mock.method(console, 'error', () => {});
+  const action: CallbackAction = {
+    prefix: 'stop:',
+    answer() {
+      throw new Error('x'.repeat(1_000));
+    },
+  };
+
+  await dispatchCallbackQuery(tap('stop:bg_1'), [], [action]);
+
+  assert.deepEqual(toasts(calls), ['Something went wrong; see the bot log.']);
 });

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { currentModel } from './extension-models.ts';
 import {
+  type ProgressContent,
   type ProgressMessage,
   type ProgressMessageOptions,
   startProgressMessage,
@@ -20,8 +21,9 @@ import { errorMessage, formatDuration } from './util.ts';
  * This module owns the parts that are not specific to a kind of job — ID
  * allocation, the yield-then-background step, TTL pruning, cancellation, and
  * report delivery including where a report is routed and whether it is still
- * needed, and the live progress message of a backgrounded job — while the
- * caller keeps its own status vocabulary and user-facing wording.
+ * needed, and the live progress message of a job started from the chat — while
+ * the caller keeps its own status vocabulary and user-facing wording, and its
+ * own stop path for the message's Stop buttons.
  *
  * A registry lives at module level in src/ (imported once by Node), so it is
  * shared for the lifetime of the bot process. Jobs do not survive bot restarts;
@@ -109,6 +111,12 @@ export interface Job<TTerminal extends string> {
   /** True once start returned an ID to the agent; gates the completion report. */
   backgrounded: boolean;
   /**
+   * True once cancel() stopped the job: the agent's own stop tools, or
+   * shutdown. Such a job sends no report. A stop the user makes from the
+   * progress message goes through the job's own stop path instead, and reports.
+   */
+  cancelled: boolean;
+  /**
    * True once the session that started the job read its settled result. The
    * completion report is then redundant: it would only repeat what the agent
    * already acted on.
@@ -134,7 +142,7 @@ export interface JobRegistryOptions<
   completedTtlMs: number;
   /** How long cancel() waits for signalled jobs to settle. */
   cancelWaitMs: number;
-  /** Terminal status recorded when a job is cancelled by the user or by shutdown. */
+  /** Terminal status recorded when a job is cancelled by the agent or by shutdown. */
   cancelledStatus: TTerminal;
   /** Signals one running job to stop. */
   signalCancel: (job: TJob) => void;
@@ -143,11 +151,11 @@ export interface JobRegistryOptions<
   /** Projects a settled job into the report delivered to the chat agent. */
   buildReport: (job: TJob) => TReport;
   /**
-   * Renders the job's progress message as Telegram HTML, for both the running
-   * and the final state. Without it, backgrounded jobs show no progress.
+   * Renders the job's progress message as Telegram HTML and its Stop buttons,
+   * for both the running and the final state. Without it, jobs show no progress.
    */
-  renderProgress?: (job: TJob) => string;
-  /** Overrides the progress transport and refresh interval; for tests. */
+  renderProgress?: (job: TJob) => ProgressContent;
+  /** Overrides the progress transport, intervals, and write gate; for tests. */
   progressOptions?: ProgressMessageOptions;
 }
 
@@ -174,8 +182,10 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
     }
   }
 
+  /** Adds a job that has just started, and starts its progress message. */
   register(job: TJob): void {
     this.jobs.set(job.id, job);
+    this.startProgress(job);
   }
 
   /** Forgets a job, e.g. once it finished fast enough to be returned inline. */
@@ -200,9 +210,10 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   /**
    * Waits up to yieldMs for a just-started job. A job that settles in time is
-   * forgotten, since its result goes back inline and no report follows; one
-   * still running is marked backgrounded so its completion report is delivered.
-   * Returns true when the job was backgrounded.
+   * forgotten, since its result goes back inline and no report follows; its
+   * progress message still ends on its final state. One still running is marked
+   * backgrounded so its completion report is delivered. Returns true when the
+   * job was backgrounded.
    */
   async settleOrBackground(job: TJob, yieldMs: number): Promise<boolean> {
     await settleWithin(job.done, yieldMs);
@@ -211,7 +222,6 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
       return false;
     }
     job.backgrounded = true;
-    this.startProgress(job);
     return true;
   }
 
@@ -265,9 +275,20 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
     await this.reportEnd(job);
   }
 
+  /** Asks for the job's progress message to be re-rendered soon, coalesced with other changes. */
+  refreshProgress(job: TJob): void {
+    this.progress.get(job.id)?.refresh();
+  }
+
+  /** Re-renders the job's progress message at once, for a Stop tap. */
+  refreshProgressNow(job: TJob): void {
+    this.progress.get(job.id)?.refreshNow();
+  }
+
   /**
-   * Progress is shown only for jobs the chat started. A job from the background
-   * session belongs to an unattended run whose own output is noted, not watched.
+   * Progress is shown only for jobs the chat started, from the moment they
+   * start. A job from the background session belongs to an unattended run whose
+   * own output is noted, not watched.
    */
   private startProgress(job: TJob): void {
     const render = this.options.renderProgress;
@@ -291,12 +312,14 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   /**
    * Marks each running job cancelled, signals it, then waits briefly for the
-   * runners to settle. Cancelled jobs do not send a completion report.
+   * runners to settle. For the agent's own stop tools and shutdown: cancelled
+   * jobs do not send a completion report.
    */
   async cancel(targets: TJob[]): Promise<number> {
     const running = targets.filter((job) => job.status === 'running');
     for (const job of running) {
       job.status = this.options.cancelledStatus;
+      job.cancelled = true;
       this.options.signalCancel(job);
     }
     if (running.length > 0) {
@@ -335,9 +358,13 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
     return this.jobs.get(id)?.resultRead ?? false;
   }
 
-  /** Delivers a settled job's report unless it was cancelled or never backgrounded. */
+  /**
+   * Delivers a settled job's report unless it was cancelled or never
+   * backgrounded. A job the user stopped from Telegram was not cancelled, so the
+   * agent still hears how it ended.
+   */
   private async reportEnd(job: TJob): Promise<void> {
-    if (!job.backgrounded || job.status === this.options.cancelledStatus) return;
+    if (!job.backgrounded || job.cancelled) return;
 
     if (!this.reportHandler) {
       console.error(`no ${this.options.jobNoun} report handler set; dropping report`);
