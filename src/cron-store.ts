@@ -91,10 +91,10 @@ function createCronJob(input: CreateCronJobInput): CronJob {
     ...(input.title ? { title: input.title } : {}),
     prompt: input.prompt,
     model: input.model,
-    ...(input.runAt ? { runAt: input.runAt } : {}),
+    ...(input.runAt ? { runAt: resolveRunAt(input.runAt, input.timezone).toISOString() } : {}),
     ...(input.intervalMs ? { intervalMs: input.intervalMs } : {}),
     ...(input.schedule ? { schedule: input.schedule } : {}),
-    ...(input.timezone ? { timezone: input.timezone } : {}),
+    ...(input.timezone ? { timezone: requireTimeZone(input.timezone) } : {}),
     nextRunAt: null,
     lastRunAt: null,
     createdAt: nowIso,
@@ -120,9 +120,11 @@ export function updateCronJob(id: string, input: UpdateCronJobInput): CronJob {
   const index = jobs.findIndex((job) => job.id === id);
   if (index < 0) throw new Error(`No scheduled task found with id ${id}`);
 
+  const timezone = input.timezone ? requireTimeZone(input.timezone) : jobs[index].timezone;
   const updated = normalizeCronJob({
     ...jobs[index],
     ...definedOnly(input),
+    ...(input.runAt ? { runAt: resolveRunAt(input.runAt, timezone).toISOString() } : {}),
     updatedAt: new Date().toISOString(),
   });
   updated.nextRunAt = updated.enabled ? computeNextRunAt(updated) : null;
@@ -199,14 +201,22 @@ export function deferCronJob(job: CronJob, delayMs: number, fromDate: Date = new
   };
 }
 
+/**
+ * One line per task for the scheduling tools. Times are shown in the task's
+ * timezone, or labelled UTC, so the agent can check a task fires when the user
+ * meant rather than reading a bare UTC timestamp.
+ */
 export function formatCronJob(job: CronJob): string {
   const title = job.title ? `${job.title} ` : '';
   const schedule = formatCronSchedule(job);
-  return `${job.id} — ${title}${job.enabled ? 'enabled' : 'disabled'}, ${schedule}, model: ${job.model}, next: ${job.nextRunAt ?? 'none'}`;
+  const next = job.nextRunAt ? formatLocalTime(job.nextRunAt, job.timezone) : 'none';
+  return `${job.id} — ${title}${job.enabled ? 'enabled' : 'disabled'}, ${schedule}, model: ${job.model}, next: ${next}`;
 }
 
 function formatCronSchedule(job: CronJob): string {
-  if (job.kind === 'once') return `once at ${job.runAt}`;
+  if (job.kind === 'once') {
+    return `once at ${job.runAt ? formatLocalTime(job.runAt, job.timezone) : 'an unset time'}`;
+  }
   if (job.kind === 'interval') {
     const minutes = Math.round((job.intervalMs ?? 0) / 60_000);
     return `every ${minutes} minute${minutes === 1 ? '' : 's'}`;
@@ -285,6 +295,107 @@ function validateCronJob(job: CronJob): void {
   CronExpressionParser.parse(job.schedule, {
     ...(job.timezone ? { tz: job.timezone } : {}),
   });
+}
+
+const EXPLICIT_OFFSET_RE = /\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+const WALL_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+
+/**
+ * The instant a one-time task's run_at means. A time with a UTC offset (or Z)
+ * is taken as written. One without is the wall-clock time in `timezone`, and
+ * with no timezone either it is rejected: the server runs on UTC, so reading it
+ * there would fire the task hours away from what the user meant.
+ */
+export function resolveRunAt(runAt: string, timezone?: string): Date {
+  const text = runAt.trim();
+  if (EXPLICIT_OFFSET_RE.test(text)) return requireValidDate(text, 'runAt');
+  if (!timezone) {
+    throw new Error(
+      `run_at ${runAt} has no UTC offset. Add one (2026-05-29T09:00:00+05:30) or pass timezone (Asia/Kolkata).`,
+    );
+  }
+  const match = WALL_TIME_RE.exec(text);
+  if (!match) {
+    throw new Error(
+      `run_at must be an ISO date and time such as 2026-05-29T09:00:00, got ${runAt}`,
+    );
+  }
+  const [year, month, day, hour, minute] = match.slice(1, 6).map(Number);
+  const second = Number(match[6] ?? 0);
+  const ms = Number((match[7] ?? '0').padEnd(3, '0'));
+  // Written as if it were UTC; Date.UTC rolls overflow over (Feb 30 -> Mar 2), so
+  // reading the fields back catches a date or time that does not exist.
+  const wall = new Date(Date.UTC(year, month - 1, day, hour, minute, second, ms));
+  if (
+    wall.getUTCMonth() !== month - 1 ||
+    wall.getUTCDate() !== day ||
+    wall.getUTCHours() !== hour ||
+    wall.getUTCMinutes() !== minute
+  ) {
+    throw new Error(`run_at ${runAt} is not a valid date and time`);
+  }
+  const zone = requireTimeZone(timezone);
+  // The zone's offset at a first guess, corrected once: that settles on the right
+  // side of a daylight-saving change.
+  const guess = wall.getTime() - zoneOffsetMs(wall.getTime(), zone);
+  return new Date(wall.getTime() - zoneOffsetMs(guess, zone));
+}
+
+/** Returns the timezone if Intl knows it, so a typo fails when the task is saved. */
+function requireTimeZone(timezone: string): string {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+  } catch {
+    throw new Error(`Unknown timezone ${timezone}; use an IANA name such as Asia/Kolkata`);
+  }
+  return timezone;
+}
+
+/** How far the clock in `timeZone` is ahead of UTC at `instant`. */
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const p = zonedParts(instant, timeZone);
+  const wall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return wall - Math.floor(instant / 1000) * 1000;
+}
+
+function zonedParts(instant: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    weekday: 'short',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(instant);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? '';
+  return {
+    weekday: part('weekday'),
+    year: Number(part('year')),
+    month: Number(part('month')),
+    day: Number(part('day')),
+    hour: Number(part('hour')),
+    minute: Number(part('minute')),
+    second: Number(part('second')),
+  };
+}
+
+/** `Fri 2026-09-25 09:00 (Asia/Kolkata)`; UTC when there is no usable timezone. */
+export function formatLocalTime(iso: string, timezone?: string): string {
+  let zone = timezone ?? 'UTC';
+  let p: ReturnType<typeof zonedParts>;
+  try {
+    p = zonedParts(Date.parse(iso), zone);
+  } catch {
+    zone = 'UTC';
+    p = zonedParts(Date.parse(iso), zone);
+  }
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const seconds = p.second ? `:${pad(p.second)}` : '';
+  return `${p.weekday} ${p.year}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}${seconds} (${zone})`;
 }
 
 function definedOnly<T extends object>(value: T): Partial<T> {

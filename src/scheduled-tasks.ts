@@ -32,7 +32,8 @@ const ScheduleTaskParams = Type.Object({
   ),
   run_at: Type.Optional(
     Type.String({
-      description: 'ISO timestamp for one-time tasks, e.g. 2026-05-29T09:00:00+05:30.',
+      description:
+        'ISO date and time for one-time tasks: with a UTC offset (2026-05-29T09:00:00+05:30), or as local time (2026-05-29T09:00:00) together with timezone.',
     }),
   ),
   interval_minutes: Type.Optional(
@@ -48,7 +49,8 @@ const ScheduleTaskParams = Type.Object({
   ),
   timezone: Type.Optional(
     Type.String({
-      description: 'IANA timezone for cron expressions, e.g. Asia/Kolkata or America/New_York.',
+      description:
+        "IANA timezone, e.g. Asia/Kolkata or America/New_York: the zone of a cron schedule and of a run_at given without an offset. The task's times are shown in it.",
     }),
   ),
 });
@@ -74,7 +76,12 @@ const UpdateScheduledTaskParams = Type.Object({
       description: `Model to run this task on, as provider/model. Pass '${DEFAULT_MODEL_KEYWORD}' to re-pin the task to the chat model active right now.`,
     }),
   ),
-  run_at: Type.Optional(Type.String()),
+  run_at: Type.Optional(
+    Type.String({
+      description:
+        "With a UTC offset, or as local time in timezone (the task's own when not given).",
+    }),
+  ),
   interval_minutes: Type.Optional(Type.Integer({ minimum: 1 })),
   schedule: Type.Optional(Type.String()),
   timezone: Type.Optional(Type.String()),
@@ -87,12 +94,13 @@ export function scheduledTasksExtension(pi: ExtensionAPI): void {
     name: 'create_schedule_task',
     label: 'Create Schedule Task',
     description:
-      "Create a scheduled task for the Telegram assistant. Use for reminders, recurring checks, or future/proactive work. For kind='once', provide run_at. For kind='interval', provide interval_minutes. For kind='cron', provide a five-field cron schedule and preferably timezone.",
+      "Create a scheduled task for the Telegram assistant. Use for reminders, recurring checks, or future/proactive work. For kind='once', provide run_at, with a UTC offset or with timezone. For kind='interval', provide interval_minutes. For kind='cron', provide a five-field cron schedule and preferably timezone.",
     promptSnippet: 'Schedule one-time, interval, or cron-like Telegram assistant tasks.',
     promptGuidelines: [
       'Use create_schedule_task when the user asks you to do something later, at a specific time, or repeatedly.',
-      'If the user gives a relative time like tomorrow or next week, get the current time with bash date before scheduling.',
-      'Prefer timezone-aware ISO timestamps for one-time tasks and IANA timezones for cron tasks.',
+      "If the user gives a relative time like tomorrow or next week, get the current time with bash date before scheduling. It prints the server's UTC time; TZ=<zone> date prints the user's local time.",
+      "Give one-time and cron tasks the user's IANA timezone. A run_at with neither a UTC offset nor a timezone is rejected, since the server runs on UTC.",
+      'The result shows when the task will next run, in its timezone: check it matches what the user asked for.',
       'Keep the scheduled prompt self-contained; include what to check and when to notify the user.',
       'A scheduled task is pinned to the chat model active when it is created; later /models switches do not affect it. Pass model only when the user asks for a specific model for that task.',
     ],
