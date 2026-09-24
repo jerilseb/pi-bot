@@ -5,7 +5,7 @@ import type { InlineKeyboardButton } from './telegram.ts';
 const SUBAGENT_TOOL_CALL_CALLBACK_PREFIX = 'subagenttoolcalls:';
 
 export function describeSubagentToolCallSetting(enabled: boolean): string {
-  return enabled ? 'On — show tool calls' : 'Off — one line per task';
+  return enabled ? 'On — show tool calls for sub-agents' : 'Off — one line per task';
 }
 
 export function buildSubagentToolCallInlineKeyboard(): InlineKeyboardButton[][] {
