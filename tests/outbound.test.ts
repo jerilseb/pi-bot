@@ -69,3 +69,27 @@ test('a report that merely mentions a sentinel is delivered', async (t) => {
   assert.equal(messages.length, 1);
   assert.ok(messages[0].endsWith(body));
 });
+
+test('narration before a sentinel does not make it a report', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: true }));
+
+  await sendPiResponse(
+    { text: `Checking state.\n\n${CRON_NOOP}`, finalText: CRON_NOOP },
+    { source: 'cron', suppressNoop: true },
+  );
+
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+test('a reply that must be sent says so when the model said nothing', async (t) => {
+  const messages: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    messages.push((JSON.parse(String(init?.body)) as { text: string }).text);
+    return Response.json({ ok: true, result: { message_id: messages.length } });
+  });
+
+  await sendPiResponse({ text: '' });
+  await sendPiResponse({ text: '' }, { source: 'cron' });
+
+  assert.deepEqual(messages, ['(no response)', '⏰ <b>Scheduled report</b>\n\n(no response)']);
+});

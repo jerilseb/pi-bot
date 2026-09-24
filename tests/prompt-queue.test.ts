@@ -3,7 +3,8 @@ import { test, type TestContext } from 'node:test';
 import { BackgroundOutbox, setBackgroundOutbox } from '../src/background-outbox.ts';
 import { createChatSession } from '../src/chat-session.ts';
 import { CRON_NOOP, MAX_QUEUED_PROMPTS } from '../src/config.ts';
-import type { PiRunPromptOptions, PiRuntime } from '../src/pi-session.ts';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
+import type { PiRunPromptOptions, PiRuntime, SdkPiSession } from '../src/pi-session.ts';
 import { createPromptQueue } from '../src/prompt-queue.ts';
 import type { Attachment, IncomingPrompt } from '../src/types.ts';
 
@@ -26,6 +27,41 @@ function runtime(): PiRuntime {
     extensionFactories: [],
   };
 }
+
+/**
+ * Puts the real runPrompt back on `pi`, over a fake SDK session that emits
+ * `events`, so a test sees the reply exactly as runPrompt builds it.
+ */
+function useRealRunPrompt(pi: SdkPiSession, events: AgentSessionEvent[]): void {
+  (pi.runPrompt as unknown as { mock: { restore(): void } }).mock.restore();
+  const listeners = new Set<(event: AgentSessionEvent) => void>();
+  const session = {
+    isStreaming: false,
+    subscribe(listener: (event: AgentSessionEvent) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    async prompt() {
+      for (const event of events) for (const listener of listeners) listener(event);
+    },
+    clearQueue: () => ({ steering: [], followUp: [] }),
+    getSteeringMessages: () => [],
+    async abort() {},
+    dispose() {},
+  };
+  Object.assign(pi, { session });
+}
+
+const assistantStart = {
+  type: 'message_start',
+  message: { role: 'assistant', content: [] },
+} as unknown as AgentSessionEvent;
+const runEnd = { type: 'agent_end', messages: [], willRetry: false } as AgentSessionEvent;
+const textDelta = (text: string) =>
+  ({
+    type: 'message_update',
+    assistantMessageEvent: { type: 'text_delta', delta: text },
+  }) as AgentSessionEvent;
 
 async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 100; i++) {
@@ -388,21 +424,39 @@ test('a scheduled task that reports nothing leaves no note in the chat session',
   assert.equal(f.messages.length, 0);
 });
 
-test('a scheduled task with a blank reply sends nothing and leaves no note', async (t) => {
-  const f = setup(t);
-  f.gate.resolve();
-  t.mock.method(f.background.pi, 'runPrompt', async () => ({ text: '  \n' }));
-  await f.queue.handleIncoming({
-    text: 'run the check',
-    attachments: [],
-    source: 'cron',
-    suppressNoop: true,
-    label: 'Blank check',
-  });
-  await until(() => !f.queue.isAssistantBusy());
+for (const [name, events] of [
+  // Once sent as "(no response)": runPrompt filled in the placeholder itself.
+  ['says nothing', [assistantStart, runEnd]],
+  // Once sent as "Checking state.__CRON_NOOP__", which no longer matched.
+  [
+    'narrates, then answers with the sentinel',
+    [assistantStart, textDelta('Checking state.'), assistantStart, textDelta(CRON_NOOP), runEnd],
+  ],
+] as const) {
+  test(`a scheduled task that ${name} sends nothing and leaves no note`, async (t) => {
+    const f = setup(t);
+    f.gate.resolve();
+    useRealRunPrompt(f.background.pi, [...events]);
+    await f.queue.handleIncoming({
+      text: 'run the check',
+      attachments: [],
+      source: 'cron',
+      suppressNoop: true,
+      label: 'Quiet check',
+    });
+    await until(() => !f.queue.isAssistantBusy());
 
-  assert.equal(f.note.mock.callCount(), 0);
-  assert.equal(f.messages.length, 0);
+    assert.equal(f.note.mock.callCount(), 0);
+    assert.deepEqual(f.messages, []);
+  });
+}
+
+test('a chat reply that says nothing still answers the user', async (t) => {
+  const f = setup(t);
+  useRealRunPrompt(f.chat.pi, [assistantStart, runEnd]);
+  await f.send('hello');
+  await until(() => !f.queue.isAssistantBusy());
+  assert.deepEqual(f.messages, ['(no response)']);
 });
 
 test('post-restart tasks queue behind an active run instead of steering it', async (t) => {

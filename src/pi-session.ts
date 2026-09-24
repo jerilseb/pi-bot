@@ -248,15 +248,15 @@ export async function driveWorkerSession(
   try {
     const live = await createSession();
     session = live;
-    const chunks: string[] = [];
+    const reply = new RunText();
     let promptError = '';
     unsubscribe = live.subscribe((event) => {
       abortOnRunStart(live, event, request.signal.aborted);
       if (event.type === 'auto_retry_start') {
-        chunks.length = 0;
+        reply.dropLast();
         promptError = '';
       }
-      collectResponseEvent(event, chunks, (message) => {
+      collectResponseEvent(event, reply, (message) => {
         promptError = message;
       });
     });
@@ -277,7 +277,8 @@ export async function driveWorkerSession(
       throw new Error(promptError);
     }
     outcome = { status: 'succeeded' };
-    return { text: chunks.join('').trim() || '(no response)', sessionFile };
+    // The parent agent reads this as the worker's answer, so an empty one says so.
+    return { text: reply.result().text || '(no response)', sessionFile };
   } catch (error) {
     outcome ??= request.signal.aborted
       ? { status: 'aborted' }
@@ -339,6 +340,46 @@ async function loadResources(
 }
 
 /**
+ * The text of a run's assistant messages, kept per message: narration before a
+ * tool call and the answer after it are separate paragraphs rather than one run
+ * of text, and the last message can be checked on its own for a sentinel.
+ */
+class RunText {
+  private messages: string[] = [];
+
+  observe(event: AgentSessionEvent): void {
+    if (event.type === 'message_start' && event.message.role === 'assistant') {
+      this.messages.push('');
+    } else if (
+      event.type === 'message_update' &&
+      event.assistantMessageEvent.type === 'text_delta'
+    ) {
+      if (this.messages.length === 0) this.messages.push('');
+      this.messages[this.messages.length - 1] += event.assistantMessageEvent.delta;
+    }
+  }
+
+  /**
+   * Drops the message a failed attempt left, before the SDK retries it. Every
+   * assistant message, a failed one included, starts with message_start, so the
+   * failed one is always the last; what came before it stands.
+   */
+  dropLast(): void {
+    this.messages.pop();
+  }
+
+  clear(): void {
+    this.messages = [];
+  }
+
+  /** Raw, with no placeholder: a blank reply is for the caller to judge. */
+  result(): PiPromptResult {
+    const texts = this.messages.map((message) => message.trim()).filter(Boolean);
+    return { text: texts.join('\n\n'), finalText: texts.at(-1) ?? '' };
+  }
+}
+
+/**
  * Accumulates a response's text and records its error, for both the persistent
  * sessions and workers. agent_end is emitted for each low-level attempt: a
  * retrying failure is superseded, and a later successful attempt must clear its
@@ -346,14 +387,12 @@ async function loadResources(
  */
 function collectResponseEvent(
   event: AgentSessionEvent,
-  chunks: string[],
+  reply: RunText,
   setError: (message: string) => void,
 ): void {
+  reply.observe(event);
   if (event.type === 'message_update') {
     const delta = event.assistantMessageEvent;
-    if (delta.type === 'text_delta') {
-      chunks.push(delta.delta);
-    }
     if (delta.type === 'error') {
       setError(delta.error.errorMessage || 'Pi agent failed while generating a response');
     }
@@ -521,7 +560,7 @@ export class SdkPiSession {
       options.onSteeringSettled?.(prompt, disposition);
     });
     this.steering = steering;
-    let chunks: string[] = [];
+    const reply = new RunText();
     let promptError = '';
     let recoveryNotified = false;
     let recoveryAttempts = 0;
@@ -541,15 +580,15 @@ export class SdkPiSession {
       abortOnRunStart(session, event, aborted());
       steering.observe(event);
       if (event.type === 'auto_retry_start') {
-        // Discard partial text and the superseded error before the SDK retries.
-        chunks = [];
+        // Discard the failed attempt's partial text and error before the SDK retries.
+        reply.dropLast();
         promptError = '';
         notifyRecovery(event.errorMessage);
       }
       this.collectPromptEvent(
         event,
         session,
-        chunks,
+        reply,
         (message) => {
           promptError = message;
         },
@@ -575,7 +614,7 @@ export class SdkPiSession {
 
         if (!promptError) {
           await recoveryNotification;
-          return { text: chunks.join('').trim() || '(no response)' };
+          return reply.result();
         }
 
         const canRecover =
@@ -592,7 +631,7 @@ export class SdkPiSession {
 
         recoveryAttempts++;
         notifyRecovery(promptError);
-        chunks = [];
+        reply.clear();
         const recoveryController = new AbortController();
         this.transportRecoveryAbortController = recoveryController;
         try {
@@ -959,11 +998,11 @@ export class SdkPiSession {
   private collectPromptEvent(
     event: AgentSessionEvent,
     session: AgentSession,
-    chunks: string[],
+    reply: RunText,
     setError: (message: string) => void,
     onToolCall: ((notification: string) => void) | undefined,
   ): void {
-    collectResponseEvent(event, chunks, setError);
+    collectResponseEvent(event, reply, setError);
 
     if (event.type === 'tool_execution_start') {
       onToolCall?.(formatToolStartNotification(event, this.runtime.cwd));

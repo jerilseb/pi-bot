@@ -16,24 +16,27 @@ export async function sendPiResponse(
     return false;
   }
 
-  const text =
-    options.source === 'cron'
-      ? `⏰ <b>Scheduled report</b>\n\n${response.text || '(empty)'}`
-      : response.text;
+  // Only a reply that must be sent gets here blank: an unattended run's is silent.
+  const body = response.text || '(no response)';
+  const text = options.source === 'cron' ? `⏰ <b>Scheduled report</b>\n\n${body}` : body;
   await sendTelegramMessage(text);
   return true;
 }
 
 /**
  * True when a response has nothing to send: a blank reply from an unattended
- * run is nothing to report, same as the sentinel — sending "(empty)" would only
- * tell the user the model said nothing.
+ * run is nothing to report, same as the sentinel — sending "(no response)" would
+ * only tell the user the model said nothing. The sentinel is looked for in the
+ * last message, so narration before it does not make it a report.
  */
 export function isSilentResponse(
   response: PiPromptResult,
   options: { suppressNoop?: boolean },
 ): boolean {
-  return Boolean(options.suppressNoop && (!response.text.trim() || isNoopResponse(response.text)));
+  return Boolean(
+    options.suppressNoop &&
+      (!response.text.trim() || isNoopResponse(response.finalText ?? response.text)),
+  );
 }
 
 // Compared against the bare sentinel name so a model that drops the __ wrapper —

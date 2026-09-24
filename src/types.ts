@@ -113,7 +113,14 @@ export interface IncomingPrompt {
 }
 
 export interface PiPromptResult {
+  /** Every assistant message of the run, a blank line apart; empty when it said nothing. */
   text: string;
+  /**
+   * The last assistant message on its own, for sentinel checks: a run that
+   * narrates and then answers with a sentinel still has nothing to report.
+   * runPrompt always sets it; without it, checks fall back to `text`.
+   */
+  finalText?: string;
 }
 
 export interface TranscriptionResult {
