@@ -6,9 +6,8 @@ import { getSelectListTheme } from '@earendil-works/pi-coding-agent';
 import {
   CombinedAutocompleteProvider,
   Container,
-  Editor,
-  Loader,
   matchesKey,
+  Spacer,
   type Terminal,
   Text,
   type TUI,
@@ -39,6 +38,7 @@ import { JobsWidget, jobSummary } from './jobs.ts';
 import { Picker } from './picker.ts';
 import { RemoteCore } from './remote-core.ts';
 import { cyan, dim, levelColor, red, yellow } from './style.ts';
+import { WorkingEditor } from './working-editor.ts';
 
 /**
  * The terminal UI: a channel of the agent core like Telegram, reached through
@@ -125,10 +125,9 @@ export class TerminalApp implements Channel {
   private readonly chat: ChatView;
   private readonly jobs: JobsWidget;
   private readonly pending = new Text('', 1, 0);
-  private readonly statusArea = new Container();
-  private readonly loader: Loader;
   private readonly inputArea = new Container();
-  private readonly editor: Editor;
+  /** Shows the chat working in its top border, whichever channel the turn came from. */
+  private readonly editor: WorkingEditor;
   private readonly footer = new Text('', 1, 0);
   private detach: (() => void) | null = null;
   private footerState: FooterState = {
@@ -154,8 +153,10 @@ export class TerminalApp implements Channel {
     this.tui = new TuiMainScreen(options.terminal);
     this.chat = new ChatView(this.tui, this.cwd);
     this.jobs = new JobsWidget(this.tui);
-    this.loader = new Loader(this.tui, cyan, dim, 'Working…');
-    this.editor = new Editor(this.tui, { borderColor: dim, selectList: getSelectListTheme() });
+    this.editor = new WorkingEditor(this.tui, {
+      borderColor: dim,
+      selectList: getSelectListTheme(),
+    });
     this.editor.onSubmit = (text) => this.submitLine(text);
     this.core = new RemoteCore({
       connect: options.connect,
@@ -166,7 +167,8 @@ export class TerminalApp implements Channel {
     this.tui.addChild(this.chat.container);
     this.tui.addChild(this.jobs);
     this.tui.addChild(this.pending);
-    this.tui.addChild(this.statusArea);
+    // A margin between the chat and the editor, or a menu in its place.
+    this.tui.addChild(new Spacer(1));
     this.tui.addChild(this.inputArea);
     this.tui.addChild(this.footer);
     this.inputArea.addChild(this.editor);
@@ -188,7 +190,7 @@ export class TerminalApp implements Channel {
   stop(): void {
     this.detach?.();
     this.detach = null;
-    this.loader.stop();
+    this.editor.setWorking(false);
     this.jobs.dispose();
     this.tui.stop();
   }
@@ -559,16 +561,8 @@ export class TerminalApp implements Channel {
   }
 
   private setBusy(busy: boolean): void {
-    if (busy === this.busy) return;
     this.busy = busy;
-    this.statusArea.clear();
-    if (busy) {
-      this.statusArea.addChild(this.loader);
-      this.loader.start();
-    } else {
-      this.loader.stop();
-    }
-    this.tui.requestRender();
+    this.editor.setWorking(busy);
   }
 
   private refreshPending(): void {

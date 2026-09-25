@@ -38,7 +38,6 @@ export class Picker extends Container {
       else options.onSelect(Number(item.value));
     };
     this.list.onCancel = () => options.onCancel();
-    this.addChild(new Spacer(1));
     this.addChild(new Text(bold(options.title), 1, 0));
     this.addChild(new Spacer(1));
     this.addChild(this.list);

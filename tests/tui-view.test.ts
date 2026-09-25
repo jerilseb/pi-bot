@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { initTheme } from '@earendil-works/pi-coding-agent';
+import { getSelectListTheme, initTheme } from '@earendil-works/pi-coding-agent';
 import { stripTerminalSequences, type Terminal, TuiMainScreen } from '@earendil-works/pi-tui';
 import type {
   BashJobSnapshot,
@@ -11,6 +11,7 @@ import type {
 import { ChatView, internalPromptSummary } from '../src/tui/chat-view.ts';
 import { footerLine } from '../src/tui/footer.ts';
 import { jobLines, jobSummary } from '../src/tui/jobs.ts';
+import { WorkingEditor } from '../src/tui/working-editor.ts';
 
 /**
  * What the terminal draws, rendered off-screen: the chat from a transcript and
@@ -21,7 +22,7 @@ initTheme();
 
 const plain = (text: string): string => stripTerminalSequences(text);
 
-function view() {
+function screen(): TuiMainScreen {
   const terminal = {
     start() {},
     stop() {},
@@ -35,7 +36,11 @@ function view() {
     clearFromCursor() {},
     clearScreen() {},
   } as unknown as Terminal;
-  const chat = new ChatView(new TuiMainScreen(terminal), '/work');
+  return new TuiMainScreen(terminal);
+}
+
+function view() {
+  const chat = new ChatView(screen(), '/work');
   const shown = (): string =>
     chat.container
       .render(80)
@@ -221,4 +226,19 @@ test("a job's lines show its progress, and its summary how it ended", () => {
     '      ↳ read (src/cron.ts)',
     '   2. ✅ Survey · succeeded · 2s',
   ]);
+});
+
+test("while the chat works, the editor's top border says so, as Pi's does", (t) => {
+  const editor = new WorkingEditor(screen(), {
+    borderColor: (text) => text,
+    selectList: getSelectListTheme(),
+  });
+  t.after(() => editor.setWorking(false));
+  const top = (width = 40): string => plain(editor.render(width)[0] ?? '');
+  assert.equal(top(), '─'.repeat(40));
+  editor.setWorking(true);
+  assert.match(top(), /^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─{27}$/);
+  assert.match(top(8), /^─[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]─{6}$/, 'too narrow for the word: the spinner alone');
+  editor.setWorking(false);
+  assert.equal(top(), '─'.repeat(40));
 });
