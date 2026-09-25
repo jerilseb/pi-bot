@@ -51,7 +51,8 @@ export class RecordingChannel implements Channel {
     return this.of('notice').map((event) => event.text.text);
   }
 
+  /** The text of every background report delivered, in order. */
   reports(): string[] {
-    return this.deliveries.map((item) => item.text.text);
+    return this.deliveries.flatMap((item) => (item.kind === 'report' ? [item.text.text] : []));
   }
 }

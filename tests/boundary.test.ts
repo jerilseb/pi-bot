@@ -6,32 +6,7 @@ import { test } from 'node:test';
 /**
  * The core knows no interface: nothing directly in src/ may import from
  * src/channels/ or src/tui/. Interfaces import the core, never the reverse.
- *
- * KNOWN_CROSSINGS lists the core modules that still reach into the Telegram
- * channel — the commands, menus, uploads, voice notes and job progress messages
- * that have not moved behind the contract yet. It may only shrink: a new
- * crossing fails the first test, and a module that stops crossing fails the
- * second until it is taken off the list.
  */
-const KNOWN_CROSSINGS = new Set([
-  'background-bash.ts',
-  'callback-menu.ts',
-  'commands.ts',
-  'elevenlabs-usage.ts',
-  'job-progress.ts',
-  'model-menu.ts',
-  'openai-usage.ts',
-  'reasoning-menu.ts',
-  'restart-flow.ts',
-  'status.ts',
-  'subagent-progress.ts',
-  'subagent-tool-call-menu.ts',
-  'telegram-menu.ts',
-  'tool-call-menu.ts',
-  'transcript-menu.ts',
-  'uploads.ts',
-  'voice.ts',
-]);
 
 const SRC_DIR = path.resolve(import.meta.dirname, '..', 'src');
 const INTERFACE_DIRS = ['channels', 'tui'].map((dir) => path.join(SRC_DIR, dir) + path.sep);
@@ -39,9 +14,8 @@ const INTERFACE_DIRS = ['channels', 'tui'].map((dir) => path.join(SRC_DIR, dir) 
 // Static imports and re-exports (`from '…'`), side-effect imports, and dynamic import('…').
 const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/g;
 
-/** The interface modules a core file imports, as paths relative to src/. */
-function interfaceImports(file: string): string[] {
-  const source = fs.readFileSync(path.join(SRC_DIR, file), 'utf8');
+/** The interface modules `source`, a file directly in src/, imports, as paths relative to src/. */
+function interfaceImports(source: string): string[] {
   const crossings: string[] = [];
   for (const [, specifier] of source.matchAll(SPECIFIER_RE)) {
     if (!specifier.startsWith('.')) continue;
@@ -59,22 +33,29 @@ const coreFiles = fs
   .map((entry) => entry.name)
   .sort();
 
-test('no core module imports an interface, beyond the known crossings', () => {
-  const unexpected = coreFiles
-    .filter((file) => !KNOWN_CROSSINGS.has(file))
-    .flatMap((file) => interfaceImports(file).map((target) => `${file} → ${target}`));
-  assert.deepEqual(unexpected, []);
+test('no core module imports an interface', () => {
+  const crossings = coreFiles.flatMap((file) =>
+    interfaceImports(fs.readFileSync(path.join(SRC_DIR, file), 'utf8')).map(
+      (target) => `${file} → ${target}`,
+    ),
+  );
+  assert.deepEqual(crossings, []);
 });
 
-test('every known crossing still crosses, so the list only shrinks', () => {
-  const fixed = [...KNOWN_CROSSINGS].filter(
-    (file) => !coreFiles.includes(file) || interfaceImports(file).length === 0,
-  );
-  assert.deepEqual(fixed, [], 'take these off KNOWN_CROSSINGS');
-});
-
-test('the scan sees imports, so a clean result means something', () => {
-  assert.ok(
-    interfaceImports('commands.ts').includes(path.join('channels', 'telegram', 'inbound.ts')),
-  );
+test('the scan finds every form of import, so a clean result means something', () => {
+  const source = [
+    "import { a } from './channels/telegram/telegram.ts';",
+    "import type { B } from './tui/client.ts';",
+    "export { c } from './channels/telegram/channel.ts';",
+    "import './channels/telegram/polling.ts';",
+    "const d = await import('./tui/screen.ts');",
+    "import { e } from './contract.ts';",
+  ].join('\n');
+  assert.deepEqual(interfaceImports(source), [
+    path.join('channels', 'telegram', 'telegram.ts'),
+    path.join('tui', 'client.ts'),
+    path.join('channels', 'telegram', 'channel.ts'),
+    path.join('channels', 'telegram', 'polling.ts'),
+    path.join('tui', 'screen.ts'),
+  ]);
 });

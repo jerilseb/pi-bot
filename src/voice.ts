@@ -1,15 +1,20 @@
+import { randomBytes } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import {
-  ALLOWED_CHAT_ID,
-  MAX_TTS_CHARS,
-  TELEGRAM_MEDIA_TIMEOUT_MS,
-  TELEGRAM_VOICE_UPLOAD_LIMIT,
-} from './config.ts';
+import { deleteLocalFile } from './attachments.ts';
+import { heldDeliveryNote } from './background-outbox.ts';
+import { MAX_TTS_CHARS, TMP_DIR } from './config.ts';
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
-import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
-import { telegram } from './channels/telegram/telegram.ts';
+import { describeReceipts, toolHost } from './tool-host.ts';
 import type { SessionKind } from './types.ts';
+
+/**
+ * send_voice_note. Speech is synthesized only when some connected interface
+ * plays voice notes; the others show the text. The audio is a temp file that
+ * is deleted once the note has gone out.
+ */
 
 const SendVoiceNoteParams = Type.Object({
   text: Type.String({
@@ -43,49 +48,48 @@ function registerSendVoiceNote(pi: ExtensionAPI, session: SessionKind): void {
     parameters: SendVoiceNoteParams,
 
     async execute(_toolCallId, params) {
+      const speechText = prepareTtsText(params.text);
+      if (!speechText) {
+        throw new Error('Voice note text is empty after cleanup.');
+      }
+      const host = toolHost();
       // Synthesized now, so a TTS failure still reaches the agent; only the
-      // upload waits when the send is held.
-      const result = await synthesizeVoiceNote(params.text);
-      const outcome = await deliverToChat(session, 'voice note', () =>
-        uploadVoiceNote(result.audio),
+      // send waits when it is held.
+      const audio = host.anyChannelCan('voice') ? await synthesizeVoiceNote(speechText) : null;
+      const result = await host.deliver(
+        session,
+        'voice note',
+        () => ({ kind: 'voice', text: speechText, ...(audio ? { path: audio.path } : {}) }),
+        () => {
+          if (audio) deleteLocalFile(audio.path);
+        },
       );
-      const characters = prepareTtsText(params.text).length;
+      const characters = speechText.length;
       return {
         content: [
           {
             type: 'text',
             text:
-              outcome === 'held'
+              result.outcome === 'held'
                 ? heldDeliveryNote(`Voice note (${characters} characters)`)
-                : `Voice note sent (${characters} characters).`,
+                : `Voice note sent (${characters} characters).${describeReceipts('voice notes', result.receipts)}`,
           },
         ],
-        details: result,
+        details: audio?.result ?? { synthesized: false },
       };
     },
   });
 }
 
-async function synthesizeVoiceNote(text: string): Promise<TtsAudioResult> {
-  const speechText = prepareTtsText(text);
-  if (!speechText) {
-    throw new Error('Voice note text is empty after cleanup.');
-  }
-
-  const result = await synthesizeTtsAudio(speechText);
-  if (result.audio.byteLength > TELEGRAM_VOICE_UPLOAD_LIMIT) {
-    throw new Error(
-      `Generated voice note is too large: ${(result.audio.byteLength / 1024 / 1024).toFixed(1)}MB`,
-    );
-  }
-  return result;
-}
-
-async function uploadVoiceNote(audio: TtsAudioResult['audio']): Promise<void> {
-  const form = new FormData();
-  form.append('chat_id', ALLOWED_CHAT_ID);
-  form.append('voice', new Blob([audio], { type: 'audio/ogg' }), 'pi-reply.ogg');
-  await telegram('sendVoice', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
+/** Synthesizes `speechText` into a temp file for the channels to send. */
+async function synthesizeVoiceNote(
+  speechText: string,
+): Promise<{ path: string; result: Omit<TtsAudioResult, 'audio'> }> {
+  const { audio, ...result } = await synthesizeTtsAudio(speechText);
+  fs.mkdirSync(TMP_DIR, { recursive: true });
+  const file = path.join(TMP_DIR, `voice-note-${randomBytes(4).toString('hex')}.ogg`);
+  fs.writeFileSync(file, Buffer.from(audio));
+  return { path: file, result };
 }
 
 function prepareTtsText(text: string): string {

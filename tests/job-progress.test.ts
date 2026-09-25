@@ -8,7 +8,7 @@ import {
   type ProgressTransport,
   parseJobStopCallback,
   startProgressMessage,
-} from '../src/job-progress.ts';
+} from '../src/channels/telegram/job-progress.ts';
 
 /**
  * The progress message is best-effort UI kept current by the bot, so what

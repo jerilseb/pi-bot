@@ -1,14 +1,7 @@
-import { escapeTelegramHtml } from './telegram-html.ts';
-
 /**
- * Small presentational helpers for Telegram message bodies, shared by the usage
- * reports. Escaping, sanitizing, and splitting live in telegram-html.ts;
- * sending lives in telegram.ts.
+ * Small presentational helpers for the bot's own messages, shared by /status
+ * and the usage reports. Plain text, so they fit any message format.
  */
-
-export function telegramCode(value: string): string {
-  return `<code>${escapeTelegramHtml(value)}</code>`;
-}
 
 export function titleCase(value: string | null | undefined): string {
   if (!value) return '—';

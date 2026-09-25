@@ -1,6 +1,6 @@
 import type { CallbackMenu } from './callback-menu.ts';
-import { setSubagentToolCalls, subagentToolCallsEnabled } from './config.ts';
-import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
+import { setSubagentToolCalls, subagentToolCallsEnabled } from '../../config.ts';
+import type { InlineKeyboardButton } from './telegram.ts';
 
 const SUBAGENT_TOOL_CALL_CALLBACK_PREFIX = 'subagenttoolcalls:';
 

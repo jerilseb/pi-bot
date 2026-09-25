@@ -3,8 +3,8 @@ import type { SessionKind } from './types.ts';
 import { errorMessage } from './util.ts';
 
 /**
- * Holds what background runs send to the Telegram chat until the chat has been
- * left alone for a while.
+ * Holds what background runs send the user until the chat has been left alone
+ * for a while, and while no channel is attached to send it to.
  *
  * Scheduled tasks and heartbeat runs no longer wait for the chat, so their
  * reports can be ready while the user is mid-conversation. A report arriving
@@ -26,6 +26,8 @@ export type DeliveryOutcome = 'delivered' | 'held';
 export interface BackgroundOutboxOptions {
   /** True while the chat session is processing a prompt or has one queued. */
   isChatBusy: () => boolean;
+  /** False while no channel is attached to deliver to; held deliveries wait. Defaults to true. */
+  hasAudience?: () => boolean;
   cooldownMs?: number;
   /** How often a held delivery rechecks while the chat is busy. */
   pollMs?: number;
@@ -96,20 +98,26 @@ export class BackgroundOutbox {
   private canDeliver(): boolean {
     return (
       !this.stopped &&
+      this.hasAudience() &&
       !this.options.isChatBusy() &&
       this.now() - this.lastChatActivityAt >= this.cooldownMs
     );
   }
 
+  private hasAudience(): boolean {
+    return this.options.hasAudience?.() ?? true;
+  }
+
   private schedule(): void {
     if (this.stopped || this.timer || this.pending.length === 0) return;
     const untilCooldown = this.lastChatActivityAt + this.cooldownMs - this.now();
-    // Busy has no end time to wait for, so poll; idle waits out the cooldown.
-    // Either way a recheck decides, so activity after scheduling only means an
-    // early wake-up.
-    const delay = this.options.isChatBusy()
-      ? this.pollMs
-      : Math.max(0, Math.min(untilCooldown, this.pollMs));
+    // Busy, or nobody attached, has no end time to wait for, so poll; idle
+    // waits out the cooldown. Either way a recheck decides, so activity after
+    // scheduling only means an early wake-up.
+    const delay =
+      this.options.isChatBusy() || !this.hasAudience()
+        ? this.pollMs
+        : Math.max(0, Math.min(untilCooldown, this.pollMs));
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.flush();
@@ -151,9 +159,9 @@ export function backgroundOutbox(): BackgroundOutbox | null {
 }
 
 /**
- * The one door from a Pi session to the Telegram chat. The chat session sends
- * directly; the background session goes through the outbox. Without an outbox
- * (tests, the smoke check) everything is sent directly.
+ * The one door from a Pi session to the user. The chat session sends directly;
+ * the background session goes through the outbox. Without an outbox (tests,
+ * the smoke check) everything is sent directly.
  */
 export async function deliverToChat(
   session: SessionKind,

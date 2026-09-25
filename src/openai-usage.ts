@@ -1,11 +1,6 @@
 import { USAGE_FETCH_TIMEOUT_MS } from './config.ts';
-import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
-import {
-  telegramCode as code,
-  formatPercent,
-  titleCase,
-  usageBar,
-} from './channels/telegram/telegram-format.ts';
+import { formatPercent, titleCase, usageBar } from './format.ts';
+import { escapeMarkdown, markdownCode as code } from './markdown.ts';
 import { errorMessage, isRecord } from './util.ts';
 
 const OPENAI_CODEX_PROVIDER = 'openai-codex';
@@ -253,7 +248,7 @@ export async function fetchOpenAIUsage(
 
 function windowReport(window: UsageWindow): string[] {
   return [
-    `<b>${escapeTelegramHtml(titleCase(window.name))} Window</b>`,
+    `**${escapeMarkdown(titleCase(window.name))} Window**`,
     `• Used: ${code(formatPercent(window.usedPercent))} ${code(usageBar(window.usedPercent))}`,
     `• Window: ${code(formatWindow(window.windowMinutes))}`,
     `• Resets in: ${code(formatSecondsDuration(window.resetAfterSeconds))}`,
@@ -261,11 +256,11 @@ function windowReport(window: UsageWindow): string[] {
   ];
 }
 
-export function buildOpenAIUsageTelegramHtml(usage: OpenAIUsage, warnings: string[]): string {
+export function buildOpenAIUsageMarkdown(usage: OpenAIUsage, warnings: string[]): string {
   const lines = [
-    '<b>OpenAI Codex Usage</b>',
+    '**OpenAI Codex Usage**',
     '',
-    '<b>Account</b>',
+    '**Account**',
     `• Plan: ${code(titleCase(usage.planType))}`,
     `• Limit: ${code(titleCase(usage.activeLimit))}`,
     `• Credits: ${code(formatCredits(usage))}`,
@@ -284,9 +279,9 @@ export function buildOpenAIUsageTelegramHtml(usage: OpenAIUsage, warnings: strin
   }
 
   if (warnings.length > 0) {
-    lines.push('', '<b>Warnings</b>');
+    lines.push('', '**Warnings**');
     for (const warning of warnings) {
-      lines.push(`• ${escapeTelegramHtml(warning)}`);
+      lines.push(`• ${escapeMarkdown(warning)}`);
     }
   }
 

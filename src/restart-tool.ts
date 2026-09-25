@@ -2,7 +2,9 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { RESTART_TOOL_DELAY_MS } from './config.ts';
 import { addPostRestartTask, formatPostRestartTask } from './post-restart-tasks.ts';
+import { escapeMarkdown } from './markdown.ts';
 import { runRestartGate } from './restart-flow.ts';
+import { toolHost } from './tool-host.ts';
 import { textResult } from './tool-result.ts';
 import { errorMessage } from './util.ts';
 
@@ -54,17 +56,21 @@ export function telegramRestartToolExtension(
 
         // The follow-up task is queued inside the gate so it is only persisted
         // once the checks pass, never on a blocked restart.
-        const passed = await runRestartGate(() => {
-          if (!afterRestartPrompt) return [];
+        const host = toolHost();
+        const passed = await runRestartGate(
+          (text) => host.notice(text),
+          () => {
+            if (!afterRestartPrompt) return [];
 
-          const task = addPostRestartTask({
-            prompt: afterRestartPrompt,
-            ...(params.after_restart_title?.trim()
-              ? { title: params.after_restart_title.trim() }
-              : {}),
-          });
-          return [`Queued post-restart task: ${formatPostRestartTask(task)}`];
-        });
+            const task = addPostRestartTask({
+              prompt: afterRestartPrompt,
+              ...(params.after_restart_title?.trim()
+                ? { title: params.after_restart_title.trim() }
+                : {}),
+            });
+            return [escapeMarkdown(`Queued post-restart task: ${formatPostRestartTask(task)}`)];
+          },
+        );
 
         if (!passed) {
           restartRequested = false;

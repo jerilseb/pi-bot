@@ -17,8 +17,13 @@ import {
   SUBAGENT_STOP_WAIT_MS,
   SUBAGENTS_ENABLED,
 } from './config.ts';
+import type {
+  JobStopOutcome,
+  SubagentJobSnapshot,
+  SubagentTaskSnapshot,
+  SubagentTaskStatus,
+} from './contract.ts';
 import { requireCurrentModel, resolveRequestedModel } from './extension-models.ts';
-import type { JobStopOutcome } from './job-progress.ts';
 import {
   captureJobOrigin,
   type Job,
@@ -26,12 +31,6 @@ import {
   JobRegistry,
   jobReportPrompt,
 } from './job-registry.ts';
-import {
-  formatSubagentProgress,
-  type SubagentProgressTask,
-  TOOL_CALLS_SHOWN,
-  type SubagentTaskStatus,
-} from './subagent-progress.ts';
 import { readSubagentSystemPrompt } from './system-prompt.ts';
 import { describeToolCall } from './tool-call-description.ts';
 import { textResult } from './tool-result.ts';
@@ -50,10 +49,11 @@ import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
  * bash choreography: wait a yield window, return results inline if every task
  * finished, otherwise return a job ID and deliver an internal report later.
  *
- * A job the chat started has a live progress message (src/subagent-progress.ts)
- * with a Stop button per unfinished task. A stop from there aborts that worker
- * alone, and the job's report tells the agent the user stopped it; the agent's
- * own subagent_stop ends the whole job and sends no report.
+ * A job the chat started shows live progress in every channel, with a Stop per
+ * unfinished task (Telegram renders it in src/channels/telegram/
+ * subagent-progress.ts). A user's stop aborts that worker alone, and the job's
+ * report tells the agent the user stopped it; the agent's own subagent_stop
+ * ends the whole job and sends no report.
  *
  * This module owns the policy — limits, transcript naming and metadata, the
  * report wording — and is handed the one thing it cannot do itself: running a
@@ -101,7 +101,10 @@ export type RunWorker = (request: WorkerRunRequest) => Promise<WorkerRunResult>;
 
 type SubagentTerminalStatus = 'succeeded' | 'failed' | 'stopped';
 
-interface SubagentTask extends SubagentProgressTask {
+/** How many of a worker's recent tool calls its task keeps, for the progress it shows. */
+const TOOL_CALLS_KEPT = 8;
+
+interface SubagentTask extends SubagentTaskSnapshot {
   cwd: string;
   sessionId: string;
   sessionFile: string | null;
@@ -153,7 +156,7 @@ const registry = new JobRegistry<SubagentTerminalStatus, SubagentJob, SubagentRe
   cancelledStatus: 'stopped',
   signalCancel: (job) => job.abort.abort(),
   describeStatus,
-  renderProgress: (job) => formatSubagentProgress(job, { toolCalls: showToolCalls() }),
+  snapshot: subagentJobSnapshot,
   buildReport: (job) => ({
     jobId: job.id,
     origin: job.origin,
@@ -167,15 +170,31 @@ export function setSubagentReportHandler(handler: (report: SubagentReport) => Pr
   registry.setReportHandler(handler);
 }
 
-/** Whether progress messages show each worker's tool calls; off until main.ts wires the setting. */
-let showToolCalls: () => boolean = () => false;
-
-/**
- * Wires the `subagentToolCalls` setting into the progress message, read at every
- * render. Called from main.ts, so tests never read files/settings.json.
- */
-export function setSubagentToolCallsSetting(read: () => boolean): void {
-  showToolCalls = read;
+/** The job as channels show it: plain data, copied, so it can be sent anywhere. */
+function subagentJobSnapshot(job: SubagentJob): SubagentJobSnapshot {
+  return {
+    kind: 'subagent',
+    id: job.id,
+    status: job.status,
+    startedAt: job.startedAt,
+    endedAt: job.endedAt,
+    tasks: job.tasks.map(
+      (task): SubagentTaskSnapshot => ({
+        index: task.index,
+        task: task.task,
+        description: task.description,
+        model: task.model,
+        status: task.status,
+        stopRequested: task.stopRequested,
+        toolCalls: [...task.toolCalls],
+        toolUses: task.toolUses,
+        result: task.result,
+        error: task.error,
+        startedAt: task.startedAt,
+        endedAt: task.endedAt,
+      }),
+    ),
+  };
 }
 
 /** Stops every running worker regardless of origin. Called from main.ts on shutdown. */
@@ -184,9 +203,9 @@ export async function stopAllSubagents(): Promise<void> {
 }
 
 /**
- * A task's Stop button on the job's progress message. Aborts that worker alone
- * (a queued task never starts) and returns at once: the polling loop waits for
- * the tap's answer, and the rest of the job carries on and reports as usual.
+ * The user's Stop for one task, from any channel. Aborts that worker alone (a
+ * queued task never starts) and returns at once: the channel waits for the
+ * answer, and the rest of the job carries on and reports as usual.
  * taskNumber is 1-based, as the rows show it.
  */
 export function stopSubagentTask(jobId: string, taskNumber: number): JobStopOutcome {
@@ -686,7 +705,7 @@ async function runTask(
       },
       onToolStart: ({ toolName, args }) => {
         task.toolCalls.push(describeToolCall(toolName, args));
-        if (task.toolCalls.length > TOOL_CALLS_SHOWN) task.toolCalls.shift();
+        if (task.toolCalls.length > TOOL_CALLS_KEPT) task.toolCalls.shift();
         task.toolUses++;
         registry.refreshProgress(job);
       },

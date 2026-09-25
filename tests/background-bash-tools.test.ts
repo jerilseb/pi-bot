@@ -11,8 +11,13 @@ import {
   type BackgroundBashReport,
   setBackgroundBashReportHandler,
   stopAllBackgroundSessions,
+  stopBackgroundBashByUser,
 } from '../src/background-bash.ts';
-import { jobStopCallbackAction } from '../src/job-stop-action.ts';
+import { jobStopCallbackAction } from '../src/channels/telegram/job-stop-action.ts';
+import { TelegramJobProgress } from '../src/channels/telegram/jobs.ts';
+import { setJobEventSink } from '../src/job-registry.ts';
+
+const stopAction = jobStopCallbackAction((jobId) => stopBackgroundBashByUser(jobId));
 
 interface TelegramCall {
   method: string;
@@ -36,7 +41,11 @@ function setup(t: TestContext) {
   setBackgroundBashReportHandler(async (report) => {
     reports.push(report);
   });
-  // Chat jobs keep a progress message; capture it instead of sending.
+  // Chat jobs announce their progress; Telegram's renderer turns it into a
+  // message, captured here instead of sent.
+  const progress = new TelegramJobProgress({ subagentToolCalls: () => false });
+  setJobEventSink((event) => void progress.onJob(event));
+  t.after(() => setJobEventSink(null));
   const telegram: TelegramCall[] = [];
   t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
     const payload = JSON.parse(String(init?.body ?? '{}')) as {
@@ -69,7 +78,7 @@ function setup(t: TestContext) {
     const data = telegram.find((c) => c.method === 'sendMessage')?.keyboard?.[0]?.[0]
       ?.callback_data;
     assert.ok(data, 'the progress message has a Stop button');
-    return jobStopCallbackAction.answer(data.slice(jobStopCallbackAction.prefix.length));
+    return stopAction.answer(data.slice(stopAction.prefix.length));
   };
   return { call, start, reports, telegram, tapStop };
 }

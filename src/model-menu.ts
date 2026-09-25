@@ -1,26 +1,24 @@
-import type { CallbackMenu } from './callback-menu.ts';
 import type { ChatSession } from './chat-session.ts';
+import type { ChoiceRegistry, ChoiceSpec } from './choices.ts';
 import { ALLOWED_MODELS } from './config.ts';
-import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
+import type { ChannelRef } from './contract.ts';
 
-const MODEL_CALLBACK_PREFIX = 'model:';
+/**
+ * The /models menu. Its options index into ALLOWED_MODELS and its ID is
+ * stable, so a copy from before a restart still switches the model.
+ */
+const MODEL_CHOICE_ID = 'models';
 
-export function buildModelInlineKeyboard(): InlineKeyboardButton[][] {
-  return [
-    ...ALLOWED_MODELS.map((model, index) => [
-      { text: model, callback_data: `${MODEL_CALLBACK_PREFIX}${index}` },
-    ]),
-    [{ text: 'Cancel', callback_data: `${MODEL_CALLBACK_PREFIX}cancel` }],
-  ];
-}
-
-/** The /models keyboard. Buttons carry an index into ALLOWED_MODELS. */
-export function modelCallbackMenu(session: ChatSession): CallbackMenu {
+export function modelChoice(session: ChatSession, audience: 'all' | ChannelRef): ChoiceSpec {
   return {
-    prefix: MODEL_CALLBACK_PREFIX,
+    id: MODEL_CHOICE_ID,
+    text: [`Current chat model: ${session.get().pi.modelName}`, 'Choose a chat model:'].join('\n'),
+    options: ALLOWED_MODELS.map((label) => ({ label })),
+    cancellable: true,
     cancelText: 'Cancelled model switch.',
     unknownOptionText: '❌ That model option is no longer available. Use /models again.',
     failureToast: 'Model switch failed.',
+    audience,
     refuse: () =>
       session.isBusy()
         ? {
@@ -28,9 +26,8 @@ export function modelCallbackMenu(session: ChatSession): CallbackMenu {
             text: '⚠️ Model switch cancelled because the chat is busy. Try /models again when idle.',
           }
         : null,
-    async select(value) {
-      const modelIndex = Number(value);
-      const modelName = Number.isInteger(modelIndex) ? ALLOWED_MODELS[modelIndex] : undefined;
+    async select(index) {
+      const modelName = ALLOWED_MODELS[index];
       if (!modelName) return null;
 
       const chat = session.get();
@@ -42,4 +39,8 @@ export function modelCallbackMenu(session: ChatSession): CallbackMenu {
       };
     },
   };
+}
+
+export function defineModelChoice(registry: ChoiceRegistry, session: ChatSession): void {
+  registry.define(MODEL_CHOICE_ID, (_param, by) => modelChoice(session, by));
 }

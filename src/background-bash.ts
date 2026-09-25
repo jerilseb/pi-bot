@@ -6,6 +6,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { buildAgentEnvelope } from './agent-envelope.ts';
+import type { BashJobSnapshot, JobStopOutcome } from './contract.ts';
 import {
   BACKGROUND_JOB_END_TURN_AFTER_MS,
   BACKGROUND_BASH_COMPLETED_TTL_MS,
@@ -21,7 +22,6 @@ import {
   BACKGROUND_WAIT_CHECK_MS,
   BACKGROUND_WAIT_MAX_MS,
 } from './config.ts';
-import { type JobStopOutcome, jobStopCallbackData, type ProgressContent } from './job-progress.ts';
 import {
   captureJobOrigin,
   type Job,
@@ -31,7 +31,6 @@ import {
   type WaitOutcome,
 } from './job-registry.ts';
 import { BoundedOutputBuffer, type OutputSnapshot } from './output-buffer.ts';
-import { clipEscapedTelegramHtml, escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
 import { textResult } from './tool-result.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
@@ -105,7 +104,7 @@ const registry = new JobRegistry<
   cancelledStatus: 'stopped',
   signalCancel: (session) => session.abort.abort(),
   describeStatus,
-  renderProgress: (session) => formatBackgroundBashProgress(session),
+  snapshot: bashJobSnapshot,
   buildReport: (session) => ({
     sessionId: session.id,
     command: session.command,
@@ -405,11 +404,11 @@ export async function stopAllBackgroundSessions(): Promise<void> {
 }
 
 /**
- * The Stop button on a command's progress message. Kills the process tree and
- * returns at once: the polling loop waits for the tap's answer, and the session
- * settles, then reports that the user stopped it, on its own.
+ * The user's Stop on a command's progress message, from any channel. Kills the
+ * process tree and returns at once: the channel waits for the answer, and the
+ * session settles, then reports that the user stopped it, on its own.
  */
-export function stopBackgroundBashFromTelegram(sessionId: string): JobStopOutcome {
+export function stopBackgroundBashByUser(sessionId: string): JobStopOutcome {
   const session = registry.get(sessionId);
   if (!session || session.status !== 'running') return 'not-running';
   if (session.stopRequested) return 'already-stopping';
@@ -550,86 +549,29 @@ function describeReportOutcome(session: BackgroundBashSession): string {
   return `${describeStatus(session)} after ${runtime}`;
 }
 
-/**
- * Display widths in the progress message. The whole message stays well under
- * Telegram's 4096-char limit once escaped, so it is never split: an edit only
- * reaches one message, and a split would leave the Stop button on a piece that
- * is never updated. The command gets whatever room the other lines leave.
- */
-const PROGRESS_MESSAGE_MAX_CHARS = 3_900;
-const PROGRESS_OUTPUT_MAX_CHARS = 120;
-const PROGRESS_COMMAND_WRAPPER = ['<blockquote expandable><code>', '</code></blockquote>'];
-
-/**
- * The progress message of a command the chat started, as Telegram HTML: status
- * and runtime, the command in an expandable blockquote, and its latest line of
- * output, with a Stop button while it runs. The command keeps its line breaks,
- * so a multi-line script reads as written once expanded, while the folded quote
- * keeps the message short. Rendered for the final state too, so the same
- * message ends on the outcome.
- */
-export function formatBackgroundBashProgress(
-  session: Pick<
-    BackgroundBashSession,
-    | 'id'
-    | 'command'
-    | 'status'
-    | 'exitCode'
-    | 'statusDetail'
-    | 'startedAt'
-    | 'endedAt'
-    | 'stopRequested'
-  > & { output: Pick<BoundedOutputBuffer, 'lastLine'> },
-): ProgressContent {
-  const icon =
-    session.status === 'running'
-      ? '⏳'
-      : session.status === 'exited' && session.exitCode === 0
-        ? '✅'
-        : session.status === 'stopped'
-          ? '⏹'
-          : '❌';
-  const runtime = formatDuration((session.endedAt ?? Date.now()) - session.startedAt);
-  const header = `${icon} <b>Background bash</b> · ${escapeTelegramHtml(progressStatus(session))} · ${runtime}`;
-  const lastLine = session.output.lastLine();
-  const outputLine = lastLine
-    ? `<i>${escapeTelegramHtml(oneLineLabel(lastLine, PROGRESS_OUTPUT_MAX_CHARS))}</i>`
-    : null;
-
-  const [open, close] = PROGRESS_COMMAND_WRAPPER;
-  const others = [header, outputLine].filter((line) => line !== null);
-  const room =
-    PROGRESS_MESSAGE_MAX_CHARS -
-    others.reduce((total, line) => total + line.length + 1, 0) -
-    open.length -
-    close.length;
-  const command = `${open}${clipEscapedTelegramHtml(progressCommand(session.command), room)}${close}`;
-
-  const stoppable = session.status === 'running' && !session.stopRequested;
+/** The session as channels show it: plain data, copied, so it can be sent anywhere. */
+function bashJobSnapshot(session: BackgroundBashSession): BashJobSnapshot {
   return {
-    html: [header, command, ...(outputLine ? [outputLine] : [])].join('\n'),
-    keyboard: stoppable
-      ? [[{ text: '⏹ Stop', callback_data: jobStopCallbackData(session.id) }]]
-      : [],
+    kind: 'bash',
+    id: session.id,
+    command: session.command,
+    status: session.status,
+    statusText: bashProgressStatus(session),
+    exitCode: session.exitCode,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    stopRequested: session.stopRequested,
+    lastLine: session.output.lastLine() || null,
   };
 }
 
 /** The status the user sees: their own stop in their words, otherwise the agent's. */
-function progressStatus(
+export function bashProgressStatus(
   session: Pick<BackgroundBashSession, 'status' | 'exitCode' | 'statusDetail' | 'stopRequested'>,
 ): string {
   if (session.status === 'running' && session.stopRequested) return 'stopping…';
   if (session.status === 'stopped' && session.stopRequested) return 'stopped by you';
   return describeStatus(session);
-}
-
-/** The command as shown in the progress message: line breaks kept, trailing space dropped. */
-function progressCommand(command: string): string {
-  return command
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .join('\n')
-    .trim();
 }
 
 function stoppedByUser(session: Pick<BackgroundBashSession, 'status' | 'stopRequested'>): boolean {

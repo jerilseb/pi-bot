@@ -2,20 +2,20 @@ import {
   JOB_PROGRESS_GLOBAL_MIN_GAP_MS,
   JOB_PROGRESS_MIN_EDIT_MS,
   JOB_PROGRESS_UPDATE_MS,
-} from './config.ts';
+} from '../../config.ts';
+import { errorMessage } from '../../util.ts';
 import {
   editTelegramMessageHtml,
   type InlineKeyboardButton,
   sendTelegramHtmlMessage,
-} from './channels/telegram/telegram.ts';
-import { errorMessage } from './util.ts';
+} from './telegram.ts';
 
 /**
  * A live Telegram message for one job started from the chat, kept current by
  * the bot itself. The user sees how a long command or sub-agent job is going
  * without the agent polling it: no model call is involved, so a refresh costs
  * one Telegram edit and no context. Its Stop buttons are handled in
- * src/job-stop-action.ts.
+ * job-stop-action.ts.
  *
  * - Every Telegram call runs through one chain, so an edit can never overtake
  *   the send it depends on, and the final state is always the last written.
@@ -230,6 +230,3 @@ export function parseJobStopCallback(value: string): { jobId: string; taskNumber
   if (!match?.[1]) return null;
   return { jobId: match[1], ...(match[2] ? { taskNumber: Number(match[2]) } : {}) };
 }
-
-/** How a Stop tap went, answered at once; the job ends on its own afterwards. */
-export type JobStopOutcome = 'stopping' | 'already-stopping' | 'not-running';

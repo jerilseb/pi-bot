@@ -7,14 +7,17 @@ import type {
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import { SUBAGENT_MAX_CONCURRENT_WORKERS, SUBAGENT_MAX_TASKS_PER_JOB } from '../src/config.ts';
-import { jobStopCallbackAction } from '../src/job-stop-action.ts';
+import { createWriteGate } from '../src/channels/telegram/job-progress.ts';
+import { jobStopCallbackAction } from '../src/channels/telegram/job-stop-action.ts';
+import { TelegramJobProgress } from '../src/channels/telegram/jobs.ts';
+import { setJobEventSink } from '../src/job-registry.ts';
 import {
   interruptedSubagentsNote,
   runningSubagentOriginFiles,
   type RunWorker,
   setSubagentReportHandler,
-  setSubagentToolCallsSetting,
   stopAllSubagents,
+  stopSubagentTask,
   SUBAGENT_SESSION_ENTRY_TYPE,
   type SubagentReport,
   subagentExtension,
@@ -107,7 +110,16 @@ function setup(t: TestContext, origin: SessionKind = 'chat') {
   setSubagentReportHandler(async (report) => {
     reports.push(report);
   });
-  // Chat jobs keep a progress message; capture it instead of sending.
+  // Chat jobs announce their progress; Telegram's renderer turns it into a
+  // message, captured here instead of sent.
+  let toolCalls = false;
+  const progress = new TelegramJobProgress({
+    subagentToolCalls: () => toolCalls,
+    // Fast, so a test sees each change without waiting out Telegram's pacing.
+    progressOptions: { minIntervalMs: 1, heartbeatMs: 60_000, gate: createWriteGate(0) },
+  });
+  setJobEventSink((event) => void progress.onJob(event));
+  t.after(() => setJobEventSink(null));
   const telegram: TelegramCall[] = [];
   t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
     const payload = JSON.parse(String(init?.body ?? '{}')) as {
@@ -130,7 +142,10 @@ function setup(t: TestContext, origin: SessionKind = 'chat') {
   };
   const text = async (result: Promise<{ content: Array<{ type: string; text?: string }> }>) =>
     (await result).content.map((c) => c.text ?? '').join('\n');
-  return { worker, reports, call, text, tools, telegram };
+  const showToolCalls = (on: boolean) => {
+    toolCalls = on;
+  };
+  return { worker, reports, call, text, tools, telegram, showToolCalls };
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -425,9 +440,13 @@ test('a backgrounded job ends the turn: there is no tool to wait for it', (t) =>
   assert.doesNotMatch(everything, /subagent_wait/);
 });
 
+const stopAction = jobStopCallbackAction((jobId, task) =>
+  task === undefined ? 'not-running' : stopSubagentTask(jobId, task),
+);
+
 /** Taps the Stop button for `taskNumber` on the job's progress message, as Telegram would. */
 function tapStop(jobId: string, taskNumber: number): string {
-  return jobStopCallbackAction.answer(`${jobId}:${taskNumber}`);
+  return stopAction.answer(`${jobId}:${taskNumber}`);
 }
 
 test('a stop from Telegram ends that task alone, and the report says the user stopped it', async (t) => {
@@ -454,11 +473,15 @@ test('a stop from Telegram ends that task alone, and the report says the user st
   assert.equal(f.worker.requests[0]?.signal.aborted, false, 'the other workers carry on');
   assert.equal(f.worker.requests[2]?.signal.aborted, false);
 
-  // The tap refreshes the message at once: the row shows the stop (the fake
-  // worker ends the moment it is aborted), its button is gone, and the others
-  // show what their workers are doing.
-  await until(() => f.telegram.some((call) => call.method === 'editMessageText'));
-  const tapped = f.telegram.find((call) => call.method === 'editMessageText');
+  // The tap refreshes the message at once, then again as the worker ends (the
+  // fake one ends the moment it is aborted): the row shows the stop, its
+  // button is gone, and the others show what their workers are doing.
+  const stoppedEdit = () =>
+    f.telegram.find(
+      (call) => call.method === 'editMessageText' && call.text.includes('stopped by you'),
+    );
+  await until(() => stoppedEdit() !== undefined);
+  const tapped = stoppedEdit();
   assert.match(
     tapped?.text ?? '',
     /\n⏳ 1\. Map the cron scheduler · 2 tools\n⏹ 2\. Survey every module · stopped by you\n⏳ 3\. Check the tests\.$/,
@@ -569,7 +592,7 @@ test('a stale Stop button says the job is no longer running', async (t) => {
   f.worker.finish(0, 'done');
   await until(() => f.reports.length === 1);
   assert.equal(tapStop(jobId, 1), 'That job is no longer running.');
-  assert.equal(jobStopCallbackAction.answer('nonsense'), 'Unknown action.');
+  assert.equal(stopAction.answer('nonsense'), 'Unknown action.');
 });
 
 test('the task description names the worker transcript', async (t) => {
@@ -586,8 +609,7 @@ test('the task description names the worker transcript', async (t) => {
 
 test('with the tool call setting on, the message shows what each worker is doing, then its result', async (t) => {
   const f = setup(t);
-  setSubagentToolCallsSetting(() => true);
-  t.after(() => setSubagentToolCallsSetting(() => false));
+  f.showToolCalls(true);
   const jobId = jobIdIn(
     await f.text(
       f.call('subagent_run', {
@@ -605,8 +627,12 @@ test('with the tool call setting on, the message shows what each worker is doing
 
   // A tap refreshes the message at once, which shows the tool calls gathered so far.
   tapStop(jobId, 2);
-  await until(() => f.telegram.some((call) => call.method === 'editMessageText'));
-  const tapped = f.telegram.find((call) => call.method === 'editMessageText');
+  const stoppedEdit = () =>
+    f.telegram.find(
+      (call) => call.method === 'editMessageText' && call.text.includes('stopped by you'),
+    );
+  await until(() => stoppedEdit() !== undefined);
+  const tapped = stoppedEdit();
   assert.match(
     tapped?.text ?? '',
     /\n⏳ 1\. Map cron · 2 tools\n<blockquote expandable>grep \(schedule\)\nread \(src\/cron\.ts\)<\/blockquote>\n⏹ 2\. Survey tests · stopped by you$/,

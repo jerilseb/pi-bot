@@ -5,9 +5,11 @@ import {
   type BackgroundBashReport,
   backgroundBashExtension,
   backgroundBashReportPrompt,
-  formatBackgroundBashProgress,
+  bashProgressStatus,
   formatReportOutput,
 } from '../src/background-bash.ts';
+import { formatBashProgress } from '../src/channels/telegram/bash-progress.ts';
+import type { BashJobSnapshot } from '../src/contract.ts';
 import { BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS } from '../src/config.ts';
 import type { OutputSnapshot } from '../src/output-buffer.ts';
 
@@ -126,22 +128,35 @@ test('a JSON result field is reported on its own', () => {
   assert.equal(formatReportOutput(snapshot(content), 'bg_1'), 'the answer');
 });
 
-function progress(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
-  return formatBackgroundBashProgress({
+/**
+ * A running session's progress message, as Telegram renders the snapshot the
+ * core makes of it: the status text is the core's, the layout Telegram's.
+ */
+function progress(
+  overrides: Partial<Omit<BashJobSnapshot, 'kind' | 'statusText'>> & {
+    statusDetail?: string | null;
+  },
+) {
+  const { statusDetail = null, ...fields } = overrides;
+  const session = {
     id: 'bg_abc123',
     command: 'uv pip install\n  "vllm==0.16.0"',
-    status: 'running',
+    status: 'running' as BashJobSnapshot['status'],
     exitCode: null,
-    statusDetail: null,
     startedAt: Date.now() - 372_000,
     endedAt: null,
     stopRequested: false,
-    output: { lastLine: () => 'Downloading vllm (484.8MiB)' },
-    ...overrides,
+    lastLine: 'Downloading vllm (484.8MiB)',
+    ...fields,
+  };
+  return formatBashProgress({
+    kind: 'bash',
+    ...session,
+    statusText: bashProgressStatus({ ...session, statusDetail }),
   });
 }
 
-function progressSession(overrides: Partial<Parameters<typeof formatBackgroundBashProgress>[0]>) {
+function progressSession(overrides: Parameters<typeof progress>[0]) {
   return progress(overrides).html;
 }
 
@@ -168,7 +183,7 @@ test('the command in the progress message is escaped, and capped after escaping'
   // would let this one split the message and strand its Stop button.
   const angled = progressSession({
     command: '<'.repeat(3_000),
-    output: { lastLine: () => '&'.repeat(500) },
+    lastLine: '&'.repeat(500),
   });
   assert.ok(angled.length <= 3_900, `${angled.length} chars`);
   assert.match(angled, /(&lt;)+…<\/code><\/blockquote>/, 'no entity is cut in half');
@@ -208,9 +223,9 @@ test('the progress message ends on the outcome', () => {
 });
 
 test('output in the progress message is escaped, and absent until there is some', () => {
-  const html = progressSession({ output: { lastLine: () => '<b>1 < 2</b> & more' } });
+  const html = progressSession({ lastLine: '<b>1 < 2</b> & more' });
   assert.match(html, /<i>&lt;b&gt;1 &lt; 2&lt;\/b&gt; &amp; more<\/i>$/);
-  assert.doesNotMatch(progressSession({ output: { lastLine: () => '' } }), /<i>/);
+  assert.doesNotMatch(progressSession({ lastLine: null }), /<i>/);
 });
 
 test('a report of a command the user stopped says so, and not to start it again', () => {

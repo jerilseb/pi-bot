@@ -8,13 +8,29 @@ import {
   renderStatus,
   type StatusSnapshot,
 } from '../src/status.ts';
+import { markdownToTelegramHtml } from '../src/channels/telegram/markdown.ts';
 import { sanitizeTelegramHtml } from '../src/channels/telegram/telegram-html.ts';
 
 /**
- * /status is one Telegram HTML message. Telegram rejects the whole message on
- * malformed markup, so every shape the snapshot can take must render balanced,
- * within one message, and with user-controlled values escaped.
+ * /status is one Markdown message, which Telegram shows as one HTML message.
+ * Telegram rejects the whole message on malformed markup, so every shape the
+ * snapshot can take must convert to balanced HTML within one message, with the
+ * values the bot did not write escaped.
  */
+
+const TELEGRAM_SETTINGS = (subagentToolCalls: boolean) => ({
+  title: 'Telegram',
+  settings: [
+    { label: 'Sub-agent tool calls', on: subagentToolCalls },
+    { label: 'Voice transcripts', on: true },
+    { label: '🛠 Tool calls', detail: 'Collapsed' },
+  ],
+});
+
+/** The status as Telegram shows it. */
+function html(shape: StatusSnapshot): string {
+  return markdownToTelegramHtml(renderStatus(shape));
+}
 
 function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
   return {
@@ -35,10 +51,8 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       heartbeat: { on: false, detail: 'off' },
       cron: { on: true, detail: '2 of 3 active' },
       subagents: false,
-      toolCalls: 'Collapsed',
-      transcripts: true,
-      subagentToolCalls: false,
     },
+    channels: [TELEGRAM_SETTINGS(false)],
     ...overrides,
   };
 }
@@ -80,46 +94,50 @@ const SHAPES: Array<[string, StatusSnapshot]> = [
 describe('renderStatus', () => {
   for (const [name, shape] of SHAPES) {
     test(`renders balanced HTML within one message: ${name}`, () => {
-      const html = renderStatus(shape);
-      assert.deepEqual(tagStack(html), []);
-      assert.ok(html.length <= TELEGRAM_MAX_MESSAGE);
-      assert.equal(sanitizeTelegramHtml(html), html);
+      const shown = html(shape);
+      assert.deepEqual(tagStack(shown), []);
+      assert.ok(shown.length <= TELEGRAM_MAX_MESSAGE);
+      assert.equal(sanitizeTelegramHtml(shown), shown);
     });
   }
 
   test('shows background messages held for the chat cooldown, only when there are some', () => {
     const background = { loaded: true, processing: false, queue: 0, model: 'per-prompt' };
-    assert.match(
-      renderStatus(snapshot({ background: { ...background, held: 2 } })),
-      /📬 Held <b>2<\/b>/,
-    );
-    assert.doesNotMatch(renderStatus(snapshot({ background: { ...background, held: 0 } })), /Held/);
+    assert.match(html(snapshot({ background: { ...background, held: 2 } })), /📬 Held <b>2<\/b>/);
+    assert.doesNotMatch(html(snapshot({ background: { ...background, held: 0 } })), /Held/);
   });
 
-  test('says whether sub-agent progress shows tool calls', () => {
-    const features = snapshot().features;
-    assert.match(renderStatus(snapshot()), /\n⛔ Sub-agent tool calls\n/);
+  test("shows each interface's own settings under its name", () => {
     assert.match(
-      renderStatus(snapshot({ features: { ...features, subagentToolCalls: true } })),
+      html(snapshot()),
+      /📱 <b>Telegram<\/b>\n⛔ Sub-agent tool calls\n✅ Voice transcripts/,
+    );
+    assert.match(
+      html(snapshot({ channels: [TELEGRAM_SETTINGS(true)] })),
       /\n✅ Sub-agent tool calls\n/,
     );
+    assert.match(html(snapshot()), /🛠 Tool calls · <i>Collapsed<\/i>$/);
+    assert.doesNotMatch(html(snapshot({ channels: [] })), /Telegram/);
   });
 
   test('escapes values it did not write', () => {
-    const html = renderStatus(SHAPES[5][1]);
-    assert.match(html, /&lt;b&gt;x&lt;\/b&gt; &amp; "y"/);
+    assert.match(html(SHAPES[5][1]), /<code>&lt;b&gt;x&lt;\/b&gt; &amp; "y"<\/code>/);
   });
 
   test('shows context as used and free against the window', () => {
-    const html = renderStatus(snapshot());
-    assert.match(html, /🟢 31% used/);
-    assert.match(html, /84k of 272k · 188k free/);
+    const shown = html(snapshot());
+    assert.match(shown, /🟢 31% used/);
+    assert.match(shown, /84k of 272k · 188k free/);
   });
 
   test('explains an unknown reading after compaction instead of showing 0%', () => {
-    const html = renderStatus(SHAPES[3][1]);
-    assert.match(html, /\? \/ 272k/);
-    assert.doesNotMatch(html, /% used/);
+    const shown = html(SHAPES[3][1]);
+    assert.match(shown, /\? \/ 272k/);
+    assert.doesNotMatch(shown, /% used/);
+  });
+
+  test('keeps the chat details quoted right under their heading', () => {
+    assert.match(html(snapshot()), /💬 <b>Chat<\/b> · 🟢 idle\n<blockquote>🤖 <code>/);
   });
 });
 

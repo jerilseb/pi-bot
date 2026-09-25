@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { TELEGRAM_CHANNEL, TelegramChannel } from '../src/channels/telegram/channel.ts';
-import { MAX_QUEUED_PROMPTS, TOOL_CALL_BATCH_MAX_ITEMS, type ToolCallMode } from '../src/config.ts';
+import { createWriteGate } from '../src/channels/telegram/job-progress.ts';
+import type { TelegramCallbackQuery } from '../src/channels/telegram/types.ts';
+import {
+  ALLOWED_CHAT_ID,
+  MAX_QUEUED_PROMPTS,
+  TOOL_CALL_BATCH_MAX_ITEMS,
+  type ToolCallMode,
+} from '../src/config.ts';
 import type {
   AgentCore,
+  BashJobSnapshot,
   ChannelRef,
+  ChoiceView,
   CoreEvent,
   Deliverable,
   PromptOrigin,
@@ -16,6 +28,12 @@ import type {
 interface ApiCall {
   method: string;
   text?: string;
+  /** The message a call edits. */
+  messageId?: number;
+  /** The keyboard a call sends, as callback data. */
+  buttons?: string[][];
+  /** For an upload, the file's field and name. */
+  file?: string;
   silent: boolean;
   /** Set once Telegram has answered. */
   done: boolean;
@@ -30,14 +48,20 @@ interface ApiCall {
 function fakeTelegram(t: TestContext, options: { slow?: RegExp; fail?: RegExp } = {}) {
   const calls: ApiCall[] = [];
   t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
-    const payload = JSON.parse(String(init?.body ?? '{}')) as {
-      text?: string;
-      disable_notification?: boolean;
-    };
+    const payload = readPayload(init?.body);
     const call: ApiCall = {
       method: String(url).split('/').at(-1) ?? '',
       ...(payload.text !== undefined ? { text: payload.text } : {}),
-      silent: payload.disable_notification === true,
+      ...(payload.message_id !== undefined ? { messageId: payload.message_id } : {}),
+      ...(payload.reply_markup
+        ? {
+            buttons: payload.reply_markup.inline_keyboard.map((row) =>
+              row.map((button) => button.callback_data),
+            ),
+          }
+        : {}),
+      ...(payload.file ? { file: payload.file } : {}),
+      silent: payload.disable_notification === true || payload.disable_notification === 'true',
       done: false,
       afterEarlierDone: calls.every((earlier) => earlier.done),
     };
@@ -57,6 +81,29 @@ function fakeTelegram(t: TestContext, options: { slow?: RegExp; fail?: RegExp } 
   return { calls, sent };
 }
 
+interface Payload {
+  text?: string;
+  message_id?: number;
+  disable_notification?: boolean | string;
+  reply_markup?: { inline_keyboard: Array<Array<{ callback_data: string }>> };
+  file?: string;
+}
+
+/** A JSON body, or a multipart upload's fields with its file as `field:name`. */
+function readPayload(body: unknown): Payload {
+  if (!(body instanceof FormData)) return JSON.parse(String(body ?? '{}')) as Payload;
+  const payload: Payload = {};
+  for (const [key, value] of body.entries()) {
+    if (typeof value === 'string') {
+      if (key === 'caption') payload.text = value;
+      if (key === 'disable_notification') payload.disable_notification = value;
+    } else {
+      payload.file = `${key}:${value.name}`;
+    }
+  }
+  return payload;
+}
+
 /** An AgentCore that answers submit and command the way a test says. */
 function fakeCore(options: { submit?: SubmitResult; command?: boolean } = {}) {
   const submitted: UserInput[] = [];
@@ -70,6 +117,12 @@ function fakeCore(options: { submit?: SubmitResult; command?: boolean } = {}) {
       commands.push(line);
       return options.command ?? false;
     },
+    commands: () => [],
+    choose: async () => {
+      throw new Error('unused');
+    },
+    stopJob: () => 'not-running',
+    beginIngestion: () => ({ epoch: 0 }),
     attach: () => () => {},
     snapshot: () => {
       throw new Error('unused');
@@ -319,13 +372,215 @@ test('a slash command goes to the core as a command, and an unknown one as a mes
   );
 });
 
-test('a menu answer is submitted as a message, never run as a command', async (t) => {
-  fakeTelegram(t);
+test("Telegram's own commands are handled here, not by the core", async (t) => {
+  const { sent } = fakeTelegram(t);
   const { core, commands, submitted } = fakeCore({ command: true });
-  await channel(core).submitAnswer('/looks like a command');
+  const telegram = channel(core);
+  await telegram.submitInput({ text: '/start', attachments: [] });
+  await telegram.drain(1_000);
   assert.deepEqual(commands, []);
+  assert.deepEqual(submitted, []);
+  assert.match(sent()[0]?.text ?? '', /^👋 Hi!/);
+});
+
+function tap(data: string, messageId: number): TelegramCallbackQuery {
+  return {
+    id: `tap-${messageId}`,
+    from: { id: 1 },
+    data,
+    message: {
+      message_id: messageId,
+      chat: { id: Number(ALLOWED_CHAT_ID), type: 'private' },
+      date: 0,
+    },
+  };
+}
+
+const MENU: ChoiceView = {
+  id: 'm1',
+  text: { format: 'plain', text: 'Pick <one>' },
+  options: ['A', 'B', 'C'],
+  columns: 2,
+  cancellable: true,
+  audience: 'all',
+};
+
+test('a core menu is a keyboard whose taps go to the core, and every copy closes', async (t) => {
+  const { calls, sent } = fakeTelegram(t);
+  const chosen: Array<[string, number | 'cancel']> = [];
+  let telegram: TelegramChannel | null = null;
+  const core: AgentCore = {
+    ...fakeCore().core,
+    async choose(choiceId, option, from) {
+      chosen.push([choiceId, option]);
+      const text = { format: 'plain', text: '✅ Picked <B>' } as const;
+      // As the core does: every channel hears the menu close before the answer returns.
+      telegram?.onEvent({ type: 'choice_closed', choiceId, text, by: from });
+      return { toast: 'Picked', text, closed: true, submitted: { status: 'steered' } };
+    },
+  };
+  telegram = channel(core);
+  assert.deepEqual(await telegram.deliver({ kind: 'choice', choice: MENU, ping: pinged }), {
+    channel: TELEGRAM_CHANNEL,
+    ok: true,
+  });
+  await telegram.deliver({ kind: 'choice', choice: MENU, ping: [] });
+  const [first, second] = sent();
+  assert.equal(first?.text, 'Pick &lt;one&gt;');
+  assert.deepEqual(first?.buttons, [['ch:m1:0', 'ch:m1:1'], ['ch:m1:2'], ['ch:m1:cancel']]);
+  assert.equal(second?.silent, true);
+
+  await telegram.handleCallbackQuery(tap('ch:m1:1', 1));
+  await telegram.drain(1_000);
+  assert.deepEqual(chosen, [['m1', 1]]);
+  const edits = calls.filter((call) => call.method === 'editMessageText');
   assert.deepEqual(
-    submitted.map((input) => input.text),
-    ['/looks like a command'],
+    edits.map((call) => [call.messageId, call.text, call.buttons]),
+    [
+      [1, '✅ Picked &lt;B&gt;', undefined],
+      [2, '✅ Picked &lt;B&gt;', undefined],
+    ],
+  );
+  assert.equal(calls.find((call) => call.method === 'answerCallbackQuery') !== undefined, true);
+  // The answer was submitted as a message that steered the turn under way.
+  assert.equal(sent().at(-1)?.text, '↪️ Steering current task.');
+});
+
+test('a tap on a menu the core no longer knows closes only the copy tapped', async (t) => {
+  const { calls } = fakeTelegram(t);
+  const core: AgentCore = {
+    ...fakeCore().core,
+    choose: async () => ({
+      toast: 'Menu expired.',
+      text: { format: 'plain', text: '⏱ gone' },
+      closed: false,
+    }),
+  };
+  const telegram = channel(core);
+  await telegram.handleCallbackQuery(tap('ch:old:0', 7));
+  await telegram.drain(1_000);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === 'editMessageText')
+      .map((call) => [call.messageId, call.text]),
+    [[7, '⏱ gone']],
   );
 });
+
+test('files and voice notes are uploaded, silently when they alert no one', async (t) => {
+  const { calls } = fakeTelegram(t);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-bot-telegram-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string) => {
+    const full = path.join(dir, name);
+    fs.writeFileSync(full, 'content');
+    return full;
+  };
+  const telegram = channel();
+  const deliveries: Deliverable[] = [
+    { kind: 'image', path: file('chart.png'), caption: 'a <chart>', ping: pinged },
+    { kind: 'document', path: file('notes.md'), ping: [] },
+    { kind: 'voice', text: 'hello', path: file('note.ogg'), ping: pinged },
+    { kind: 'voice', text: 'no <audio>', ping: pinged },
+  ];
+  for (const item of deliveries) {
+    assert.equal((await telegram.deliver(item)).ok, true, item.kind);
+  }
+  assert.deepEqual(
+    calls.map((call) => [call.method, call.file ?? call.text, call.silent]),
+    [
+      ['sendPhoto', 'photo:chart.png', false],
+      ['sendDocument', 'document:notes.md', true],
+      ['sendVoice', 'voice:pi-reply.ogg', false],
+      ['sendMessage', '🔊 no &lt;audio&gt;', false],
+    ],
+  );
+  assert.equal(calls[0]?.text, 'a &lt;chart&gt;', 'the caption is escaped for Telegram');
+});
+
+function bashJob(overrides: Partial<BashJobSnapshot> = {}): BashJobSnapshot {
+  return {
+    kind: 'bash',
+    id: 'bg_abc123',
+    command: 'npm test',
+    status: 'running',
+    statusText: 'running',
+    exitCode: null,
+    startedAt: Date.now(),
+    endedAt: null,
+    stopRequested: false,
+    lastLine: null,
+    ...overrides,
+  };
+}
+
+test("a job's message follows its snapshots, and its last write holds what comes after", async (t) => {
+  const { calls } = fakeTelegram(t);
+  const stops: Array<[string, number | undefined]> = [];
+  const core: AgentCore = {
+    ...fakeCore().core,
+    stopJob(jobId, task) {
+      stops.push([jobId, task]);
+      return 'stopping';
+    },
+  };
+  const telegram = new TelegramChannel({
+    core,
+    cwd: '/unused',
+    toolCallMode: () => 'off',
+    subagentToolCalls: () => false,
+    progressOptions: { minIntervalMs: 1, heartbeatMs: 60_000, gate: createWriteGate(0) },
+  });
+  telegram.onEvent({ type: 'job', job: bashJob() });
+  await until(() => calls.length === 1);
+  assert.match(calls[0]?.text ?? '', /^⏳ <b>Background bash<\/b> · running/);
+  assert.deepEqual(calls[0]?.buttons, [['stop:bg_abc123']]);
+
+  await telegram.handleCallbackQuery(tap('stop:bg_abc123', 1));
+  assert.deepEqual(stops, [['bg_abc123', undefined]]);
+
+  const ended = bashJob({
+    status: 'exited',
+    exitCode: 0,
+    statusText: 'exited with code 0',
+    endedAt: Date.now(),
+  });
+  telegram.onEvent({ type: 'job', job: ended, final: true });
+  telegram.onEvent({
+    type: 'notice',
+    text: { format: 'plain', text: 'after the job' },
+    level: 'info',
+    to: 'all',
+    ping: pinged,
+  });
+  await telegram.drain(1_000);
+  const writes = calls.filter((call) => call.method !== 'answerCallbackQuery');
+  assert.match(writes.at(-2)?.text ?? '', /^✅ <b>Background bash<\/b> · exited with code 0/);
+  assert.equal(writes.at(-1)?.text, 'after the job');
+});
+
+test("Telegram's /status section lists its own display settings", () => {
+  const telegram = new TelegramChannel({
+    core: fakeCore().core,
+    cwd: '/unused',
+    toolCallMode: () => 'stream',
+    subagentToolCalls: () => true,
+    showTranscripts: () => false,
+  });
+  assert.deepEqual(telegram.status(), {
+    title: 'Telegram',
+    settings: [
+      { label: 'Sub-agent tool calls', on: true },
+      { label: 'Voice transcripts', on: false },
+      { label: '🛠 Tool calls', detail: 'Stream — a message per batch' },
+    ],
+  });
+});
+
+async function until(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.fail('condition not reached');
+}

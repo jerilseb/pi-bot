@@ -3,19 +3,20 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import { heldDeliveryNote } from './background-outbox.ts';
 import {
-  ALLOWED_CHAT_ID,
   DOCUMENT_UPLOAD_EXTS,
   LOCAL_DOCUMENT_UPLOAD_DIRS,
   LOCAL_IMAGE_UPLOAD_DIRS,
-  TELEGRAM_DOCUMENT_UPLOAD_LIMIT,
-  TELEGRAM_MEDIA_TIMEOUT_MS,
-  TELEGRAM_PHOTO_UPLOAD_LIMIT,
 } from './config.ts';
-import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
-import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
-import { telegram } from './channels/telegram/telegram.ts';
+import { describeReceipts, toolHost } from './tool-host.ts';
 import type { SessionKind } from './types.ts';
+
+/**
+ * send_image and send_document. The tools check the file is one the agent may
+ * send; each channel then sends it its own way and enforces its own limits,
+ * and the receipts say whether it arrived.
+ */
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
 
@@ -65,17 +66,20 @@ function registerSendImage(pi: ExtensionAPI, session: SessionKind): void {
     async execute(_toolCallId, params) {
       const resolved = resolvePath(params.path);
       validateUpload(resolved, IMAGE_EXTS, LOCAL_IMAGE_UPLOAD_DIRS);
-      const outcome = await deliverToChat(session, 'image', () =>
-        uploadImage(resolved, params.caption),
-      );
+      const name = path.basename(resolved);
+      const result = await toolHost().deliver(session, 'image', () => ({
+        kind: 'image',
+        path: resolved,
+        ...(params.caption ? { caption: params.caption } : {}),
+      }));
       return {
         content: [
           {
             type: 'text',
             text:
-              outcome === 'held'
-                ? heldDeliveryNote(`Image ${path.basename(resolved)}`)
-                : `Sent image: ${path.basename(resolved)}`,
+              result.outcome === 'held'
+                ? heldDeliveryNote(`Image ${name}`)
+                : `Sent image: ${name}${describeReceipts('images', result.receipts)}`,
           },
         ],
         details: { path: resolved, caption: params.caption ?? null },
@@ -107,17 +111,20 @@ function registerSendDocument(pi: ExtensionAPI, session: SessionKind): void {
       const resolved = resolvePath(params.path);
       const allowedExts = DOCUMENT_UPLOAD_EXTS.map((ext) => `.${ext}`);
       validateUpload(resolved, allowedExts, LOCAL_DOCUMENT_UPLOAD_DIRS);
-      const outcome = await deliverToChat(session, 'document', () =>
-        uploadDocument(resolved, params.caption),
-      );
+      const name = path.basename(resolved);
+      const result = await toolHost().deliver(session, 'document', () => ({
+        kind: 'document',
+        path: resolved,
+        ...(params.caption ? { caption: params.caption } : {}),
+      }));
       return {
         content: [
           {
             type: 'text',
             text:
-              outcome === 'held'
-                ? heldDeliveryNote(`Document ${path.basename(resolved)}`)
-                : `Sent document: ${path.basename(resolved)}`,
+              result.outcome === 'held'
+                ? heldDeliveryNote(`Document ${name}`)
+                : `Sent document: ${name}${describeReceipts('documents', result.receipts)}`,
           },
         ],
         details: { path: resolved, caption: params.caption ?? null },
@@ -154,11 +161,6 @@ function validateUpload(filePath: string, allowedExts: string[], allowedDirs: st
   if (!stat.isFile() || stat.size <= 0) {
     throw new Error(`Not a regular non-empty file: ${filePath}`);
   }
-  if (stat.size > TELEGRAM_DOCUMENT_UPLOAD_LIMIT) {
-    throw new Error(
-      `File exceeds Telegram upload limit (${(stat.size / 1024 / 1024).toFixed(1)}MB).`,
-    );
-  }
 
   let realFile: string;
   try {
@@ -180,51 +182,5 @@ function validateUpload(filePath: string, allowedExts: string[], allowedDirs: st
 
   if (!ok) {
     throw new Error(`File is not under an allowed upload directory: ${filePath}`);
-  }
-}
-
-async function uploadImage(filePath: string, caption: string | undefined): Promise<void> {
-  const stat = fs.statSync(filePath);
-  const asPhoto = stat.size <= TELEGRAM_PHOTO_UPLOAD_LIMIT;
-  const method = asPhoto ? 'sendPhoto' : 'sendDocument';
-  const fieldName = asPhoto ? 'photo' : 'document';
-  const fileBuffer = fs.readFileSync(filePath);
-  const form = new FormData();
-  form.append('chat_id', ALLOWED_CHAT_ID);
-  form.append(
-    fieldName,
-    new Blob([fileBuffer], { type: imageMimeType(filePath) }),
-    path.basename(filePath),
-  );
-  if (caption) {
-    form.append('caption', escapeTelegramHtml(caption));
-    form.append('parse_mode', 'HTML');
-  }
-  await telegram(method, { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
-}
-
-async function uploadDocument(filePath: string, caption: string | undefined): Promise<void> {
-  const fileBuffer = fs.readFileSync(filePath);
-  const form = new FormData();
-  form.append('chat_id', ALLOWED_CHAT_ID);
-  form.append('document', new Blob([fileBuffer]), path.basename(filePath));
-  if (caption) {
-    form.append('caption', escapeTelegramHtml(caption));
-    form.append('parse_mode', 'HTML');
-  }
-  await telegram('sendDocument', { method: 'POST', body: form }, TELEGRAM_MEDIA_TIMEOUT_MS);
-}
-
-function imageMimeType(filePath: string): string {
-  switch (path.extname(filePath).toLowerCase()) {
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    case '.webp':
-      return 'image/webp';
-    case '.gif':
-      return 'image/gif';
-    default:
-      return 'image/png';
   }
 }

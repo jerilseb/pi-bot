@@ -5,7 +5,7 @@ import {
   type SubagentProgressJob,
   type SubagentProgressTask,
   TOOL_CALLS_SHOWN,
-} from '../src/subagent-progress.ts';
+} from '../src/channels/telegram/subagent-progress.ts';
 import { sanitizeTelegramHtml } from '../src/channels/telegram/telegram-html.ts';
 
 /**

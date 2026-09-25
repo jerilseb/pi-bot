@@ -1,6 +1,6 @@
 import type { CallbackMenu } from './callback-menu.ts';
-import { setShowTranscripts, showTranscriptsEnabled } from './config.ts';
-import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
+import { setShowTranscripts, showTranscriptsEnabled } from '../../config.ts';
+import type { InlineKeyboardButton } from './telegram.ts';
 
 const TRANSCRIPT_CALLBACK_PREFIX = 'transcripts:';
 

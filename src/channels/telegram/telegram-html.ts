@@ -10,8 +10,7 @@ import { TELEGRAM_MAX_MESSAGE } from '../../config.ts';
  * network, no config beyond the size limit, so they can be exercised directly.
  *
  * Transport (which of these to apply, and the fallback ladder when Telegram
- * still refuses a message) lives in telegram.ts. Small presentational
- * helpers live in telegram-format.ts.
+ * still refuses a message) lives in telegram.ts.
  */
 
 export function escapeTelegramHtml(text: string): string {

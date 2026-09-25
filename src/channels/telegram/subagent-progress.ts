@@ -1,12 +1,13 @@
+import type { SubagentJobSnapshot, SubagentTaskSnapshot } from '../../contract.ts';
+import { formatDuration } from '../../util.ts';
 import { jobStopCallbackData, type ProgressContent } from './job-progress.ts';
-import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
-import { clipEscapedTelegramHtml } from './channels/telegram/telegram-html.ts';
-import { formatDuration } from './util.ts';
+import type { InlineKeyboardButton } from './telegram.ts';
+import { clipEscapedTelegramHtml } from './telegram-html.ts';
 
 /**
  * The live progress message of a sub-agent job the chat started (one
- * subagent_run call), rendered from the job's plain state. Pure, so every state
- * it passes through can be tested; src/job-progress.ts keeps it current.
+ * subagent_run call), rendered from the job's snapshot. Pure, so every state
+ * it passes through can be tested; job-progress.ts keeps it current.
  *
  * Kept small by default: the agent's own reply carries the results, so the
  * message only has to say how the job is going. While it runs, each task is one
@@ -21,36 +22,9 @@ import { formatDuration } from './util.ts';
  * result replaces them (or its error, if it failed).
  */
 
-export type SubagentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'stopped';
-
-/** What the message shows of one task. src/subagent.ts's task record extends it. */
-export interface SubagentProgressTask {
-  /** 0-based; lines show it 1-based, and the number never changes. */
-  index: number;
-  task: string;
-  /** The agent's short title for the task, if it gave one. */
-  description: string | null;
-  /** provider/model the worker runs on. */
-  model: string;
-  status: SubagentTaskStatus;
-  /** The user tapped this task's Stop button; set before the abort. */
-  stopRequested: boolean;
-  /** The worker's recent tool calls, oldest first, each one line of plain text. */
-  toolCalls: readonly string[];
-  toolUses: number;
-  result: string | null;
-  error: string | null;
-  startedAt: number | null;
-  endedAt: number | null;
-}
-
-export interface SubagentProgressJob {
-  id: string;
-  status: 'running' | 'succeeded' | 'failed' | 'stopped';
-  startedAt: number;
-  endedAt: number | null;
-  tasks: readonly SubagentProgressTask[];
-}
+/** A task and a job as the message reads them: their snapshots, less the kind. */
+export type SubagentProgressTask = SubagentTaskSnapshot;
+export type SubagentProgressJob = Omit<SubagentJobSnapshot, 'kind'>;
 
 export interface SubagentProgressOptions {
   /** Show each worker's tool calls, then its result: the `subagentToolCalls` setting. */
@@ -80,7 +54,7 @@ const RESULT_MAX_CHARS = 2_000;
 /** A result squeezed below this is left out rather than shown as a stub. */
 const RESULT_MIN_CHARS = 120;
 const BUTTONS_PER_LINE = 4;
-/** How many of a worker's tool calls its task keeps for the message. */
+/** How many of a worker's recent tool calls the message shows. */
 export const TOOL_CALLS_SHOWN = 8;
 
 const STATE_ICON: Record<RowState, string> = {

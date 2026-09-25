@@ -1,5 +1,7 @@
+import { cleanupAttachments } from './attachments.ts';
 import { backgroundOutbox } from './background-outbox.ts';
 import type { ChatSession, ChatState } from './chat-session.ts';
+import type { ChoiceRegistry, ChoiceSpec } from './choices.ts';
 import {
   CRON_JOBS_ENABLED,
   ELEVENLABS_API_KEY,
@@ -7,83 +9,70 @@ import {
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_MODEL,
   SUBAGENTS_ENABLED,
-  showTranscriptsEnabled,
-  subagentToolCallsEnabled,
-  toolCallMode,
 } from './config.ts';
+import type { ChannelRef, ChannelStatus, CommandInfo } from './contract.ts';
 import { readCronJobs } from './cron-store.ts';
-import { configuredTextToSpeechProviders } from './speech.ts';
-import { renderStatus, type StatusSnapshot } from './status.ts';
-import { buildElevenLabsUsageTelegramHtml, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
-import { buildModelInlineKeyboard } from './model-menu.ts';
-import { buildReasoningInlineKeyboard } from './reasoning-menu.ts';
+import { buildElevenLabsUsageMarkdown, fetchElevenLabsUsage } from './elevenlabs-usage.ts';
+import { discardPendingIngestion } from './ingestion.ts';
+import { escapeMarkdown, markdownCode } from './markdown.ts';
+import { defineModelChoice, modelChoice } from './model-menu.ts';
 import {
-  buildSubagentToolCallInlineKeyboard,
-  describeSubagentToolCallSetting,
-} from './subagent-tool-call-menu.ts';
-import { buildToolCallInlineKeyboard, describeToolCallMode } from './tool-call-menu.ts';
-import { buildTranscriptInlineKeyboard, describeTranscriptSetting } from './transcript-menu.ts';
-import {
-  buildOpenAIUsageTelegramHtml,
+  buildOpenAIUsageMarkdown,
   fetchOpenAIUsage,
   OPENAI_CODEX_PROVIDER,
 } from './openai-usage.ts';
-import { cleanupAttachments } from './attachments.ts';
-import { discardPendingIngestion } from './channels/telegram/inbound.ts';
-import { runRestartGate } from './restart-flow.ts';
-import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
 import {
-  sendTelegramInlineKeyboard,
-  sendTelegramMessage,
-  type TelegramBotCommand,
-} from './channels/telegram/telegram.ts';
+  defineReasoningChoice,
+  reasoningChoice,
+  selectableReasoningLevels,
+} from './reasoning-menu.ts';
+import { runRestartGate } from './restart-flow.ts';
+import { configuredTextToSpeechProviders } from './speech.ts';
+import { renderStatus, type StatusSnapshot } from './status.ts';
 import { errorMessage } from './util.ts';
 
+/**
+ * The core's slash commands, the same from every channel. A command answers
+ * through its context rather than any one interface: `reply` sends Markdown to
+ * the channel that asked, or to every channel for a change they all need to
+ * know about (/new, /abort, the restart checks), and `offer` opens a menu for
+ * the channel that asked. A channel's own commands (Telegram's display
+ * settings, say) are the channel's, listed alongside these in its command menu
+ * and in /help.
+ */
+
 export interface CommandContext {
+  from: ChannelRef;
   chat: ChatState;
   session: ChatSession;
   backgroundSession: ChatSession;
   /** Shuts the bot down and exits so systemd brings it back up. */
   restart(): Promise<void>;
+  /** Sends Markdown to the channel that asked, or to every channel. */
+  reply(markdown: string, options?: { to?: 'all' }): void;
+  /** Opens a menu for the channel that asked. */
+  offer(choice: ChoiceSpec): Promise<void>;
+  /** Tells every channel the conversation was reset. */
+  announceReset(): void;
+  /** The commands the asking channel can use: these plus its own. */
+  commandList(): CommandInfo[];
+  /** The settings of every attached channel that has some, for /status. */
+  channelStatuses(): ChannelStatus[];
 }
 
 type CommandHandler = (ctx: CommandContext) => Promise<void>;
 
-/**
- * One slash command. This is the single source of truth for the Telegram
- * command menu, the /help listing, and dispatch, so the three cannot drift.
- */
-interface BotCommand {
-  /** Command name without the leading slash. */
-  name: string;
-  /** Short line shown in the Telegram command menu. */
-  description: string;
-  /** Longer line shown by /help. Falls back to description. */
-  help?: string;
-  /** Set only for commands deliberately kept out of /help. */
-  hideFromHelp?: boolean;
+interface CoreCommand extends CommandInfo {
   handler: CommandHandler;
 }
 
-const BOT_COMMANDS: BotCommand[] = [
-  {
-    name: 'start',
-    description: 'Say hi',
-    // Conventional Telegram entry point; it carries no information for /help.
-    hideFromHelp: true,
-    handler: async () => {
-      await sendTelegramMessage(
-        "👋 Hi! Send me a message and I'll ask Pi. Use /help for commands.",
-      );
-    },
-  },
-
+const CORE_COMMANDS: CoreCommand[] = [
   {
     name: 'help',
     description: 'Show commands',
     help: 'show this help',
-    handler: async () => {
-      await sendTelegramMessage(HELP_TEXT);
+    handler: async (ctx) => {
+      ctx.reply(helpText(ctx.commandList()));
     },
   },
 
@@ -91,11 +80,13 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'status',
     description: 'Show chat session status',
     help: 'show this chat session status',
-    handler: async ({ chat, backgroundSession }) => {
+    handler: async (ctx) => {
       // Loads the transcript if it is not yet, so the context and usage below are real.
-      const thinking = await chat.pi.getThinkingState();
-      await sendTelegramMessage(
-        renderStatus(collectStatus(chat, backgroundSession.existing(), thinking.level)),
+      const thinking = await ctx.chat.pi.getThinkingState();
+      ctx.reply(
+        renderStatus(
+          collectStatus(ctx.chat, ctx.backgroundSession.existing(), thinking.level, ctx),
+        ),
       );
     },
   },
@@ -104,18 +95,14 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'models',
     description: 'Switch chat model',
     help: 'choose an allowed chat model',
-    handler: async ({ chat, session }) => {
-      if (session.isBusy()) {
-        await sendTelegramMessage(
+    handler: async (ctx) => {
+      if (ctx.session.isBusy()) {
+        ctx.reply(
           '⚠️ Wait for the current chat response and queue to finish before switching models.',
         );
         return;
       }
-
-      await sendTelegramInlineKeyboard(
-        [`Current chat model: ${chat.pi.modelName}`, 'Choose a chat model:'].join('\n'),
-        buildModelInlineKeyboard(),
-      );
+      await ctx.offer(modelChoice(ctx.session, ctx.from));
     },
   },
 
@@ -123,68 +110,16 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'reasoning',
     description: 'Switch chat reasoning level',
     help: 'choose the chat reasoning level',
-    handler: async ({ chat, session }) => {
-      if (session.isBusy()) {
-        await sendTelegramMessage(
+    handler: async (ctx) => {
+      if (ctx.session.isBusy()) {
+        ctx.reply(
           '⚠️ Wait for the current chat response and queue to finish before switching reasoning.',
         );
         return;
       }
-
-      const thinking = await chat.pi.getThinkingState();
-      await sendTelegramInlineKeyboard(
-        [
-          `Current chat model: ${chat.pi.modelName}`,
-          `Current reasoning: ${thinking.level}`,
-          'Choose a reasoning level:',
-        ].join('\n'),
-        buildReasoningInlineKeyboard(thinking.availableLevels),
-      );
-    },
-  },
-
-  {
-    name: 'toolcalls',
-    description: 'Choose how tool calls are shown',
-    help: 'choose how Pi’s tool calls are shown in the chat',
-    handler: async () => {
-      await sendTelegramInlineKeyboard(
-        [
-          `Current: ${describeToolCallMode(toolCallMode())}`,
-          'Choose how tool calls are shown:',
-        ].join('\n'),
-        buildToolCallInlineKeyboard(),
-      );
-    },
-  },
-
-  {
-    name: 'transcripts',
-    description: 'Choose whether voice transcripts are sent back',
-    help: 'choose whether a voice note transcript is sent back to the chat',
-    handler: async () => {
-      await sendTelegramInlineKeyboard(
-        [
-          `Current: ${describeTranscriptSetting(showTranscriptsEnabled())}`,
-          'Send the voice note transcript back to the chat?',
-        ].join('\n'),
-        buildTranscriptInlineKeyboard(),
-      );
-    },
-  },
-
-  {
-    name: 'subagent_toolcalls',
-    description: 'Choose whether sub-agent progress shows tool calls',
-    help: 'choose whether a sub-agent job’s progress message shows each worker’s tool calls, then its result',
-    handler: async () => {
-      await sendTelegramInlineKeyboard(
-        [
-          `Current: ${describeSubagentToolCallSetting(subagentToolCallsEnabled())}`,
-          'Show each worker’s tool calls in the sub-agent progress message?',
-        ].join('\n'),
-        buildSubagentToolCallInlineKeyboard(),
-      );
+      const thinking = await ctx.chat.pi.getThinkingState();
+      const levels = selectableReasoningLevels(thinking.availableLevels);
+      await ctx.offer(reasoningChoice(ctx.session, levels, ctx.from, thinking.level));
     },
   },
 
@@ -192,24 +127,22 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'openaiusage',
     description: 'Show OpenAI Codex weekly usage',
     help: 'show OpenAI Codex seven-day usage and reset time',
-    handler: async ({ chat }) => {
-      const accessToken = await chat.pi.getApiKeyForProvider(OPENAI_CODEX_PROVIDER);
+    handler: async (ctx) => {
+      const accessToken = await ctx.chat.pi.getApiKeyForProvider(OPENAI_CODEX_PROVIDER);
       if (!accessToken) {
-        await sendTelegramMessage(
-          '❌ No OpenAI Codex credentials found. Authenticate with Pi using /login openai-codex, or set OPENAI_CODEX_API_KEY.',
+        ctx.reply(
+          `❌ No OpenAI Codex credentials found. Authenticate with Pi using ${markdownCode('/login openai-codex')}, or set ${markdownCode('OPENAI_CODEX_API_KEY')}.`,
         );
         return;
       }
 
-      await sendTelegramMessage('Fetching OpenAI Codex usage...');
+      ctx.reply('Fetching OpenAI Codex usage...');
 
       try {
         const { usage, warnings } = await fetchOpenAIUsage(accessToken);
-        await sendTelegramMessage(buildOpenAIUsageTelegramHtml(usage, warnings));
+        ctx.reply(buildOpenAIUsageMarkdown(usage, warnings));
       } catch (error) {
-        await sendTelegramMessage(
-          `❌ Failed to fetch OpenAI Codex usage: ${escapeTelegramHtml(errorMessage(error))}`,
-        );
+        ctx.reply(`❌ Failed to fetch OpenAI Codex usage: ${escapeMarkdown(errorMessage(error))}`);
       }
     },
   },
@@ -218,23 +151,21 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'elevenlabsusage',
     description: 'Show ElevenLabs usage',
     help: 'show ElevenLabs credit/character usage',
-    handler: async () => {
+    handler: async (ctx) => {
       if (!ELEVENLABS_API_KEY) {
-        await sendTelegramMessage(
-          '❌ No ElevenLabs API key found. Set ELEVENLABS_API_KEY in .env.',
+        ctx.reply(
+          `❌ No ElevenLabs API key found. Set ${markdownCode('ELEVENLABS_API_KEY')} in .env.`,
         );
         return;
       }
 
-      await sendTelegramMessage('Fetching ElevenLabs usage...');
+      ctx.reply('Fetching ElevenLabs usage...');
 
       try {
         const usage = await fetchElevenLabsUsage(ELEVENLABS_API_KEY);
-        await sendTelegramMessage(buildElevenLabsUsageTelegramHtml(usage));
+        ctx.reply(buildElevenLabsUsageMarkdown(usage));
       } catch (error) {
-        await sendTelegramMessage(
-          `❌ Failed to fetch ElevenLabs usage: ${escapeTelegramHtml(errorMessage(error))}`,
-        );
+        ctx.reply(`❌ Failed to fetch ElevenLabs usage: ${escapeMarkdown(errorMessage(error))}`);
       }
     },
   },
@@ -243,7 +174,8 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'abort',
     description: 'Stop the current Pi response',
     help: 'abort the current Pi response and clear pending messages',
-    handler: async ({ chat }) => {
+    handler: async (ctx) => {
+      const { chat } = ctx;
       discardPendingIngestion();
       for (const prompt of chat.queue.splice(0)) cleanupAttachments(prompt);
       // False when nothing had reached the model yet (the session was still
@@ -253,9 +185,9 @@ const BOT_COMMANDS: BotCommand[] = [
         // tell an interruption from a turn that chose to end there.
         await chat.pi.noteEvent('abort', 'The user aborted your previous turn before it finished.');
       }
-      await sendTelegramMessage(
-        '⏹ Aborting current prompt and clearing queued/steering messages...',
-      );
+      ctx.reply('⏹ Aborting current prompt and clearing queued/steering messages...', {
+        to: 'all',
+      });
     },
   },
 
@@ -263,7 +195,8 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'new',
     description: "Reset this chat's Pi conversation",
     help: "clear this chat's Pi conversation",
-    handler: async ({ chat }) => {
+    handler: async (ctx) => {
+      const { chat } = ctx;
       discardPendingIngestion();
       for (const prompt of chat.queue.splice(0)) cleanupAttachments(prompt);
       // Never force chat.processing or dispose a streaming session here: abort the
@@ -276,8 +209,10 @@ const BOT_COMMANDS: BotCommand[] = [
       if (!chat.processing) chat.pi.reset();
       chat.messageCount = 0;
       chat.startedAt = Date.now();
-      await sendTelegramMessage(
-        `🔄 Started a new conversation using <code>${escapeTelegramHtml(chat.pi.modelName)}</code>. Reasoning: <b>${escapeTelegramHtml(thinking.level)}</b>.`,
+      ctx.announceReset();
+      ctx.reply(
+        `🔄 Started a new conversation using ${markdownCode(chat.pi.modelName)}. Reasoning: **${escapeMarkdown(thinking.level)}**.`,
+        { to: 'all' },
       );
     },
   },
@@ -286,39 +221,53 @@ const BOT_COMMANDS: BotCommand[] = [
     name: 'restart',
     description: 'Restart the bot process',
     help: 'exit this process so systemd can restart it',
-    handler: async ({ restart }) => {
-      if (!(await runRestartGate())) return;
-      await restart();
+    handler: async (ctx) => {
+      if (!(await runRestartGate((text) => ctx.reply(text, { to: 'all' })))) return;
+      await ctx.restart();
     },
   },
 ];
 
-const HELP_TEXT = [
-  'Telegram → Pi bridge commands:',
-  ...BOT_COMMANDS.filter((command) => !command.hideFromHelp).map(
-    (command) => `/${command.name} — ${command.help ?? command.description}`,
-  ),
-].join('\n');
-
 const COMMAND_HANDLERS = new Map<string, CommandHandler>(
-  BOT_COMMANDS.map((command) => [`/${command.name}`, command.handler]),
+  CORE_COMMANDS.map((command) => [`/${command.name}`, command.handler]),
 );
 
-/** The Telegram command menu, registered with the Bot API on startup. */
-export function telegramCommandMenu(): TelegramBotCommand[] {
-  return BOT_COMMANDS.map(({ name, description }) => ({ command: name, description }));
+/** The core's commands, without their handlers. */
+export function coreCommands(): CommandInfo[] {
+  return CORE_COMMANDS.map(({ handler: _handler, ...info }) => info);
+}
+
+/** The name a slash-command line invokes, lowercased and without a `@botname` suffix. */
+export function commandName(line: string): string {
+  const [commandRaw = ''] = line.trim().split(/\s+/, 1);
+  return commandRaw.toLowerCase().replace(/@.+$/, '').replace(/^\//, '');
 }
 
 /** Dispatches a leading-slash command. Returns false when none matches. */
 export async function handleCommand(ctx: CommandContext, text: string): Promise<boolean> {
-  const [commandRaw] = text.split(/\s+/, 1);
-  const command = commandRaw.toLowerCase().replace(/@.+$/, '');
-
-  const handler = COMMAND_HANDLERS.get(command);
+  const handler = COMMAND_HANDLERS.get(`/${commandName(text)}`);
   if (!handler) return false;
 
   await handler(ctx);
   return true;
+}
+
+/** Registers the menus commands open that must keep working after a restart. */
+export function defineCommandChoices(registry: ChoiceRegistry, session: ChatSession): void {
+  defineModelChoice(registry, session);
+  defineReasoningChoice(registry, session);
+}
+
+function helpText(commands: CommandInfo[]): string {
+  return [
+    escapeMarkdown('Telegram → Pi bridge commands:'),
+    ...commands
+      .filter((command) => !command.hideFromHelp)
+      .map(
+        (command) =>
+          `${escapeMarkdown(`/${command.name}`)} — ${escapeMarkdown(command.help ?? command.description)}`,
+      ),
+  ].join('\n');
 }
 
 /** Everything /status shows, read from live state at one moment. */
@@ -326,6 +275,7 @@ function collectStatus(
   chat: ChatState,
   background: ChatState | null,
   reasoning: string,
+  ctx: CommandContext,
 ): StatusSnapshot {
   const stats = chat.pi.getSessionStats();
   const context = chat.pi.getContextUsage();
@@ -354,10 +304,8 @@ function collectStatus(
       heartbeat: heartbeatFeature(),
       cron: cronFeature(),
       subagents: SUBAGENTS_ENABLED,
-      toolCalls: describeToolCallMode(toolCallMode()),
-      transcripts: showTranscriptsEnabled(),
-      subagentToolCalls: subagentToolCallsEnabled(),
     },
+    channels: ctx.channelStatuses(),
   };
 }
 

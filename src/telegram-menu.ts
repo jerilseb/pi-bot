@@ -1,17 +1,19 @@
-import { randomUUID } from 'node:crypto';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
-import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
-import type { CallbackMenu } from './callback-menu.ts';
-import {
-  sendTelegramInlineKeyboard,
-  type InlineKeyboardButton,
-} from './channels/telegram/telegram.ts';
+import { heldDeliveryNote } from './background-outbox.ts';
+import type { ChoiceSpec } from './choices.ts';
+import type { ChannelRef } from './contract.ts';
+import { describeReceipts, type ToolHost, toolHost } from './tool-host.ts';
 import { textResult } from './tool-result.ts';
 import type { SessionKind } from './types.ts';
 
-const MENU_CALLBACK_PREFIX = 'menu:';
-const MENU_CALLBACK_CANCEL = 'cancel';
+/**
+ * send_telegram_menu: a menu the agent sends every connected interface. The
+ * first answer, from any of them, closes every copy and comes back into the
+ * chat as the user's own message from that interface, so it can steer a turn
+ * under way. A menu is single-use and expires.
+ */
+
 const DEFAULT_MENU_EXPIRY_MINUTES = 60;
 const MAX_MENU_EXPIRY_MINUTES = 24 * 60;
 const MAX_MENU_OPTIONS = 12;
@@ -67,14 +69,10 @@ interface TelegramMenuOption {
 }
 
 interface TelegramMenu {
-  id: string;
   text: string;
   options: TelegramMenuOption[];
   allowCancel: boolean;
-  expiresAt: number;
 }
-
-const menus = new Map<string, TelegramMenu>();
 
 /** send_telegram_menu for one of the bot's sessions; the background session's sends are held. */
 export function telegramMenuExtension(session: SessionKind): (pi: ExtensionAPI) => void {
@@ -96,13 +94,21 @@ function registerSendMenu(pi: ExtensionAPI, session: SessionKind): void {
     ],
     parameters: SendTelegramMenuParams,
     async execute(_toolCallId, params: SendTelegramMenuParamsType) {
-      // Built now so invalid options still fail the call; the expiry clock
-      // starts when the menu is actually sent.
+      // Built now so invalid options still fail the call; the menu opens, and
+      // its expiry clock starts, when it is actually sent.
       const prepared = prepareTelegramMenu(params);
-      const outcome = await deliverToChat(session, 'menu', async () => {
-        await sendTelegramMenu(prepared);
-      });
-      if (outcome === 'held') {
+      const host = toolHost();
+      const result = await host.deliver(
+        session,
+        'menu',
+        () => ({ kind: 'choice', choice: host.openChoice(menuChoice(prepared, host)) }),
+        (receipts, item) => {
+          if (item.kind === 'choice' && !receipts.some((receipt) => receipt.ok)) {
+            host.closeChoice(item.choice.id);
+          }
+        },
+      );
+      if (result.outcome === 'held') {
         return textResult(
           [
             heldDeliveryNote('Menu'),
@@ -110,10 +116,9 @@ function registerSendMenu(pi: ExtensionAPI, session: SessionKind): void {
           ].join('\n'),
         );
       }
-      const menu = prepared.menu;
       return textResult(
         [
-          `Sent Telegram menu ${menu.id}.`,
+          `Sent the menu.${describeReceipts('menus', result.receipts)}`,
           'The user selection will arrive as a follow-up prompt when they tap a button.',
         ].join('\n'),
       );
@@ -121,49 +126,33 @@ function registerSendMenu(pi: ExtensionAPI, session: SessionKind): void {
   });
 }
 
-/**
- * The keyboard sent by send_telegram_menu. Callback data is
- * `menu:<menuId>:<index|cancel>`: Cancel belongs to one menu rather than the
- * shared `<prefix>cancel` button, so it is handled in select. A menu is
- * single-use and is forgotten on the first tap, whatever the tap was. The
- * answer is submitted as the user's own message, so it can steer a turn.
- */
-export function telegramMenuCallbackMenu(
-  submitAnswer: (text: string) => Promise<void>,
-): CallbackMenu {
+/** The menu as the core keeps it. An answer is submitted as the user's message. */
+function menuChoice(prepared: PreparedMenu, host: ToolHost): ChoiceSpec {
+  const { menu, columns, expiresMinutes } = prepared;
+  const answer = (by: ChannelRef, text: string) => host.submit({ from: by, text, attachments: [] });
   return {
-    prefix: MENU_CALLBACK_PREFIX,
+    text: menu.text,
+    options: menu.options.map(({ label }) => ({ label })),
+    columns,
+    cancellable: menu.allowCancel,
     unknownOptionText: '❌ That menu option is no longer available. Ask me to send the menu again.',
     failureToast: 'Menu selection failed.',
-    async select(value) {
-      cleanupExpiredMenus();
-
-      const parsed = parseMenuCallbackData(value);
-      if (!parsed) return null;
-
-      const menu = menus.get(parsed.menuId);
-      if (!menu || menu.expiresAt <= Date.now()) {
-        menus.delete(parsed.menuId);
-        return {
-          toast: 'Menu expired.',
-          text: '⏱ This menu has expired. Ask me to send it again.',
-        };
-      }
-      menus.delete(menu.id);
-
-      if (parsed.action === MENU_CALLBACK_CANCEL) {
-        await submitAnswer(buildMenuCancelledPrompt(menu));
-        return { toast: 'Cancelled', text: `${menu.text}\n\nCancelled.` };
-      }
-
-      const option = menu.options[parsed.optionIndex];
+    expiredText: '⏱ This menu has expired. Ask me to send it again.',
+    expiresAt: Date.now() + expiresMinutes * 60_000,
+    audience: 'all',
+    async select(index, by) {
+      const option = menu.options[index];
       if (!option) return null;
-
-      await submitAnswer(buildMenuSelectionPrompt(menu, option));
+      const submitted = await answer(by, buildMenuSelectionPrompt(menu, option));
       return {
         toast: `Selected: ${option.label}`,
         text: `${menu.text}\n\nSelected: ${option.label}`,
+        submitted,
       };
+    },
+    async cancel(by) {
+      const submitted = await answer(by, buildMenuCancelledPrompt(menu));
+      return { toast: 'Cancelled', text: `${menu.text}\n\nCancelled.`, submitted };
     },
   };
 }
@@ -178,31 +167,13 @@ function prepareTelegramMenu(params: SendTelegramMenuParamsType): PreparedMenu {
   const expiresMinutes = normalizeExpiryMinutes(params.expires_minutes);
   return {
     menu: {
-      id: createMenuId(),
       text: params.text.trim(),
       options: normalizeMenuOptions(params.options),
       allowCancel: params.allow_cancel ?? false,
-      expiresAt: Date.now() + expiresMinutes * 60_000,
     },
     columns: normalizeColumns(params.columns),
     expiresMinutes,
   };
-}
-
-async function sendTelegramMenu(prepared: PreparedMenu): Promise<TelegramMenu> {
-  const { menu, columns, expiresMinutes } = prepared;
-  menu.expiresAt = Date.now() + expiresMinutes * 60_000;
-
-  menus.set(menu.id, menu);
-
-  try {
-    await sendTelegramInlineKeyboard(menu.text, buildMenuKeyboard(menu, columns));
-  } catch (error) {
-    menus.delete(menu.id);
-    throw error;
-  }
-
-  return menu;
 }
 
 function normalizeMenuOptions(
@@ -233,41 +204,6 @@ function normalizeExpiryMinutes(expiresMinutes: number | undefined): number {
   return Math.min(MAX_MENU_EXPIRY_MINUTES, Math.max(1, Math.floor(value)));
 }
 
-function buildMenuKeyboard(menu: TelegramMenu, columns: number): InlineKeyboardButton[][] {
-  const rows: InlineKeyboardButton[][] = [];
-  for (let index = 0; index < menu.options.length; index += columns) {
-    rows.push(
-      menu.options.slice(index, index + columns).map((option, offset) => ({
-        text: option.label,
-        callback_data: `${MENU_CALLBACK_PREFIX}${menu.id}:${index + offset}`,
-      })),
-    );
-  }
-
-  if (menu.allowCancel) {
-    rows.push([{ text: 'Cancel', callback_data: `${MENU_CALLBACK_PREFIX}${menu.id}:cancel` }]);
-  }
-
-  return rows;
-}
-
-/** Parses `<menuId>:<index|cancel>`, the callback data with the menu prefix removed. */
-function parseMenuCallbackData(
-  value: string,
-):
-  | { menuId: string; action: typeof MENU_CALLBACK_CANCEL }
-  | { menuId: string; action: 'select'; optionIndex: number }
-  | null {
-  const [menuId, action] = value.split(':', 2);
-  if (!menuId || !action) return null;
-
-  if (action === MENU_CALLBACK_CANCEL) return { menuId, action: MENU_CALLBACK_CANCEL };
-
-  const optionIndex = Number(action);
-  if (!Number.isInteger(optionIndex) || optionIndex < 0) return null;
-  return { menuId, action: 'select', optionIndex };
-}
-
 function buildMenuSelectionPrompt(menu: TelegramMenu, option: TelegramMenuOption): string {
   return [
     'The user selected an option from a Telegram inline menu.',
@@ -294,15 +230,4 @@ function buildMenuCancelledPrompt(menu: TelegramMenu): string {
     '',
     'Acknowledge the cancellation briefly or ask how to proceed if needed.',
   ].join('\n');
-}
-
-function createMenuId(): string {
-  return randomUUID().replace(/-/g, '').slice(0, 12);
-}
-
-function cleanupExpiredMenus(): void {
-  const now = Date.now();
-  for (const [id, menu] of menus.entries()) {
-    if (menu.expiresAt <= now) menus.delete(id);
-  }
 }

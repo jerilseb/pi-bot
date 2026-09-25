@@ -168,7 +168,10 @@ export function ensureBotSettingsFile(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Telegram API and size limits
+// Telegram: the Bot API, its limits, and how the Telegram channel shows things
+//
+// Telegram's rate limits are the reason for every interval here; the core
+// announces every change and the Telegram channel paces its own edits.
 // ---------------------------------------------------------------------------
 
 export const TELEGRAM_API = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
@@ -183,34 +186,6 @@ export const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 export const TELEGRAM_PHOTO_UPLOAD_LIMIT = 10 * 1024 * 1024;
 export const TELEGRAM_DOCUMENT_UPLOAD_LIMIT = 50 * 1024 * 1024;
 export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
-
-// ---------------------------------------------------------------------------
-// Interfaces: the channels (Telegram, later a terminal UI) that use the core
-// ---------------------------------------------------------------------------
-
-/**
- * How recently a channel must have been used for something unprompted (a
- * background report, a heartbeat or cron message) to alert it rather than
- * every durable channel. See src/core.ts.
- */
-export const ACTIVE_WINDOW_MS = 10 * 60_000;
-/**
- * How long shutdown waits for each channel to finish its pending sends. Each
- * channel sends in the background, in event order, so a reply or error may
- * still be going out when the process is asked to exit.
- */
-export const CHANNEL_DRAIN_TIMEOUT_MS = 5_000;
-
-// ---------------------------------------------------------------------------
-// Queueing and response behavior
-// ---------------------------------------------------------------------------
-
-export const MAX_QUEUED_PROMPTS = 5;
-// The Pi SDK already retries transient failures (3 attempts by default). After
-// that budget is exhausted, the foreground chat gets one fresh continuation
-// turn rather than replaying the original user prompt and its tool side effects.
-export const TRANSPORT_RECOVERY_MAX_CONTINUATIONS = 1;
-export const TRANSPORT_RECOVERY_DELAY_MS = 1_000;
 
 /**
  * How tool calls reach the chat. `stream` sends a new message per batch,
@@ -288,6 +263,57 @@ export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
  * header and blockquote tags always fit; lines past it are counted, not shown.
  */
 export const TOOL_CALL_COLLAPSED_MAX_CHARS = 3_500;
+
+/**
+ * The heartbeat of the live progress message a job started from the chat keeps
+ * in Telegram (src/channels/telegram/job-progress.ts): it is re-rendered this
+ * often even when nothing happened, so its clock moves. Each refresh is at most
+ * one Telegram edit and no model call. Also how long a message waits after a
+ * failed write before trying again, so a Telegram rate limit does not use up
+ * its retries in seconds.
+ */
+export const JOB_PROGRESS_UPDATE_MS = 20_000;
+/**
+ * Shortest gap between two routine writes of one live progress message. Changes
+ * in between (a worker's tool call, a line of output) are coalesced into the
+ * next write, which renders the state as it is then.
+ */
+export const JOB_PROGRESS_MIN_EDIT_MS = 3_000;
+/**
+ * Shortest gap between routine writes across all live progress messages, since
+ * the per-message gap does not bound the total when many jobs run at once. With
+ * no Telegram 429 handling, this and the two intervals above are the only rate
+ * protection.
+ */
+export const JOB_PROGRESS_GLOBAL_MIN_GAP_MS = 1_000;
+
+// ---------------------------------------------------------------------------
+// Interfaces: the channels (Telegram, later a terminal UI) that use the core
+// ---------------------------------------------------------------------------
+
+/**
+ * How recently a channel must have been used for something unprompted (a
+ * background report, a heartbeat or cron message) to alert it rather than
+ * every durable channel. See src/core.ts.
+ */
+export const ACTIVE_WINDOW_MS = 10 * 60_000;
+/**
+ * How long shutdown waits for each channel to finish its pending sends. Each
+ * channel sends in the background, in event order, so a reply or error may
+ * still be going out when the process is asked to exit.
+ */
+export const CHANNEL_DRAIN_TIMEOUT_MS = 5_000;
+
+// ---------------------------------------------------------------------------
+// Queueing and response behavior
+// ---------------------------------------------------------------------------
+
+export const MAX_QUEUED_PROMPTS = 5;
+// The Pi SDK already retries transient failures (3 attempts by default). After
+// that budget is exhausted, the foreground chat gets one fresh continuation
+// turn rather than replaying the original user prompt and its tool side effects.
+export const TRANSPORT_RECOVERY_MAX_CONTINUATIONS = 1;
+export const TRANSPORT_RECOVERY_DELAY_MS = 1_000;
 
 // ---------------------------------------------------------------------------
 // Usage commands (/openaiusage, /elevenlabsusage)
@@ -381,27 +407,6 @@ export const BACKGROUND_BASH_REPORT_OUTPUT_MAX_CHARS = 3_000;
 export const BACKGROUND_BASH_COMPLETED_TTL_MS = 30 * 60_000;
 /** How long background_bash_stop waits for a signalled session to settle. */
 export const BACKGROUND_BASH_STOP_WAIT_MS = 5_000;
-/**
- * The heartbeat of the live progress message a job started from the chat keeps
- * (src/job-progress.ts): it is re-rendered this often even when nothing
- * happened, so its clock moves. Each refresh is at most one Telegram edit and no
- * model call. Also how long a message waits after a failed write before trying
- * again, so a Telegram rate limit does not use up its retries in seconds.
- */
-export const JOB_PROGRESS_UPDATE_MS = 20_000;
-/**
- * Shortest gap between two routine writes of one live progress message. Changes
- * in between (a worker's tool call, a line of output) are coalesced into the
- * next write, which renders the state as it is then.
- */
-export const JOB_PROGRESS_MIN_EDIT_MS = 3_000;
-/**
- * Shortest gap between routine writes across all live progress messages, since
- * the per-message gap does not bound the total when many jobs run at once. With
- * no Telegram 429 handling, this and the two intervals above are the only rate
- * protection.
- */
-export const JOB_PROGRESS_GLOBAL_MIN_GAP_MS = 1_000;
 /**
  * Guidance, not a limit: a background command the agent expects to run longer
  * than this, or that is still running after it, should end the agent's turn,

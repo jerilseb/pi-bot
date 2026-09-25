@@ -90,12 +90,9 @@ function setup(t: TestContext) {
     }),
     resolve: () => resolveGate(),
   };
-  // Commands still send their own output straight to Telegram.
-  const commandMessages: string[] = [];
-  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
-    const payload = JSON.parse(String(init?.body)) as { text?: string };
-    if (payload.text) commandMessages.push(payload.text);
-    return Response.json({ ok: true, result: { message_id: commandMessages.length } });
+  // Nothing in the core may talk to the network: everything goes out as events.
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('unexpected network call');
   });
   const runs: string[] = [];
   let options: PiRunPromptOptions | undefined;
@@ -164,7 +161,6 @@ function setup(t: TestContext) {
     backgroundSteer,
     abort,
     note,
-    commandMessages,
     stop: () => {
       running = false;
     },
@@ -297,8 +293,11 @@ for (const command of ['/abort', '/new']) {
     assert.equal(f.chat.queue.length, 1);
     assert.equal(await f.send(command), null);
     if (command === '/new') {
-      assert.ok(f.commandMessages.some((message) => message.includes('Reasoning: <b>medium</b>')));
+      assert.ok(f.channel.notices().some((notice) => notice.includes('Reasoning: **medium**')));
+      assert.equal(f.channel.of('reset').length, 1);
     }
+    // A change every channel needs to know about goes to all of them.
+    assert.equal(f.channel.of('notice').at(-1)?.to, 'all');
     assert.equal(f.abort.mock.callCount(), 1);
     assert.equal(f.steer.mock.callCount(), 0);
     assert.deepEqual(f.chat.queue, []);
@@ -424,8 +423,10 @@ test('a delivered scheduled-task report is noted in the chat session', async (t)
   assert.match(text, /background answer/);
   // The report reaches the channels as a delivery, not as a chat reply.
   assert.deepEqual(f.channel.reports(), ['background answer']);
-  assert.deepEqual(f.channel.deliveries[0]?.origin, cron);
-  assert.equal(f.channel.deliveries[0]?.label, 'Morning check');
+  const [delivered] = f.channel.deliveries;
+  assert.equal(delivered?.kind, 'report');
+  assert.deepEqual(delivered?.kind === 'report' && delivered.origin, cron);
+  assert.equal(delivered?.kind === 'report' && delivered.label, 'Morning check');
   assert.deepEqual(f.channel.replies(), []);
 });
 

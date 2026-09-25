@@ -27,7 +27,6 @@ import {
 } from './src/background-bash.ts';
 import { BackgroundOutbox, setBackgroundOutbox } from './src/background-outbox.ts';
 import { createChatSession } from './src/chat-session.ts';
-import { telegramCommandMenu } from './src/commands.ts';
 import {
   ALLOWED_CHAT_ID,
   HEARTBEAT_MODEL,
@@ -43,7 +42,6 @@ import {
   TMP_DIR,
   ensureBotSettingsFile,
   isAllowedTelegramChat,
-  subagentToolCallsEnabled,
   toolCallMode,
 } from './src/config.ts';
 import { collectConfigProblems } from './src/config-validation.ts';
@@ -54,25 +52,18 @@ import {
 } from './src/context-gist.ts';
 import { LocalCore } from './src/core.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
-import { dispatchCallbackQuery } from './src/callback-menu.ts';
 import { TelegramChannel } from './src/channels/telegram/channel.ts';
-import { registerBotCommands } from './src/channels/telegram/telegram.ts';
 import { discoverExtensionPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
-import { jobStopCallbackAction } from './src/job-stop-action.ts';
-import { modelCallbackMenu } from './src/model-menu.ts';
-import { reasoningCallbackMenu } from './src/reasoning-menu.ts';
-import { toolCallCallbackMenu } from './src/tool-call-menu.ts';
-import { transcriptCallbackMenu } from './src/transcript-menu.ts';
+import { escapeMarkdown } from './src/markdown.ts';
+import { runningJobSnapshots, setJobEventSink } from './src/job-registry.ts';
 import {
   consumePostRestartTasks,
   ensurePostRestartTasksFile,
   formatPostRestartTask,
   type PostRestartTask,
 } from './src/post-restart-tasks.ts';
-import { subagentToolCallCallbackMenu } from './src/subagent-tool-call-menu.ts';
-import { telegramMenuCallbackMenu } from './src/telegram-menu.ts';
 import {
   assertModelUsable,
   createPiRuntime,
@@ -83,7 +74,6 @@ import {
   interruptedSubagentsNote,
   runningSubagentOriginFiles,
   setSubagentReportHandler,
-  setSubagentToolCallsSetting,
   stopAllSubagents,
   subagentReportPrompt,
   subagentStatusText,
@@ -94,6 +84,7 @@ import {
   memorySystemPromptExtension,
   readSystemPrompt,
 } from './src/system-prompt.ts';
+import { setToolHost } from './src/tool-host.ts';
 import { errorMessage } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
@@ -159,7 +150,11 @@ let running = true;
 
 // What background runs send waits until the chat has been idle for
 // BACKGROUND_DELIVERY_COOLDOWN_MS, so a report never interrupts a conversation.
-const outbox = new BackgroundOutbox({ isChatBusy: () => chatSession.isBusy() });
+// With no interface attached, it keeps them until one is.
+const outbox = new BackgroundOutbox({
+  isChatBusy: () => chatSession.isBusy(),
+  hasAudience: () => core.hasChannels(),
+});
 setBackgroundOutbox(outbox);
 
 const core = new LocalCore({
@@ -167,7 +162,11 @@ const core = new LocalCore({
   backgroundSession,
   restart,
   isRunning: () => running,
+  runningJobs: runningJobSnapshots,
 });
+// The agent's tools reach the user through the core, and so does job progress.
+setToolHost(core.toolHost);
+setJobEventSink((event) => core.emit(event));
 const telegramChannel = new TelegramChannel({ core, cwd: process.cwd() });
 core.attach(telegramChannel);
 
@@ -184,18 +183,6 @@ const cron = createCronController({
   isRunning: () => running,
 });
 
-// Every inline keyboard the bot sends, keyed by callback-data prefix.
-const CALLBACK_MENUS = [
-  modelCallbackMenu(chatSession),
-  reasoningCallbackMenu(chatSession),
-  toolCallCallbackMenu,
-  transcriptCallbackMenu,
-  subagentToolCallCallbackMenu,
-  telegramMenuCallbackMenu((text) => telegramChannel.submitAnswer(text)),
-];
-// Buttons on messages the bot keeps editing itself: the live job messages' Stop buttons.
-const CALLBACK_ACTIONS = [jobStopCallbackAction];
-
 // Backgrounded bash sessions report back to the agent that started them as
 // internal background-bash-report prompts that go through the normal prompt
 // queue, rather than sending messages of their own.
@@ -205,7 +192,6 @@ setBackgroundBashReportHandler(async (report) => {
 setSubagentReportHandler(async (report) => {
   await core.enqueue(subagentReportPrompt(report));
 });
-setSubagentToolCallsSetting(subagentToolCallsEnabled);
 
 function validateConfiguration(): void {
   const problems = collectConfigProblems();
@@ -298,17 +284,14 @@ async function noteUncleanExit(): Promise<void> {
 async function run(): Promise<void> {
   logStartupBanner();
 
-  await registerBotCommands(telegramCommandMenu());
+  await telegramChannel.registerCommands();
   await noteUncleanExit();
   heartbeat.start();
   cron.start();
   core.notice('✅ Bot is up and running.');
   await enqueuePostRestartTasks();
 
-  await telegramChannel.poll({
-    isRunning: () => running,
-    onCallbackQuery: (query) => dispatchCallbackQuery(query, CALLBACK_MENUS, CALLBACK_ACTIONS),
-  });
+  await telegramChannel.poll({ isRunning: () => running });
 }
 
 function logStartupBanner(): void {
@@ -345,7 +328,9 @@ async function enqueuePostRestartTasks(): Promise<void> {
 
     console.log(`enqueueing post-restart task: ${formatPostRestartTask(task)}`);
     try {
-      core.notice(`🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`);
+      core.notice(
+        escapeMarkdown(`🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`),
+      );
       // Not user input: that steers a run already in progress, so a second task
       // would be folded into the first one's turn instead of getting its own.
       await core.enqueue({

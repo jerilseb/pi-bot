@@ -1,12 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { CoreEvent, JobSnapshot } from './contract.ts';
 import { currentModel } from './extension-models.ts';
-import {
-  type ProgressContent,
-  type ProgressMessage,
-  type ProgressMessageOptions,
-  startProgressMessage,
-} from './job-progress.ts';
 import { onSteeringMessage } from './steering-signal.ts';
 import type { IncomingPrompt, JobReportSource, SessionKind } from './types.ts';
 import { errorMessage, formatDuration } from './util.ts';
@@ -21,14 +16,43 @@ import { errorMessage, formatDuration } from './util.ts';
  * This module owns the parts that are not specific to a kind of job — ID
  * allocation, the yield-then-background step, TTL pruning, cancellation, and
  * report delivery including where a report is routed and whether it is still
- * needed, and the live progress message of a job started from the chat — while
- * the caller keeps its own status vocabulary and user-facing wording, and its
- * own stop path for the message's Stop buttons.
+ * needed, and telling the channels how a job started from the chat is going —
+ * while the caller keeps its own status vocabulary and user-facing wording, and
+ * its own stop path for the user's Stop.
+ *
+ * Progress is a stream of `job` events carrying plain snapshots: one as the
+ * job starts, one per change (bursts coalesced to one per tick), an urgent one
+ * for the user's own stop, and a final one as it settles. Each channel paces
+ * its own updates; no model call is involved.
  *
  * A registry lives at module level in src/ (imported once by Node), so it is
  * shared for the lifetime of the bot process. Jobs do not survive bot restarts;
  * main.ts stops them all on shutdown.
  */
+
+export type JobEvent = Extract<CoreEvent, { type: 'job' }>;
+
+let jobEventSink: ((event: JobEvent) => void) | null = null;
+
+/** Where every registry's job events go: the core, installed once by main.ts; tests install their own. */
+export function setJobEventSink(sink: ((event: JobEvent) => void) | null): void {
+  jobEventSink = sink;
+}
+
+const snapshotSources = new Set<() => JobSnapshot[]>();
+
+/** The running jobs the chat started, across every registry, for a channel that connects mid-job. */
+export function runningJobSnapshots(): JobSnapshot[] {
+  return [...snapshotSources].flatMap((source) => source());
+}
+
+function emitJobEvent(event: JobEvent): void {
+  try {
+    jobEventSink?.(event);
+  } catch (error) {
+    console.error('failed to announce job progress:', errorMessage(error));
+  }
+}
 
 /** Where a job was started from, so its report can find its way back. */
 export interface JobOrigin {
@@ -151,22 +175,24 @@ export interface JobRegistryOptions<
   /** Projects a settled job into the report delivered to the chat agent. */
   buildReport: (job: TJob) => TReport;
   /**
-   * Renders the job's progress message as Telegram HTML and its Stop buttons,
-   * for both the running and the final state. Without it, jobs show no progress.
+   * The job as channels show it, for both the running and the final state.
+   * Without it, jobs show no progress.
    */
-  renderProgress?: (job: TJob) => ProgressContent;
-  /** Overrides the progress transport, intervals, and write gate; for tests. */
-  progressOptions?: ProgressMessageOptions;
+  snapshot?: (job: TJob) => JobSnapshot;
 }
 
 export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, TReport> {
   private readonly jobs = new Map<string, TJob>();
   private readonly options: JobRegistryOptions<TTerminal, TJob, TReport>;
   private reportHandler: ((report: TReport) => Promise<void>) | null = null;
-  private readonly progress = new Map<string, ProgressMessage>();
+  /** Jobs whose progress the channels are shown, and the ones with an update pending this tick. */
+  private readonly watched = new Map<string, TJob>();
+  private readonly pending = new Set<string>();
 
   constructor(options: JobRegistryOptions<TTerminal, TJob, TReport>) {
     this.options = options;
+    const { snapshot } = options;
+    if (snapshot) snapshotSources.add(() => [...this.watched.values()].map(snapshot));
   }
 
   /** Wires completion reports into the bot's incoming-prompt pipeline. Called from main.ts. */
@@ -182,7 +208,7 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
     }
   }
 
-  /** Adds a job that has just started, and starts its progress message. */
+  /** Adds a job that has just started, and announces it. */
   register(job: TJob): void {
     this.jobs.set(job.id, job);
     this.startProgress(job);
@@ -211,7 +237,7 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
   /**
    * Waits up to yieldMs for a just-started job. A job that settles in time is
    * forgotten, since its result goes back inline and no report follows; its
-   * progress message still ends on its final state. One still running is marked
+   * progress still ends on its final state. One still running is marked
    * backgrounded so its completion report is delivered. Returns true when the
    * job was backgrounded.
    */
@@ -227,8 +253,8 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   /**
    * Blocks the calling tool, not the model, until one of the WaitOptions ends
-   * it. No model call is spent while it waits, and the job's progress message
-   * keeps the user informed meanwhile.
+   * it. No model call is spent while it waits, and the job's progress keeps
+   * the user informed meanwhile.
    */
   waitFor(job: TJob, options: WaitOptions): Promise<WaitOutcome> {
     if (job.status !== 'running') return Promise.resolve('settled');
@@ -267,22 +293,29 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   /**
    * Called once when a job reaches its terminal status, from the runner's
-   * settle path: shows the final state in its progress message, then delivers
-   * the report. In that order, so the report's reply cannot land first.
+   * settle path: announces the final state, then delivers the report. In that
+   * order, so a channel shows the outcome before the report's reply.
    */
   async settled(job: TJob): Promise<void> {
-    await this.finishProgress([job]);
+    this.finishProgress([job]);
     await this.reportEnd(job);
   }
 
-  /** Asks for the job's progress message to be re-rendered soon, coalesced with other changes. */
+  /** Announces that the job changed. Changes within one tick are coalesced into one event. */
   refreshProgress(job: TJob): void {
-    this.progress.get(job.id)?.refresh();
+    if (!this.watched.has(job.id) || this.pending.has(job.id)) return;
+    this.pending.add(job.id);
+    setImmediate(() => {
+      if (!this.pending.delete(job.id) || !this.watched.has(job.id)) return;
+      this.announce(job, {});
+    });
   }
 
-  /** Re-renders the job's progress message at once, for a Stop tap. */
+  /** Announces the change at once and marks it urgent, for the user's own Stop. */
   refreshProgressNow(job: TJob): void {
-    this.progress.get(job.id)?.refreshNow();
+    if (!this.watched.has(job.id)) return;
+    this.pending.delete(job.id);
+    this.announce(job, { urgent: true });
   }
 
   /**
@@ -291,23 +324,23 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
    * own output is noted, not watched.
    */
   private startProgress(job: TJob): void {
-    const render = this.options.renderProgress;
-    if (!render || job.origin.session !== 'chat') return;
-    this.progress.set(
-      job.id,
-      startProgressMessage(() => render(job), this.options.progressOptions),
-    );
+    if (!this.options.snapshot || job.origin.session !== 'chat') return;
+    this.watched.set(job.id, job);
+    this.announce(job, {});
   }
 
-  private async finishProgress(jobs: TJob[]): Promise<void> {
-    const pending: Promise<void>[] = [];
+  private finishProgress(jobs: TJob[]): void {
     for (const job of jobs) {
-      const progress = this.progress.get(job.id);
-      if (!progress) continue;
-      this.progress.delete(job.id);
-      pending.push(progress.finish());
+      if (!this.watched.delete(job.id)) continue;
+      this.pending.delete(job.id);
+      this.announce(job, { final: true });
     }
-    await Promise.all(pending);
+  }
+
+  private announce(job: TJob, flags: { urgent?: boolean; final?: boolean }): void {
+    const { snapshot } = this.options;
+    if (!snapshot) return;
+    emitJobEvent({ type: 'job', job: snapshot(job), ...flags });
   }
 
   /**
@@ -328,10 +361,10 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
         this.options.cancelWaitMs,
       );
     }
-    // Awaited here as well as on settle: at shutdown the process may exit
-    // before a runner's settle path runs, and a message left saying "running"
-    // would be wrong for good.
-    await this.finishProgress(running);
+    // Here as well as on settle: at shutdown the process may exit before a
+    // runner's settle path runs, and progress left saying "running" would be
+    // wrong for good.
+    this.finishProgress(running);
     return running.length;
   }
 
@@ -360,8 +393,8 @@ export class JobRegistry<TTerminal extends string, TJob extends Job<TTerminal>, 
 
   /**
    * Delivers a settled job's report unless it was cancelled or never
-   * backgrounded. A job the user stopped from Telegram was not cancelled, so the
-   * agent still hears how it ended.
+   * backgrounded. A job the user stopped was not cancelled, so the agent still
+   * hears how it ended.
    */
   private async reportEnd(job: TJob): Promise<void> {
     if (!job.backgrounded || job.cancelled) return;

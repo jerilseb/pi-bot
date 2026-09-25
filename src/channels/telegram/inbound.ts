@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { cleanupAttachments, deleteLocalFile } from '../../attachments.ts';
+import { deleteLocalFile } from '../../attachments.ts';
 import {
   TELEGRAM_DOWNLOAD_LIMIT,
   TELEGRAM_FILE_API,
@@ -23,38 +23,18 @@ export interface TelegramInput {
 }
 
 /**
- * Ingestion epoch. Media ingestion (downloads, transcription) runs detached
- * from the polling loop, so /abort and /new bump the epoch to drop ingestion
- * results that finish after the user cancelled. Only ingestTelegramMessage
- * compares epochs, so the counter stays private to this module.
- */
-let epoch = 0;
-
-export function discardPendingIngestion(): void {
-  epoch++;
-}
-
-/**
  * Ingests one Telegram message detached from the polling loop, since media
- * downloads and audio transcription can take minutes. If /abort or /new bumps
- * the ingestion epoch while this is in flight, the result is dropped.
+ * downloads and audio transcription can take minutes. The caller takes an
+ * ingestion ticket first, so a message the user cancelled with /abort or /new
+ * while it was downloading is turned away when it is submitted.
  */
 export async function ingestTelegramMessage(
   message: TelegramMessage,
   submit: (input: TelegramInput) => Promise<void>,
 ): Promise<void> {
-  const startEpoch = epoch;
-
   try {
     const incoming = await toTelegramInput(message);
     if (!incoming) return;
-
-    if (epoch !== startEpoch) {
-      console.log('dropping message ingested before /abort or /new');
-      cleanupAttachments(incoming);
-      return;
-    }
-
     await submit(incoming);
   } catch (error) {
     console.error('failed to ingest Telegram message:', errorMessage(error));

@@ -8,20 +8,19 @@ import type { Attachment, JobReportSource, SessionKind } from './types.ts';
  * core module a channel needs: a channel gives the core input through
  * AgentCore, and hears back through three kinds of output.
  *
- * - Events go to every attached channel, in order: the conversation, notices,
- *   and state. A channel keeps its own sends in that order.
+ * - Events go to every attached channel, in order: the conversation, job
+ *   progress, closed menus, notices, and state. A channel keeps its own sends
+ *   in that order.
  * - Return values go only to the channel that acted, such as whether a message
- *   was queued, steered, or turned away. The channel shows its own feedback.
- * - Deliveries go to every attached channel, and each returns a receipt, so the
- *   core knows whether anyone was actually sent a background report.
+ *   was queued, steered, or turned away, or what a menu tap did. The channel
+ *   shows its own feedback.
+ * - Deliveries (files, voice notes, menus, background reports) go to every
+ *   attached channel in their audience, and each returns a receipt, so a tool
+ *   learns whether its upload arrived and the core whether anyone was actually
+ *   sent a background report.
  *
  * The core never asks which channel it is talking to. What differs between
  * channels is declared in their capabilities, or is their own setting.
- *
- * Not here yet: the command list, choices (menus), job progress and stop,
- * tickets that discard downloads made stale by /abort or /new, and file and
- * voice deliveries. Until those move behind the contract, the modules behind
- * them still talk to Telegram directly.
  */
 
 export interface ChannelRef {
@@ -43,6 +42,18 @@ export interface AgentCore {
   submit(input: UserInput): Promise<SubmitResult>;
   /** Runs a slash command. False when the line is not one the core knows. */
   command(line: string, from: ChannelRef): Promise<boolean>;
+  /** The core's commands plus that channel's own, for its command menu and /help. */
+  commands(from: ChannelRef): CommandInfo[];
+  /** Answers an open menu. The first answer wins; every copy closes with it. */
+  choose(choiceId: string, option: number | 'cancel', from: ChannelRef): Promise<ChoiceOutcome>;
+  /** Stops a running job, or one task of a sub-agent job; its report says the user stopped it. */
+  stopJob(jobId: string, task: number | undefined, from: ChannelRef): JobStopOutcome;
+  /**
+   * Taken when a channel starts ingesting a message it may take a while to
+   * submit (a download, a transcription). /abort and /new make every ticket
+   * taken before them stale, and a submit with a stale ticket is turned away.
+   */
+  beginIngestion(): IngestionTicket;
   /** Starts sending events and deliveries to a channel. Returns its detach. */
   attach(channel: Channel): () => void;
   snapshot(): CoreSnapshot;
@@ -60,6 +71,10 @@ export interface ChannelCaps {
 export interface Channel {
   readonly ref: ChannelRef;
   readonly caps: ChannelCaps;
+  /** Commands the channel handles itself, listed with the core's. */
+  readonly commands?: readonly CommandInfo[];
+  /** The channel's own settings, for /status. */
+  status?(): ChannelStatus;
   /**
    * Called for every event, in order. Must return at once and never throw: a
    * channel queues its sends internally, since the core does not wait for them.
@@ -71,16 +86,39 @@ export interface Channel {
   drain(timeoutMs: number): Promise<void>;
 }
 
+export interface CommandInfo {
+  /** Without the leading slash. */
+  name: string;
+  /** Short line for a command menu. */
+  description: string;
+  /** Longer line for /help. Falls back to description. */
+  help?: string;
+  /** Set only for commands deliberately kept out of /help. */
+  hideFromHelp?: boolean;
+}
+
+export interface ChannelStatus {
+  title: string;
+  settings: Array<{ label: string; on?: boolean; detail?: string }>;
+}
+
+/** Opaque to channels. */
+export interface IngestionTicket {
+  readonly epoch: number;
+}
+
 export interface UserInput {
   from: ChannelRef;
   text: string;
   /** Local files. The core owns them once submitted, and deletes its temp files after use. */
   attachments: Attachment[];
+  /** The ticket taken when ingestion began; a stale one is turned away. */
+  ticket?: IngestionTicket;
 }
 
 export type SubmitResult =
   | { status: 'queued' | 'steered' }
-  | { status: 'rejected'; reason: 'queue-full' | 'shutting-down' }
+  | { status: 'rejected'; reason: 'queue-full' | 'stale' | 'shutting-down' }
   | { status: 'rejected'; reason: 'error'; error: string };
 
 /** How a turn ended. Silent means a noop sentinel or a blank unattended reply: nothing to show. */
@@ -95,6 +133,18 @@ export type CoreEvent =
   /** An SDK event from a session. turnId is null for one that came between turns. */
   | { type: 'agent'; turnId: string | null; session: SessionKind; event: AgentSessionEvent }
   | ({ type: 'turn_end'; turnId: string; session: SessionKind; ping: ChannelRef[] } & TurnOutcome)
+  /**
+   * A job the chat started, whenever it changes: once as it starts, then as it
+   * goes, urgently for the user's own stop, and a last time, final, as it
+   * settles. Each channel paces its own updates.
+   */
+  | { type: 'job'; job: JobSnapshot; urgent?: boolean; final?: boolean }
+  /**
+   * A menu was answered, cancelled, refused or expired, and every copy of it
+   * now reads `text`. Sent to every channel: one that never showed the menu may
+   * show the text as a note, since it can report a change such as a new model.
+   */
+  | { type: 'choice_closed'; choiceId: string; text: RichText; by?: ChannelRef }
   | {
       type: 'notice';
       text: RichText;
@@ -103,31 +153,112 @@ export type CoreEvent =
       ping: ChannelRef[];
     }
   | { type: 'state'; state: CoreState }
+  /** /new started a fresh conversation. */
+  | { type: 'reset' }
   | { type: 'channels'; attached: ChannelRef[] };
 
 /**
- * Text as the core hands it over. Plain text is for the channel to escape.
- * Model replies are Telegram HTML, which is what the system prompt asks for.
+ * Text as the core hands it over. The bot's own text is Markdown, which each
+ * channel renders its own way; plain text is for the channel to escape. Model
+ * replies are Telegram HTML, which is what the system prompt asks for.
  */
 export interface RichText {
-  format: 'plain' | 'telegram-html';
+  format: 'plain' | 'markdown' | 'telegram-html';
   text: string;
 }
 
-/** A background run's report, released by the background outbox. */
-export type Deliverable = {
-  kind: 'report';
-  text: RichText;
-  origin: PromptOrigin;
-  label?: string;
-  ping: ChannelRef[];
-};
+/**
+ * Something sent to the user outside the conversation's own messages. A
+ * channel that cannot show a kind returns a receipt skipped as unsupported.
+ */
+export type Deliverable = (
+  | { kind: 'image' | 'document'; path: string; caption?: string }
+  /** `path` is unset when no attached channel plays voice notes, so none was synthesized. */
+  | { kind: 'voice'; text: string; path?: string }
+  /** Goes only to the channels in the menu's audience. */
+  | { kind: 'choice'; choice: ChoiceView }
+  /** A background run's report, released by the background outbox. */
+  | { kind: 'report'; text: RichText; origin: PromptOrigin; label?: string }
+) & { ping: ChannelRef[] };
 
 export interface Receipt {
   channel: ChannelRef;
   ok: boolean;
   error?: string;
   skipped?: 'unsupported';
+}
+
+/** An open menu as a channel shows it. */
+export interface ChoiceView {
+  id: string;
+  text: RichText;
+  options: string[];
+  columns: number;
+  cancellable: boolean;
+  expiresAt?: number;
+  audience: 'all' | ChannelRef;
+}
+
+export interface ChoiceOutcome {
+  /** A short acknowledgement for the one who tapped. */
+  toast: string;
+  /** What the menu now reads. */
+  text: RichText;
+  /** False when the menu was unknown or gone: only the tapped copy needs `text`. */
+  closed: boolean;
+  /** Set when the answer was submitted as the user's message, for the usual feedback. */
+  submitted?: SubmitResult;
+}
+
+export type JobStopOutcome = 'stopping' | 'already-stopping' | 'not-running';
+
+export type JobSnapshot = BashJobSnapshot | SubagentJobSnapshot;
+
+export interface BashJobSnapshot {
+  kind: 'bash';
+  id: string;
+  command: string;
+  status: 'running' | 'exited' | 'stopped' | 'failed';
+  /** The status as the user reads it, e.g. `exited with code 1` or `stopped by you`. */
+  statusText: string;
+  exitCode: number | null;
+  startedAt: number;
+  endedAt: number | null;
+  /** The user asked it to stop; it may not have ended yet. */
+  stopRequested: boolean;
+  /** The latest line of output, if any. */
+  lastLine: string | null;
+}
+
+export type SubagentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'stopped';
+
+export interface SubagentTaskSnapshot {
+  /** 0-based; shown 1-based, and the number never changes. */
+  index: number;
+  task: string;
+  /** The agent's short title for the task, if it gave one. */
+  description: string | null;
+  /** provider/model the worker runs on. */
+  model: string;
+  status: SubagentTaskStatus;
+  /** The user asked this task to stop; set before the abort. */
+  stopRequested: boolean;
+  /** The worker's recent tool calls, oldest first, each one line of plain text. */
+  toolCalls: readonly string[];
+  toolUses: number;
+  result: string | null;
+  error: string | null;
+  startedAt: number | null;
+  endedAt: number | null;
+}
+
+export interface SubagentJobSnapshot {
+  kind: 'subagent';
+  id: string;
+  status: 'running' | 'succeeded' | 'failed' | 'stopped';
+  startedAt: number;
+  endedAt: number | null;
+  tasks: readonly SubagentTaskSnapshot[];
 }
 
 export interface SessionState {
@@ -147,6 +278,10 @@ export interface CoreState {
 export interface CoreSnapshot {
   /** The live chat session's messages; empty until its transcript is loaded. */
   history: AgentMessage[];
+  /** Jobs the chat started that are still running. */
+  jobs: JobSnapshot[];
+  /** Open menus, with their audience. */
+  choices: ChoiceView[];
   state: CoreState;
   channels: ChannelRef[];
 }

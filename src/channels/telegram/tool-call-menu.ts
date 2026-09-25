@@ -1,6 +1,6 @@
 import type { CallbackMenu } from './callback-menu.ts';
-import { setToolCallMode, TOOL_CALL_MODES, type ToolCallMode, toolCallMode } from './config.ts';
-import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
+import { setToolCallMode, TOOL_CALL_MODES, type ToolCallMode, toolCallMode } from '../../config.ts';
+import type { InlineKeyboardButton } from './telegram.ts';
 
 const TOOL_CALL_CALLBACK_PREFIX = 'toolcalls:';
 
