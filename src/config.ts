@@ -66,6 +66,13 @@ export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
  */
 export const ENABLE_SUBAGENTS = process.env.ENABLE_SUBAGENTS?.trim() ?? '';
 export const SUBAGENTS_ENABLED = ENABLE_SUBAGENTS.toLowerCase() === 'true';
+/**
+ * The terminal UI's socket is opened only when .env sets ENABLE_TUI=true. Off
+ * by default: whoever can reach the socket can talk to the agent, so listening
+ * is a deployment decision. Validated like ENABLE_SUBAGENTS.
+ */
+export const ENABLE_TUI = process.env.ENABLE_TUI?.trim() ?? '';
+export const TUI_ENABLED = ENABLE_TUI.toLowerCase() === 'true';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -288,7 +295,7 @@ export const JOB_PROGRESS_MIN_EDIT_MS = 3_000;
 export const JOB_PROGRESS_GLOBAL_MIN_GAP_MS = 1_000;
 
 // ---------------------------------------------------------------------------
-// Interfaces: the channels (Telegram, later a terminal UI) that use the core
+// Interfaces: the channels (Telegram, the terminal UI) that use the core
 // ---------------------------------------------------------------------------
 
 /**
@@ -303,6 +310,47 @@ export const ACTIVE_WINDOW_MS = 10 * 60_000;
  * still be going out when the process is asked to exit.
  */
 export const CHANNEL_DRAIN_TIMEOUT_MS = 5_000;
+
+/**
+ * The Unix socket terminal UI clients connect to (src/channels/socket/), in a
+ * directory only this user can enter: the user's runtime directory, which
+ * systemd sets for user units and pam_systemd for SSH logins, or a private
+ * directory under the temp dir on a machine without one. The bot and `npm run
+ * tui` resolve it the same way, so they meet without being told where.
+ */
+export function tuiSocketPath(env: NodeJS.ProcessEnv = process.env): string {
+  const uid = process.getuid?.() ?? 0;
+  const runtimeDir = env.XDG_RUNTIME_DIR?.trim() || `/run/user/${uid}`;
+  const dir = fs.existsSync(runtimeDir)
+    ? path.join(runtimeDir, 'pi-bot')
+    : path.join(os.tmpdir(), `pi-bot-${uid}`);
+  return path.join(dir, 'tui.sock');
+}
+/**
+ * How often, at most, a terminal UI client hears a streaming message or tool
+ * output grow. Each update carries the whole message so far, so the ones in
+ * between can be dropped without losing anything.
+ */
+export const TUI_STREAM_COALESCE_MS = 50;
+/**
+ * Unsent bytes a terminal UI client may fall behind by before it is dropped.
+ * It reconnects and reloads from a snapshot, which beats buffering without end
+ * for a terminal that has stopped reading.
+ */
+export const TUI_CLIENT_BUFFER_MAX_BYTES = 16 * 1024 * 1024;
+/** Longest line a terminal UI client may send, in characters. Requests are small; this bounds a broken one. */
+export const TUI_REQUEST_MAX_CHARS = 1024 * 1024;
+/** How long a delivery waits for a terminal UI client's receipt before it counts as failed. */
+export const TUI_RECEIPT_TIMEOUT_MS = 10_000;
+/**
+ * How much of the conversation a terminal UI client is sent when it connects:
+ * the latest messages, from a user message on. The terminal keeps its own
+ * scrollback from there.
+ */
+export const TUI_HISTORY_MAX_MESSAGES = 200;
+/** A terminal UI client's reconnect backoff, doubling from the first to the last. */
+export const TUI_RECONNECT_MIN_MS = 500;
+export const TUI_RECONNECT_MAX_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Queueing and response behavior

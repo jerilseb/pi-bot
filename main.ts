@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Standalone Telegram → Pi chat bridge.
+ * Standalone Telegram → Pi chat bridge, with a terminal UI on the same chat.
  *
- * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID: keeps one
+ * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID, and with
+ * ENABLE_TUI any terminal that connects to its socket (`npm run tui`): keeps one
  * foreground Pi SDK session plus a background one that starts a fresh
  * transcript for every heartbeat or scheduled-task run, queues prompts, and
  * sends Pi's final response back. Supports text, images, downloaded files,
@@ -11,11 +12,13 @@
  * refs across Pi providers, and scheduled heartbeat prompts.
  *
  * This module is the orchestrator: it constructs the runtimes and sessions,
- * the agent core (core) and the Telegram channel attached to it, wires the
- * pieces together, and owns the startup sequence and process lifecycle.
- * Everything else is a dedicated module — the prompt queue (prompt-queue), the
- * Telegram channel and its polling loop (channels/telegram), commands, menus,
- * chat-session, discovery, system-prompt, env-guard, heartbeat, cron.
+ * the agent core (core), the Telegram channel attached to it and the socket
+ * terminal UI clients attach through, wires the pieces together, and owns the
+ * startup sequence and process lifecycle. Everything else is a dedicated
+ * module — the prompt queue (prompt-queue), the Telegram channel and its
+ * polling loop (channels/telegram), the terminal UI's socket (channels/socket),
+ * commands, menus, chat-session, discovery, system-prompt, env-guard,
+ * heartbeat, cron.
  */
 
 import * as fs from 'node:fs';
@@ -40,9 +43,11 @@ import {
   SESSIONS_DIR,
   SUBAGENT_SESSIONS_DIR,
   TMP_DIR,
+  TUI_ENABLED,
   ensureBotSettingsFile,
   isAllowedTelegramChat,
   toolCallMode,
+  tuiSocketPath,
 } from './src/config.ts';
 import { collectConfigProblems } from './src/config-validation.ts';
 import {
@@ -52,6 +57,7 @@ import {
 } from './src/context-gist.ts';
 import { LocalCore } from './src/core.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
+import { SocketServer } from './src/channels/socket/server.ts';
 import { TelegramChannel } from './src/channels/telegram/channel.ts';
 import { discoverExtensionPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
@@ -169,6 +175,9 @@ setToolHost(core.toolHost);
 setJobEventSink((event) => core.emit(event));
 const telegramChannel = new TelegramChannel({ core, cwd: process.cwd() });
 core.attach(telegramChannel);
+// Each terminal that connects becomes a channel of its own while it stays.
+const TUI_SOCKET_PATH = tuiSocketPath();
+const tuiServer = TUI_ENABLED ? new SocketServer({ core, path: TUI_SOCKET_PATH }) : null;
 
 // Neither waits for the chat, only for the background run before it.
 const heartbeat = createHeartbeatController({
@@ -284,6 +293,7 @@ async function noteUncleanExit(): Promise<void> {
 async function run(): Promise<void> {
   logStartupBanner();
 
+  await startTuiServer();
   await telegramChannel.registerCommands();
   await noteUncleanExit();
   heartbeat.start();
@@ -292,6 +302,18 @@ async function run(): Promise<void> {
   await enqueuePostRestartTasks();
 
   await telegramChannel.poll({ isRunning: () => running });
+}
+
+/** Telegram does not depend on the terminal UI, so a socket that will not open is only reported. */
+async function startTuiServer(): Promise<void> {
+  if (!tuiServer) return;
+  try {
+    await tuiServer.start();
+    console.log(`Terminal UI listening on ${TUI_SOCKET_PATH}`);
+  } catch (error) {
+    console.error('Terminal UI unavailable:', errorMessage(error));
+    core.notice(`⚠️ Terminal UI unavailable: ${escapeMarkdown(errorMessage(error))}`, 'warn');
+  }
 }
 
 function logStartupBanner(): void {
@@ -303,6 +325,7 @@ function logStartupBanner(): void {
   console.log(`Voice note tool: ${voiceStatusText()}`);
   console.log(`Context gist: ${contextGistStatusText()}`);
   console.log(`Tool call messages: ${toolCallMode()}`);
+  console.log(`Terminal UI: ${tuiServer ? TUI_SOCKET_PATH : 'off'}`);
   console.log(`Sub-agents: ${subagentStatusText()}`);
   console.log(heartbeatStatusText());
   console.log(cronStatusText());
@@ -379,6 +402,8 @@ async function shutdown(): Promise<void> {
   await stopAllSubagents();
   // Channels send in the background; let what the cleared turns left go out.
   await core.drain(CHANNEL_DRAIN_TIMEOUT_MS);
+  // Connected terminals see the socket close, and reconnect once the bot is back.
+  await tuiServer?.stop();
 }
 
 /** A stop from outside: note what is being cut short, then shut down. */

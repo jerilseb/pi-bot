@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { cleanupAttachments } from './attachments.ts';
 import { backgroundOutbox, deliverToChat } from './background-outbox.ts';
 import type { ChatSession, ChatState } from './chat-session.ts';
@@ -137,7 +138,15 @@ export function createPromptQueue(options: {
 
   function emitInput(prompt: IncomingPrompt, steered: boolean): void {
     if (prompt.origin.kind !== 'user') return;
-    sink.emit({ type: 'input', from: prompt.origin.channel, text: prompt.text, steered });
+    sink.emit({
+      type: 'input',
+      from: prompt.origin.channel,
+      text: prompt.text,
+      attachments: prompt.attachments.map(
+        (attachment) => attachment.filename ?? path.basename(attachment.path),
+      ),
+      steered,
+    });
   }
 
   /**

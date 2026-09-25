@@ -722,6 +722,29 @@ export class SdkPiSession {
     return this.session?.messages ?? [];
   }
 
+  /** The live session's reasoning level; null until the transcript is loaded. */
+  get thinkingLevel(): ThinkingLevel | null {
+    return this.session?.thinkingLevel ?? null;
+  }
+
+  /**
+   * The conversation as it stands, without starting an agent: the live
+   * session's messages, or those of the transcript the next start would
+   * resume. Empty once /new or start_new_session has cleared it.
+   */
+  async history(): Promise<AgentMessage[]> {
+    if (this.pendingNewSessionRequest || this.forceNewSessionOnNextStart) return [];
+    const live = await this.liveSession();
+    if (live) return live.messages;
+    try {
+      const manager = await this.openStoredSessionManager();
+      return manager ? manager.buildSessionContext().messages : [];
+    } catch (error) {
+      console.error('Failed to read the stored conversation:', error);
+      return [];
+    }
+  }
+
   /** How full the context window is, from the loaded transcript; undefined before it loads. */
   getContextUsage(): ContextUsage | undefined {
     return this.session?.getContextUsage();

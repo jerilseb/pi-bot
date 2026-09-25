@@ -57,7 +57,7 @@ export interface CallbackMenu {
 export interface CallbackAction {
   /** Callback-data prefix, including its trailing colon, e.g. `stop:`. */
   prefix: string;
-  answer(value: string): string;
+  answer(value: string): string | Promise<string>;
 }
 
 /**
@@ -136,7 +136,7 @@ async function handleCallbackAction(
   }
   let toast: string;
   try {
-    toast = action.answer(value);
+    toast = await action.answer(value);
   } catch (error) {
     // Toasts are capped at 200 characters, so the error itself goes to the log.
     console.error(`failed to handle the ${action.prefix} button:`, errorMessage(error));

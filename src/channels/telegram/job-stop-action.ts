@@ -16,16 +16,16 @@ import { JOB_STOP_CALLBACK_PREFIX, parseJobStopCallback } from './job-progress.t
 const NOT_RUNNING = 'That job is no longer running.';
 
 export function jobStopCallbackAction(
-  stopJob: (jobId: string, task: number | undefined) => JobStopOutcome,
+  stopJob: (jobId: string, task: number | undefined) => Promise<JobStopOutcome>,
 ): CallbackAction {
   return {
     prefix: JOB_STOP_CALLBACK_PREFIX,
-    answer(value) {
+    async answer(value) {
       const target = parseJobStopCallback(value);
       if (!target) return 'Unknown action.';
       const { jobId, taskNumber } = target;
       return toast(
-        stopJob(jobId, taskNumber),
+        await stopJob(jobId, taskNumber),
         taskNumber === undefined ? 'Stopping the command…' : `Stopping sub-agent ${taskNumber}…`,
       );
     },

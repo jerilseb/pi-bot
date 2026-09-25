@@ -27,7 +27,8 @@ export interface ToolNotifications {
  *
  * The mode is snapshotted at creation, so /toolcalls applies to the next turn.
  * A fixed timer (not a debounce) or a full batch triggers delivery. Collapsed
- * mode edits one silent expandable message; stream sends one per batch.
+ * mode edits one silent expandable message; stream sends one per batch, which
+ * alerts unless the turn is `silent` (one mirrored from another channel).
  *
  * Nothing is sent before `after` settles: the channel passes the point in its
  * send queue where the turn began, so a turn's tool calls cannot overtake the
@@ -35,9 +36,9 @@ export interface ToolNotifications {
  */
 export function createToolNotifications(
   mode: ToolCallMode = toolCallMode(),
-  options: { after?: Promise<unknown> } = {},
+  options: { after?: Promise<unknown>; silent?: boolean } = {},
 ): ToolNotifications {
-  const { after } = options;
+  const { after, silent = false } = options;
   const enabled = mode !== 'off';
   const notifications: string[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -102,7 +103,7 @@ export function createToolNotifications(
   async function deliver(pending: string[]): Promise<void> {
     if (after) await after;
     if (mode !== 'collapsed') {
-      await sendTelegramMessage(pending.join('\n'));
+      await sendTelegramMessage(pending.join('\n'), { silent });
       return;
     }
 

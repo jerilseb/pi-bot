@@ -56,6 +56,8 @@ export interface CommandContext {
   announceReset(): void;
   /** The commands the asking channel can use: these plus its own. */
   commandList(): CommandInfo[];
+  /** Every attached channel, for /status. */
+  attachedChannels(): ChannelRef[];
   /** The settings of every attached channel that has some, for /status. */
   channelStatuses(): ChannelStatus[];
 }
@@ -305,6 +307,7 @@ function collectStatus(
       cron: cronFeature(),
       subagents: SUBAGENTS_ENABLED,
     },
+    interfaces: ctx.attachedChannels(),
     channels: ctx.channelStatuses(),
   };
 }

@@ -116,6 +116,7 @@ That means it can remember stable context without stuffing every temporary detai
 - Tool calls folded into one expandable message per prompt, or streamed, or off.
 - Usage commands for OpenAI Codex and ElevenLabs.
 - Graceful self-restart through `/restart` or an explicit natural-language restart request.
+- A terminal UI on the same conversation (`npm run tui`, off by default), for when you are at the machine.
 
 ## Quick start
 
@@ -289,6 +290,41 @@ Inside Telegram:
 | `/restart` | Restart the bot process |
 
 The chat runtime also exposes a constrained `restart_bot` Pi tool. It is intended only for explicit natural-language requests such as “restart yourself” and uses the same graceful shutdown path as `/restart`, letting systemd bring the process back up.
+
+## Terminal UI
+
+The same conversation is also available in a terminal on the machine the bot runs on, for when a phone is the wrong tool: long replies, full tool output, diffs. Telegram and the terminal are equal ways into one chat. Whatever you type in either is answered in both, and a menu answered in one closes in the other.
+
+Turn it on with `ENABLE_TUI=true` in `.env` and restart the bot. It then listens on a Unix socket in your runtime directory (`$XDG_RUNTIME_DIR/pi-bot/tui.sock`) that only your user can open. From an SSH session or tmux on the same machine, as the same user:
+
+```bash
+npm run tui
+# or, with a socket somewhere else:
+npm run tui -- --socket /path/to/tui.sock
+```
+
+What to expect:
+
+- **The conversation so far**, then replies as they stream, with tool calls and their output drawn the way Pi draws them. Messages sent from Telegram are labelled as such.
+- **Telegram sees terminal turns silently.** What you type in the terminal is posted to Telegram as “🖥 From the terminal”, and its reply follows, without a notification. The reply alerts the terminal instead, with the terminal bell.
+- **Unprompted messages** (scheduled reports, heartbeat output, job reports) ring the bell in the terminal if it is the interface you used in the last 10 minutes. Otherwise Telegram notifies you. Background runs show only what they send, as in Telegram.
+- **Menus** (`/models`, `/reasoning`, questions from the agent) take the editor's place: arrow keys and Enter to choose, Esc to cancel.
+- **Running jobs** show live above the editor. `/jobs` picks one to stop.
+- **Reconnecting is automatic**, so a `/restart` or a crash only interrupts the terminal until the bot is back.
+
+Keys and commands of its own, besides the bot's commands (`/help` lists both):
+
+| Key or command | What it does |
+| --- | --- |
+| `Enter` | Send; `Alt+Enter` for a new line |
+| `Esc` | Stop the reply under way (`/abort`) |
+| `Ctrl+C` | Clear the editor; on an empty one, quit |
+| `/attach <path>` | Attach a local file to your next message; `/attach` alone drops it |
+| `/jobs` | Stop a running command or sub-agent task |
+| `/expand` | Show or hide full tool output and thinking |
+| `/quit` | Close the terminal; the bot keeps running |
+
+Several terminals can be open at once; each is its own interface.
 
 ## Deployment
 

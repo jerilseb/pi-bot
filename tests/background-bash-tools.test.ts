@@ -17,7 +17,7 @@ import { jobStopCallbackAction } from '../src/channels/telegram/job-stop-action.
 import { TelegramJobProgress } from '../src/channels/telegram/jobs.ts';
 import { setJobEventSink } from '../src/job-registry.ts';
 
-const stopAction = jobStopCallbackAction((jobId) => stopBackgroundBashByUser(jobId));
+const stopAction = jobStopCallbackAction(async (jobId) => stopBackgroundBashByUser(jobId));
 
 interface TelegramCall {
   method: string;
@@ -74,11 +74,11 @@ function setup(t: TestContext) {
     return id;
   };
   /** Taps the Stop button the progress message was first sent with. */
-  const tapStop = (): string => {
+  const tapStop = (): Promise<string> => {
     const data = telegram.find((c) => c.method === 'sendMessage')?.keyboard?.[0]?.[0]
       ?.callback_data;
     assert.ok(data, 'the progress message has a Stop button');
-    return stopAction.answer(data.slice(stopAction.prefix.length));
+    return Promise.resolve(stopAction.answer(data.slice(stopAction.prefix.length)));
   };
   return { call, start, reports, telegram, tapStop };
 }
@@ -160,8 +160,8 @@ test('mode tail returns the whole buffered output again', async (t) => {
 test('a stop from Telegram kills the command and reports that the user stopped it', async (t) => {
   const f = setup(t);
   const id = await f.start('sleep 30');
-  assert.equal(f.tapStop(), 'Stopping the command…');
-  assert.equal(f.tapStop(), 'Already stopping…');
+  assert.equal(await f.tapStop(), 'Stopping the command…');
+  assert.equal(await f.tapStop(), 'Already stopping…');
   await until(() => f.reports.length === 1);
 
   const report = f.reports[0];
@@ -174,7 +174,7 @@ test('a stop from Telegram kills the command and reports that the user stopped i
 
   const read = await f.call('background_bash_read', { session_id: id });
   assert.match(read, /Status: stopped by the user from Telegram, ran for/);
-  assert.equal(f.tapStop(), 'That job is no longer running.');
+  assert.equal(await f.tapStop(), 'That job is no longer running.');
 
   // The message ends on the stop, with its button gone.
   const last = f.telegram.at(-1);
@@ -198,7 +198,7 @@ test('a wait in progress when the user stops the command returns it, and the rep
   const id = await f.start('sleep 30');
   const waiting = f.call('background_bash_wait', { session_id: id });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  f.tapStop();
+  await f.tapStop();
   const result = await waiting;
   assert.match(result, new RegExp(`^Session ${id}: finished\\.`));
   assert.match(result, /stopped by the user from Telegram/);
@@ -210,7 +210,7 @@ test('a stop during the yield returns the stop inline, with no report to follow'
   const f = setup(t);
   const starting = f.call('background_bash_start', { command: 'sleep 30', yield_time_ms: 10_000 });
   await until(() => f.telegram.some((c) => c.method === 'sendMessage'));
-  f.tapStop();
+  await f.tapStop();
   const result = await starting;
   assert.match(result, /^Command stopped by the user from Telegram after /);
   await new Promise((resolve) => setTimeout(resolve, 50));

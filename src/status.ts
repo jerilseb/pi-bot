@@ -1,4 +1,4 @@
-import type { ChannelStatus } from './contract.ts';
+import type { ChannelRef, ChannelStatus } from './contract.ts';
 import { usageBar } from './format.ts';
 import { escapeMarkdown, markdownCode, markdownCodeBlock, markdownQuote } from './markdown.ts';
 
@@ -8,8 +8,8 @@ import { escapeMarkdown, markdownCode, markdownCodeBlock, markdownQuote } from '
  * reads live state.
  *
  * Layout: a header, then one section per concern — chat, context, tokens,
- * background, features, then each attached interface's own settings — each a
- * bold emoji title with its details below. Long values (paths, raw setting
+ * background, features, the interfaces attached, then each one's own settings
+ * — each a bold emoji title with its details below. Long values (paths, raw setting
  * names) are left to /help and the logs; this is a glance, not a config dump.
  */
 
@@ -48,6 +48,8 @@ export interface StatusSnapshot {
     cron: { on: boolean; detail: string };
     subagents: boolean;
   };
+  /** Every interface attached now, e.g. Telegram and two terminals. */
+  interfaces: ChannelRef[];
   /** The settings of each attached interface that has some. */
   channels: ChannelStatus[];
 }
@@ -65,6 +67,8 @@ export function renderStatus(snapshot: StatusSnapshot): string {
     ...backgroundSection(snapshot.background),
     '',
     ...featureSection(snapshot.features),
+    '',
+    interfaceLine(snapshot.interfaces),
     ...snapshot.channels.flatMap((channel) => ['', ...channelSection(channel)]),
   ].join('\n');
 }
@@ -141,6 +145,13 @@ function featureSection(features: StatusSnapshot['features']): string[] {
     settingLine({ on: features.cron.on, label: 'Scheduled tasks', detail: features.cron.detail }),
     settingLine({ on: features.subagents, label: 'Sub-agents' }),
   ];
+}
+
+function interfaceLine(interfaces: ChannelRef[]): string {
+  const names = interfaces.map((ref) =>
+    ref.kind === 'telegram' ? '📱 Telegram' : `🖥 Terminal ${ref.id.replace(/^tui:/, '#')}`,
+  );
+  return `🔌 **Interfaces** · ${names.length ? escapeMarkdown(names.join(' · ')) : '_none_'}`;
 }
 
 function channelSection(channel: ChannelStatus): string[] {

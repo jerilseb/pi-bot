@@ -4,9 +4,11 @@ import type { Attachment, JobReportSource, SessionKind } from './types.ts';
 
 /**
  * The contract between the agent core and the interfaces that use it
- * ("channels": Telegram today, a terminal UI later). Types only, and the one
- * core module a channel needs: a channel gives the core input through
- * AgentCore, and hears back through three kinds of output.
+ * ("channels": Telegram, and the terminal UI over a socket). Types only, and
+ * the one core module a channel needs: a channel gives the core input through
+ * AgentCore, and hears back through three kinds of output. Every call that
+ * answers is async, so the core can as well be in another process: the
+ * terminal UI reaches it through RemoteCore, a socket proxy of this interface.
  *
  * - Events go to every attached channel, in order: the conversation, job
  *   progress, closed menus, notices, and state. A channel keeps its own sends
@@ -47,16 +49,18 @@ export interface AgentCore {
   /** Answers an open menu. The first answer wins; every copy closes with it. */
   choose(choiceId: string, option: number | 'cancel', from: ChannelRef): Promise<ChoiceOutcome>;
   /** Stops a running job, or one task of a sub-agent job; its report says the user stopped it. */
-  stopJob(jobId: string, task: number | undefined, from: ChannelRef): JobStopOutcome;
+  stopJob(jobId: string, task: number | undefined, from: ChannelRef): Promise<JobStopOutcome>;
   /**
    * Taken when a channel starts ingesting a message it may take a while to
    * submit (a download, a transcription). /abort and /new make every ticket
    * taken before them stale, and a submit with a stale ticket is turned away.
+   * The ticket is dated when this is called, not when it resolves.
    */
-  beginIngestion(): IngestionTicket;
+  beginIngestion(): Promise<IngestionTicket>;
   /** Starts sending events and deliveries to a channel. Returns its detach. */
   attach(channel: Channel): () => void;
-  snapshot(): CoreSnapshot;
+  /** Everything a channel needs to show the chat as it is, e.g. one that has just connected. */
+  snapshot(): Promise<CoreSnapshot>;
 }
 
 export interface ChannelCaps {
@@ -128,7 +132,8 @@ export type TurnOutcome =
   | { outcome: 'error'; error: string };
 
 export type CoreEvent =
-  | { type: 'input'; from: ChannelRef; text: string; steered: boolean }
+  /** User input the core accepted. `attachments` are the files' names, for showing. */
+  | { type: 'input'; from: ChannelRef; text: string; attachments: string[]; steered: boolean }
   | { type: 'turn_start'; turnId: string; session: SessionKind; origin: PromptOrigin }
   /** An SDK event from a session. turnId is null for one that came between turns. */
   | { type: 'agent'; turnId: string | null; session: SessionKind; event: AgentSessionEvent }
@@ -266,6 +271,8 @@ export interface SessionState {
   queued: number;
   steering: number;
   model: string;
+  /** The reasoning level, once the session is loaded; unknown before. */
+  reasoning?: string;
 }
 
 export interface CoreState {
@@ -276,7 +283,10 @@ export interface CoreState {
 }
 
 export interface CoreSnapshot {
-  /** The live chat session's messages; empty until its transcript is loaded. */
+  /**
+   * The chat conversation: the live session's messages, or those of the
+   * transcript it would resume when none is loaded; empty after /new.
+   */
   history: AgentMessage[];
   /** Jobs the chat started that are still running. */
   jobs: JobSnapshot[];

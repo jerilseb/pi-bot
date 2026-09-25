@@ -52,6 +52,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       cron: { on: true, detail: '2 of 3 active' },
       subagents: false,
     },
+    interfaces: [{ id: 'telegram', kind: 'telegram' }],
     channels: [TELEGRAM_SETTINGS(false)],
     ...overrides,
   };
@@ -117,7 +118,21 @@ describe('renderStatus', () => {
       /\n✅ Sub-agent tool calls\n/,
     );
     assert.match(html(snapshot()), /🛠 Tool calls · <i>Collapsed<\/i>$/);
-    assert.doesNotMatch(html(snapshot({ channels: [] })), /Telegram/);
+    assert.doesNotMatch(html(snapshot({ channels: [] })), /📱 <b>Telegram<\/b>/);
+  });
+
+  test('lists the interfaces attached', () => {
+    const both = snapshot({
+      interfaces: [
+        { id: 'telegram', kind: 'telegram' },
+        { id: 'tui:2', kind: 'tui' },
+      ],
+    });
+    assert.match(html(both), /🔌 <b>Interfaces<\/b> · 📱 Telegram · 🖥 Terminal #2\n/);
+    assert.match(
+      html(snapshot({ interfaces: [], channels: [] })),
+      /🔌 <b>Interfaces<\/b> · <i>none<\/i>$/,
+    );
   });
 
   test('escapes values it did not write', () => {

@@ -14,8 +14,11 @@ function core(now = () => 0) {
     sessionKind: 'chat',
   } as unknown as PiRuntime;
   const chatSession = createChatSession(runtime);
-  // Nothing here may start a real Pi session.
-  Object.assign(chatSession.get().pi, { runPrompt: async () => ({ text: 'ok' }) });
+  // Nothing here may start a real Pi session, or read a stored one.
+  Object.assign(chatSession.get().pi, {
+    runPrompt: async () => ({ text: 'ok' }),
+    history: async () => [{ role: 'user', content: 'stored', timestamp: 1 }],
+  });
   return new LocalCore({
     chatSession,
     backgroundSession: createChatSession({ ...runtime, sessionKind: 'background' }),
@@ -29,7 +32,7 @@ function core(now = () => 0) {
 const telegram = () => new RecordingChannel({ id: 'telegram', kind: 'telegram' });
 const tui = (n: number) => new RecordingChannel({ id: `tui:${n}`, kind: 'tui' }, false);
 
-test('attaching and detaching tells every channel who is attached', () => {
+test('attaching and detaching tells every channel who is attached', async () => {
   const c = core();
   const first = telegram();
   const second = tui(1);
@@ -41,7 +44,7 @@ test('attaching and detaching tells every channel who is attached', () => {
     first.of('channels').map((event) => event.attached.map((ref) => ref.id)),
     [['telegram'], ['telegram', 'tui:1'], ['telegram']],
   );
-  assert.deepEqual(c.snapshot().channels, [first.ref]);
+  assert.deepEqual((await c.snapshot()).channels, [first.ref]);
   assert.throws(() => c.attach(telegram()), /already attached/);
 });
 
@@ -160,7 +163,7 @@ test('/models offers its menu to the channel that asked, and every channel hears
   if (offered?.kind !== 'choice') return;
   assert.deepEqual(offered.choice.audience, second.ref);
   assert.deepEqual(
-    c.snapshot().choices.map((choice) => choice.id),
+    (await c.snapshot()).choices.map((choice) => choice.id),
     [offered.choice.id],
   );
 
@@ -177,19 +180,19 @@ test('a menu no channel could show is forgotten', async () => {
   only.receipt = () => ({ ok: false, error: 'offline' });
   c.attach(only);
   await c.command('/models', only.ref);
-  assert.deepEqual(c.snapshot().choices, []);
+  assert.deepEqual((await c.snapshot()).choices, []);
 });
 
 test('a message whose ingestion began before /abort is turned away as stale', async () => {
   const c = core();
   const only = telegram();
   c.attach(only);
-  const ticket = c.beginIngestion();
+  const ticket = await c.beginIngestion();
   await c.command('/abort', only.ref);
   const result = await c.submit({ from: only.ref, text: 'late photo', attachments: [], ticket });
   assert.deepEqual(result, { status: 'rejected', reason: 'stale' });
   assert.deepEqual(only.of('input'), []);
-  const fresh = c.beginIngestion();
+  const fresh = await c.beginIngestion();
   assert.equal(
     (await c.submit({ from: only.ref, text: 'ok', attachments: [], ticket: fresh })).status,
     'queued',
@@ -252,11 +255,44 @@ test('a background delivery waits for the outbox, and for a channel to send it t
   assert.equal(outbox.heldCount, 0);
 });
 
-test('a stop names the job; anything that is not a running job is not running', () => {
+test('a stop names the job; anything that is not a running job is not running', async () => {
   const c = core();
   const only = telegram();
   c.attach(only);
-  assert.equal(c.stopJob('bg_000000', undefined, only.ref), 'not-running');
-  assert.equal(c.stopJob('sub_000000', 1, only.ref), 'not-running');
-  assert.equal(c.stopJob('bg_000000', 2, only.ref), 'not-running');
+  assert.equal(await c.stopJob('bg_000000', undefined, only.ref), 'not-running');
+  assert.equal(await c.stopJob('sub_000000', 1, only.ref), 'not-running');
+  assert.equal(await c.stopJob('bg_000000', 2, only.ref), 'not-running');
+});
+
+test('a snapshot holds the conversation as the chat would resume it', async () => {
+  const c = core();
+  assert.deepEqual((await c.snapshot()).history, [
+    { role: 'user', content: 'stored', timestamp: 1 },
+  ]);
+});
+
+test('input carries the names of its attachments, for channels that mirror it', async () => {
+  const c = core();
+  const only = tui(1);
+  c.attach(only);
+  await c.submit({
+    from: only.ref,
+    text: 'see these',
+    attachments: [
+      { type: 'file', path: '/nowhere/report.pdf' },
+      { type: 'image', path: '/nowhere/photo-123.jpg', filename: 'holiday.jpg' },
+    ],
+  });
+  assert.deepEqual(only.of('input')[0]?.attachments, ['report.pdf', 'holiday.jpg']);
+});
+
+test('a command refreshes the state every channel shows', async () => {
+  const c = core();
+  const first = telegram();
+  const second = tui(1);
+  c.attach(first);
+  c.attach(second);
+  await c.command('/help', second.ref);
+  assert.equal(first.of('state').length, 1);
+  assert.equal(second.of('state').length, 1);
 });

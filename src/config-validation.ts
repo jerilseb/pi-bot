@@ -5,6 +5,7 @@ import {
   BOT_TOKEN,
   CHAT_MODEL,
   ENABLE_SUBAGENTS,
+  ENABLE_TUI,
   HEARTBEAT_ENABLED,
   HEARTBEAT_MODEL,
   MODEL,
@@ -49,6 +50,10 @@ export function collectConfigProblems(): string[] {
   requireConfig(
     ['', 'true', 'false'].includes(ENABLE_SUBAGENTS.toLowerCase()),
     `ENABLE_SUBAGENTS in .env (${ENABLE_SUBAGENTS}) must be true or false.`,
+  );
+  requireConfig(
+    ['', 'true', 'false'].includes(ENABLE_TUI.toLowerCase()),
+    `ENABLE_TUI in .env (${ENABLE_TUI}) must be true or false.`,
   );
 
   return problems;

@@ -16,6 +16,7 @@ import type {
   CoreEvent,
   Deliverable,
   IngestionTicket,
+  PromptOrigin,
   Receipt,
   RichText,
   SubmitResult,
@@ -64,6 +65,11 @@ import type { TelegramCallbackQuery, TelegramMessage } from './types.ts';
  * calls. A background run shows nothing until the background outbox releases
  * what it sent, which arrives here as deliveries.
  *
+ * What someone types in another channel (a terminal) is mirrored here without
+ * a notification, labelled with where it came from, and so is its turn: its
+ * tool calls go out silently and its reply alerts only the channel it answers.
+ * No typing indicator is shown for it, since nobody here is waiting.
+ *
  * Menus from the core are inline keyboards whose taps go back to the core,
  * and every copy is edited once one is answered. Telegram's own display
  * settings are its own commands and menus.
@@ -73,7 +79,7 @@ export const TELEGRAM_CHANNEL: ChannelRef = { id: 'telegram', kind: 'telegram' }
 
 /** What a chat turn under way shows in Telegram. */
 interface TurnView {
-  typing: { stop(): void };
+  typing: { stop(): void } | null;
   tools: ToolNotifications;
 }
 
@@ -145,8 +151,11 @@ export class TelegramChannel implements Channel {
 
   onEvent(event: CoreEvent): void {
     switch (event.type) {
+      case 'input':
+        if (event.from.id !== this.ref.id) void this.enqueue('mirror', () => this.mirror(event));
+        return;
       case 'turn_start':
-        if (event.session === 'chat') this.startTurn(event.turnId);
+        if (event.session === 'chat') this.startTurn(event.turnId, this.isMirrored(event.origin));
         return;
       case 'agent':
         if (event.turnId && event.event.type === 'tool_execution_start') {
@@ -170,8 +179,7 @@ export class TelegramChannel implements Channel {
         this.closeCopies(event.choiceId, event.text);
         return;
       default:
-        // Input comes only from this channel so far; state, resets and the
-        // channel list change nothing shown here.
+        // State, resets and the channel list change nothing shown here.
         return;
     }
   }
@@ -256,7 +264,9 @@ export class TelegramChannel implements Channel {
   private handleMessage(message: TelegramMessage): void {
     // Taken before a download starts, so a message cancelled meanwhile is turned away.
     const ticket = this.core.beginIngestion();
-    void ingestTelegramMessage(message, (input) => this.submitInput({ ...input, ticket }));
+    void ingestTelegramMessage(message, async (input) =>
+      this.submitInput({ ...input, ticket: await ticket }),
+    );
   }
 
   private async answerChoice(query: TelegramCallbackQuery, value: string): Promise<void> {
@@ -359,13 +369,29 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  private startTurn(turnId: string): void {
+  private startTurn(turnId: string, mirrored: boolean): void {
     // Where the turn begins in the send queue: its tool calls wait for everything before it.
     const begun = this.enqueue('turn start', async () => {});
     this.turns.set(turnId, {
-      typing: startTyping(),
-      tools: createToolNotifications(this.toolCallMode(), { after: begun }),
+      typing: mirrored ? null : startTyping(),
+      tools: createToolNotifications(this.toolCallMode(), { after: begun, silent: mirrored }),
     });
+  }
+
+  /** Input typed in another channel, labelled with where, and sent without a notification. */
+  private mirror(event: Extract<CoreEvent, { type: 'input' }>): Promise<void> {
+    const where = event.from.kind === 'tui' ? '🖥 <i>From the terminal' : '<i>From elsewhere';
+    const lines = [
+      `${where}${event.steered ? ', steering the task under way' : ''}:</i>`,
+      ...(event.text.trim() ? [escapeTelegramHtml(event.text)] : []),
+      ...event.attachments.map((name) => `📎 ${escapeTelegramHtml(name)}`),
+    ];
+    return sendTelegramMessage(lines.join('\n'), { silent: true });
+  }
+
+  /** A turn that answers input from another channel. */
+  private isMirrored(origin: PromptOrigin): boolean {
+    return origin.kind === 'user' && origin.channel.id !== this.ref.id;
   }
 
   private endTurn(event: Extract<CoreEvent, { type: 'turn_end' }>): void {
@@ -382,7 +408,7 @@ export class TelegramChannel implements Channel {
           await sendTelegramMessage(`❌ ${sanitizeError(event.error)}`, { silent });
         }
       } finally {
-        turn?.typing.stop();
+        turn?.typing?.stop();
       }
     });
   }

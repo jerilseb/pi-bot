@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "node main.ts",
+    "tui": "node tui.ts",
     "systemd:install": "bash scripts/systemd.sh install",
     "systemd:uninstall": "bash scripts/systemd.sh uninstall",
     "systemd:start": "systemctl --user start pi-bot",

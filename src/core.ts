@@ -123,7 +123,12 @@ export class LocalCore implements AgentCore, QueueSink {
 
   async command(line: string, from: ChannelRef): Promise<boolean> {
     this.noteAction(from);
-    return handleCommand(this.commandContext(from), line.trim());
+    try {
+      return await handleCommand(this.commandContext(from), line.trim());
+    } finally {
+      // /new, /abort and the menus a command opens can change what the state reads.
+      this.emitState();
+    }
   }
 
   commands(from: ChannelRef): CommandInfo[] {
@@ -136,17 +141,26 @@ export class LocalCore implements AgentCore, QueueSink {
     from: ChannelRef,
   ): Promise<ChoiceOutcome> {
     this.noteAction(from);
-    return this.choices.choose(choiceId, option, from);
+    try {
+      return await this.choices.choose(choiceId, option, from);
+    } finally {
+      // An answer may have switched the model or the reasoning level.
+      this.emitState();
+    }
   }
 
-  stopJob(jobId: string, task: number | undefined, from: ChannelRef): JobStopOutcome {
+  async stopJob(
+    jobId: string,
+    task: number | undefined,
+    from: ChannelRef,
+  ): Promise<JobStopOutcome> {
     this.noteAction(from);
     if (jobId.startsWith('bg_') && task === undefined) return stopBackgroundBashByUser(jobId);
     if (jobId.startsWith('sub_') && task !== undefined) return stopSubagentTask(jobId, task);
     return 'not-running';
   }
 
-  beginIngestion(): IngestionTicket {
+  async beginIngestion(): Promise<IngestionTicket> {
     return beginIngestion();
   }
 
@@ -163,9 +177,9 @@ export class LocalCore implements AgentCore, QueueSink {
     };
   }
 
-  snapshot(): CoreSnapshot {
+  async snapshot(): Promise<CoreSnapshot> {
     return {
-      history: this.options.chatSession.existing()?.pi.messages ?? [],
+      history: await this.options.chatSession.get().pi.history(),
       jobs: this.options.runningJobs?.() ?? [],
       choices: this.choices.views(),
       state: this.readState(),
@@ -210,6 +224,7 @@ export class LocalCore implements AgentCore, QueueSink {
         console.error(`channel ${channel.ref.id} failed on ${event.type}:`, errorMessage(error));
       }
     }
+    if (event.type === 'agent' && event.event.type === 'thinking_level_changed') this.emitState();
   }
 
   /** Sends a delivery to every attached channel in its audience, and returns their receipts. */
@@ -308,6 +323,7 @@ export class LocalCore implements AgentCore, QueueSink {
       offer: (choice) => this.offer(choice, from),
       announceReset: () => this.emit({ type: 'reset' }),
       commandList: () => this.commands(from),
+      attachedChannels: () => this.attachedRefs(),
       channelStatuses: () =>
         [...this.channels.values()].flatMap((channel): ChannelStatus[] =>
           channel.status ? [channel.status()] : [],
@@ -370,5 +386,6 @@ function sessionState(session: ChatSession): SessionState {
     queued: state?.queue.length ?? 0,
     steering: state?.pi.pendingSteeringCount ?? 0,
     model: state?.pi.modelName ?? '',
+    ...(state?.pi.thinkingLevel ? { reasoning: state.pi.thinkingLevel } : {}),
   };
 }

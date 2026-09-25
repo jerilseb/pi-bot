@@ -121,10 +121,10 @@ function fakeCore(options: { submit?: SubmitResult; command?: boolean } = {}) {
     choose: async () => {
       throw new Error('unused');
     },
-    stopJob: () => 'not-running',
-    beginIngestion: () => ({ epoch: 0 }),
+    stopJob: async () => 'not-running',
+    beginIngestion: async () => ({ epoch: 0 }),
     attach: () => () => {},
-    snapshot: () => {
+    snapshot: async () => {
       throw new Error('unused');
     },
   };
@@ -237,6 +237,68 @@ test('a chat turn shows typing until its reply is sent', async (t) => {
   assert.deepEqual(
     calls.map((call) => call.method),
     ['sendChatAction', 'sendMessage'],
+  );
+});
+
+test('input typed in a terminal is mirrored silently, labelled, with its attachments', async (t) => {
+  const { sent } = fakeTelegram(t);
+  const telegram = channel(undefined, 'off');
+  const terminal: ChannelRef = { id: 'tui:1', kind: 'tui' };
+  telegram.onEvent({
+    type: 'input',
+    from: terminal,
+    text: 'look at <this>',
+    attachments: ['shot.png'],
+    steered: false,
+  });
+  telegram.onEvent({
+    type: 'input',
+    from: terminal,
+    text: 'and this',
+    attachments: [],
+    steered: true,
+  });
+  // Its own input is already in the chat.
+  telegram.onEvent({
+    type: 'input',
+    from: TELEGRAM_CHANNEL,
+    text: 'mine',
+    attachments: [],
+    steered: false,
+  });
+  await telegram.drain(1_000);
+  assert.deepEqual(
+    sent().map((call) => [call.text, call.silent]),
+    [
+      ['🖥 <i>From the terminal:</i>\nlook at &lt;this&gt;\n📎 shot.png', true],
+      ['🖥 <i>From the terminal, steering the task under way:</i>\nand this', true],
+    ],
+  );
+});
+
+test("a terminal's turn shows no typing here, and its tool calls go out silently", async (t) => {
+  const { calls, sent } = fakeTelegram(t);
+  const telegram = channel(undefined, 'stream');
+  const terminal: ChannelRef = { id: 'tui:1', kind: 'tui' };
+  telegram.onEvent({
+    type: 'turn_start',
+    turnId: 'chat-1',
+    session: 'chat',
+    origin: { kind: 'user', channel: terminal },
+  });
+  telegram.onEvent(toolCall('chat-1', 'ls'));
+  telegram.onEvent(reply('chat-1', 'Done', [terminal]));
+  await telegram.drain(1_000);
+  assert.equal(
+    calls.some((call) => call.method === 'sendChatAction'),
+    false,
+  );
+  assert.deepEqual(
+    sent().map((call) => [call.text, call.silent]),
+    [
+      ['🛠 bash (<code>ls</code>)', true],
+      ['Done', true],
+    ],
   );
 });
 
@@ -519,7 +581,7 @@ test("a job's message follows its snapshots, and its last write holds what comes
   const stops: Array<[string, number | undefined]> = [];
   const core: AgentCore = {
     ...fakeCore().core,
-    stopJob(jobId, task) {
+    async stopJob(jobId, task) {
       stops.push([jobId, task]);
       return 'stopping';
     },
