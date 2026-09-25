@@ -22,7 +22,6 @@ import { isRecord } from '../src/util.ts';
 import {
   activeModelSystemPromptExtension,
   ensureMemoryFile,
-  ensureSubagentPromptFile,
   memorySystemPromptExtension,
   readSubagentSystemPrompt,
   readSystemPrompt,
@@ -232,7 +231,6 @@ function verifySubagentTools(): number {
 async function main(): Promise<void> {
   validateConfiguration();
   ensureMemoryFile();
-  ensureSubagentPromptFile();
   fs.mkdirSync(SUBAGENT_SESSIONS_DIR, { recursive: true });
   fs.mkdirSync(HEARTBEAT_SESSIONS_DIR, { recursive: true });
   fs.mkdirSync(SCHEDULED_TASKS_SESSIONS_DIR, { recursive: true });

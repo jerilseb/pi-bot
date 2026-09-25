@@ -9,6 +9,7 @@ logs
 .vscode/settings.json
 files/*
 !files/system.md
+!files/subagent.md
 !files/settings.json.example
 .claude
 .headless-profile/

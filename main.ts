@@ -90,7 +90,6 @@ import {
 import {
   activeModelSystemPromptExtension,
   ensureMemoryFile,
-  ensureSubagentPromptFile,
   memorySystemPromptExtension,
   readSystemPrompt,
 } from './src/system-prompt.ts';
@@ -153,7 +152,6 @@ fs.mkdirSync(SUBAGENT_SESSIONS_DIR, { recursive: true });
 fs.mkdirSync(HEARTBEAT_SESSIONS_DIR, { recursive: true });
 fs.mkdirSync(SCHEDULED_TASKS_SESSIONS_DIR, { recursive: true });
 ensureMemoryFile();
-ensureSubagentPromptFile();
 ensurePostRestartTasksFile();
 
 const chatSession = createChatSession(CHAT_PI_RUNTIME);

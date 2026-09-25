@@ -29,7 +29,7 @@ Key files:
 - `src/env-guard.ts` — blocks tool access to `.env` files. `src/util.ts` — shared helpers. `src/types.ts` — shared types (Telegram payloads, `IncomingPrompt`). `src/tool-result.ts` — the plain-text tool result helper.
 - `src/restart-tool.ts`, `src/restart-flow.ts` (shared `/restart` + `restart_bot` gate), `src/pre-restart-checks.ts`, `src/post-restart-tasks.ts` — restart lifecycle.
 - `extensions/` — local Pi extensions (web search, web fetch).
-- `files/` — persistent prompt/memory/heartbeat/schedule state, including `files/subagent.md`, the worker system prompt (created with a default on first start).
+- `files/` — persistent prompt/memory/heartbeat/schedule state, including `files/system.md` and `files/subagent.md`, the chat and worker system prompts (both checked in).
 - `scripts/systemd.sh` — installs/removes the systemd `--user` unit. `scripts/smoke.ts` — the smoke check.
 
 ## Commands

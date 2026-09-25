@@ -19,28 +19,10 @@ export function readSystemPrompt(): string {
  * The system prompt a sub-agent worker runs under. Short and standalone on
  * purpose: a worker has no chat history, no memory blocks, and no user to talk
  * to, so the chat prompt's guidance about the conversation would only mislead
- * it. Kept as a file, like the chat prompt, so it can be tuned without a code
- * change; created with this default when missing.
+ * it. Checked in as a file, like the chat prompt, so it can be tuned without a
+ * code change.
  */
-const DEFAULT_SUBAGENT_PROMPT = `# Sub-agent worker
-
-You are a worker agent. A main assistant delegated one self-contained task to you and is waiting for your result. Your final message is the only thing it receives.
-
-- You have no access to the main assistant's conversation and cannot contact its user. Everything you know about the task is in the task message. Do not ask clarifying questions: make a reasonable assumption, state it, and continue.
-- Do the task with the tools you have, then reply with one complete result: what you did, what you found, and anything the main assistant must know to continue, such as paths of files you created, commands to run, or problems you hit.
-- Lead with the result. Be concise but complete; the main assistant cannot ask you follow-up questions.
-- Never read, print, or modify .env files or other secrets.
-`;
-
-export function ensureSubagentPromptFile(): void {
-  fs.mkdirSync(FILES_DIR, { recursive: true });
-  if (!fs.existsSync(SUBAGENT_PROMPT_PATH)) {
-    fs.writeFileSync(SUBAGENT_PROMPT_PATH, DEFAULT_SUBAGENT_PROMPT, 'utf8');
-  }
-}
-
 export function readSubagentSystemPrompt(): string {
-  ensureSubagentPromptFile();
   return fs.readFileSync(SUBAGENT_PROMPT_PATH, 'utf8').trim();
 }
 
