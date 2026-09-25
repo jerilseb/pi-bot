@@ -18,7 +18,7 @@ export interface HeartbeatController {
 }
 
 export function createHeartbeatController(options: {
-  handleIncoming: (prompt: IncomingPrompt) => Promise<void>;
+  handleIncoming: (prompt: IncomingPrompt) => Promise<unknown>;
   /** True while the background session is running or has queued a prompt. */
   isBackgroundBusy: () => boolean;
   isRunning: () => boolean;
@@ -41,7 +41,7 @@ export function createHeartbeatController(options: {
     await options.handleIncoming({
       text: buildHeartbeatPrompt(instructions),
       attachments: [],
-      source: 'heartbeat',
+      origin: { kind: 'heartbeat' },
       suppressNoop: true,
       // Explicit so a preceding scheduled task on another model does not leak into it.
       model: HEARTBEAT_MODEL,

@@ -1,27 +1,11 @@
 import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP, SUBAGENT_NOOP } from './config.ts';
-import { sendTelegramMessage } from './telegram.ts';
-import type { IncomingPrompt, PiPromptResult } from './types.ts';
+import type { PiPromptResult } from './types.ts';
 
 /**
- * Deliver a Pi response to the Telegram chat. Resolves true when a message was
- * sent, false when the response was a noop sentinel or blank and nothing reached
- * the user.
+ * Whether a reply has anything to show. The check is the core's, so no channel
+ * can disagree on whether an unattended run said something; sending the reply
+ * is each channel's.
  */
-export async function sendPiResponse(
-  response: PiPromptResult,
-  options: { suppressNoop?: boolean; source?: IncomingPrompt['source'] } = {},
-): Promise<boolean> {
-  if (isSilentResponse(response, options)) {
-    console.log('background task completed with no user-visible update');
-    return false;
-  }
-
-  // Only a reply that must be sent gets here blank: an unattended run's is silent.
-  const body = response.text || '(no response)';
-  const text = options.source === 'cron' ? `⏰ <b>Scheduled report</b>\n\n${body}` : body;
-  await sendTelegramMessage(text);
-  return true;
-}
 
 /**
  * True when a response has nothing to send: a blank reply from an unattended

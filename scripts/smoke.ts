@@ -52,13 +52,14 @@ function validateConfiguration(): void {
 }
 
 /**
- * Imports every src module so import-time crashes are caught before a restart.
- * main.ts is excluded: importing it would start the bot (top-level await).
+ * Imports every module under src/, subdirectories included, so import-time
+ * crashes are caught before a restart. The entry points (main.ts) live outside
+ * src/ and are never imported: importing one would start the bot.
  */
 async function importAllSourceModules(): Promise<number> {
   const srcDir = path.join(PROJECT_ROOT, 'src');
   const files = fs
-    .readdirSync(srcDir)
+    .readdirSync(srcDir, { recursive: true, encoding: 'utf8' })
     .filter((name) => name.endsWith('.ts'))
     .sort();
 

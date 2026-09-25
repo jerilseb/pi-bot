@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeToolCall, renderCollapsedToolCalls } from '../src/tool-notifications.ts';
+import { renderCollapsedToolCalls } from '../src/channels/telegram/tool-notifications.ts';
+import { describeToolCall } from '../src/tool-call-description.ts';
 
 test('renders one tool call under a singular header', () => {
   assert.equal(

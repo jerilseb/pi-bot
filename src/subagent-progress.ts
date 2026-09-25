@@ -1,6 +1,6 @@
 import { jobStopCallbackData, type ProgressContent } from './job-progress.ts';
-import type { InlineKeyboardButton } from './telegram.ts';
-import { clipEscapedTelegramHtml } from './telegram-html.ts';
+import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
+import { clipEscapedTelegramHtml } from './channels/telegram/telegram-html.ts';
 import { formatDuration } from './util.ts';
 
 /**

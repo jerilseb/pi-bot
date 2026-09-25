@@ -1,6 +1,6 @@
 import { formatPreRestartDuration, runPreRestartChecks } from './pre-restart-checks.ts';
-import { escapeTelegramHtml } from './telegram-html.ts';
-import { sendTelegramMessage } from './telegram.ts';
+import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
+import { sendTelegramMessage } from './channels/telegram/telegram.ts';
 
 /**
  * Shared restart gate for the /restart command and the restart_bot tool, so the

@@ -6,7 +6,7 @@ import {
   type SubagentProgressTask,
   TOOL_CALLS_SHOWN,
 } from '../src/subagent-progress.ts';
-import { sanitizeTelegramHtml } from '../src/telegram-html.ts';
+import { sanitizeTelegramHtml } from '../src/channels/telegram/telegram-html.ts';
 
 /**
  * The live sub-agent message is edited in place for as long as a job runs, so

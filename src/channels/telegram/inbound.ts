@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { cleanupAttachments, deleteLocalFile } from '../../attachments.ts';
 import {
   TELEGRAM_DOWNLOAD_LIMIT,
   TELEGRAM_FILE_API,
@@ -7,12 +8,19 @@ import {
   TMP_DIR,
   isAllowedTelegramChat,
   showTranscriptsEnabled,
-} from './config.ts';
-import { transcribeAudio } from './speech.ts';
+} from '../../config.ts';
+import { transcribeAudio } from '../../speech.ts';
+import type { Attachment } from '../../types.ts';
+import { errorMessage } from '../../util.ts';
 import { sendChatAction, sendTelegramMessage, telegram } from './telegram.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
-import type { IncomingPrompt, TelegramMessage } from './types.ts';
-import { errorMessage } from './util.ts';
+import type { TelegramMessage } from './types.ts';
+
+/** A Telegram message as text plus local files, ready to submit. */
+export interface TelegramInput {
+  text: string;
+  attachments: Attachment[];
+}
 
 /**
  * Ingestion epoch. Media ingestion (downloads, transcription) runs detached
@@ -33,12 +41,12 @@ export function discardPendingIngestion(): void {
  */
 export async function ingestTelegramMessage(
   message: TelegramMessage,
-  handleIncoming: (prompt: IncomingPrompt) => Promise<void>,
+  submit: (input: TelegramInput) => Promise<void>,
 ): Promise<void> {
   const startEpoch = epoch;
 
   try {
-    const incoming = await toIncomingPrompt(message);
+    const incoming = await toTelegramInput(message);
     if (!incoming) return;
 
     if (epoch !== startEpoch) {
@@ -47,27 +55,14 @@ export async function ingestTelegramMessage(
       return;
     }
 
-    await handleIncoming(incoming);
+    await submit(incoming);
   } catch (error) {
     console.error('failed to ingest Telegram message:', errorMessage(error));
   }
 }
 
-/**
- * Best-effort removal of the temp downloads this module created for a prompt.
- * Only paths under TMP_DIR are touched, so an attachment pointing at a real file
- * elsewhere is never deleted.
- */
-export function cleanupAttachments(prompt: IncomingPrompt): void {
-  for (const attachment of prompt.attachments) {
-    if (attachment.path?.startsWith(TMP_DIR)) {
-      deleteLocalFile(attachment.path);
-    }
-  }
-}
-
-/** Converts one Telegram message into a prompt, downloading media as needed. */
-async function toIncomingPrompt(message: TelegramMessage): Promise<IncomingPrompt | null> {
+/** Converts one Telegram message into input, downloading media as needed. */
+async function toTelegramInput(message: TelegramMessage): Promise<TelegramInput | null> {
   if (!isAllowedTelegramChat(String(message.chat.id))) return null;
 
   const caption = message.caption?.trim() ?? '';
@@ -188,14 +183,6 @@ function isTranscribableAudio(
   if (mimeType?.startsWith('audio/')) return true;
   const ext = path.extname(filename).toLowerCase();
   return ['.mp3', '.m4a', '.ogg', '.oga', '.wav', '.webm', '.flac', '.aac'].includes(ext);
-}
-
-function deleteLocalFile(filePath: string): void {
-  try {
-    fs.unlinkSync(filePath);
-  } catch {
-    // Best-effort cleanup.
-  }
 }
 
 async function downloadTelegramFile(

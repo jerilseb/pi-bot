@@ -31,7 +31,7 @@ import {
   type WaitOutcome,
 } from './job-registry.ts';
 import { BoundedOutputBuffer, type OutputSnapshot } from './output-buffer.ts';
-import { clipEscapedTelegramHtml, escapeTelegramHtml } from './telegram-html.ts';
+import { clipEscapedTelegramHtml, escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
 import { textResult } from './tool-result.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';

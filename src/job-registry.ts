@@ -71,7 +71,7 @@ export function jobReportPrompt(
   return {
     text: report.text,
     attachments: [],
-    source: report.source,
+    origin: { kind: 'job-report', source: report.source },
     session,
     suppressNoop: true,
     label: report.label,

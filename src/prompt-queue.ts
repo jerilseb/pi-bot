@@ -1,39 +1,68 @@
+import { cleanupAttachments } from './attachments.ts';
 import { backgroundOutbox, deliverToChat } from './background-outbox.ts';
 import type { ChatSession, ChatState } from './chat-session.ts';
-import { handleCommand } from './commands.ts';
 import {
   HEARTBEAT_SESSIONS_DIR,
   MAX_QUEUED_PROMPTS,
   SCHEDULED_TASKS_SESSIONS_DIR,
 } from './config.ts';
-import { cleanupAttachments } from './inbound.ts';
+import type {
+  ChannelRef,
+  CoreEvent,
+  Deliverable,
+  PromptOrigin,
+  Receipt,
+  SubmitResult,
+  TurnOutcome,
+} from './contract.ts';
+import { isSilentResponse } from './outbound.ts';
 import type { RunTranscript } from './pi-session.ts';
-import { isSilentResponse, sendPiResponse } from './outbound.ts';
 import { backgroundReportNote } from './session-notes.ts';
-import { sanitizeError, sendTelegramMessage, startTyping } from './telegram.ts';
-import { createToolNotifications } from './tool-notification-batch.ts';
-import type { IncomingPrompt, PiPromptResult } from './types.ts';
-import { errorMessage, isBackgroundPrompt, isJobReportPrompt } from './util.ts';
+import type { IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
+import {
+  errorMessage,
+  isBackgroundPrompt,
+  isJobReportPrompt,
+  originLabel,
+  summarizeError,
+} from './util.ts';
 
 /**
- * The bot's single entry point for work, and the worker that drains it.
+ * The queue behind every prompt, and the worker that drains it.
  *
- * Every prompt arrives here regardless of origin — a Telegram message, a
- * heartbeat or cron run, a post-restart task, a background-bash or sub-agent
- * completion report — so this is the one place that decides which session handles a prompt,
- * whether it is a slash command, and whether the queue has room for it.
+ * Every prompt arrives here regardless of origin — user input from a channel,
+ * a heartbeat or cron run, a post-restart task, a background-bash or sub-agent
+ * completion report — so this is the one place that decides which session
+ * handles a prompt and whether the queue has room for it. Slash commands never
+ * get here: the core runs them before a message is submitted.
  *
- * Runs are serial per session. Ordinary Telegram messages steer the active run;
+ * Runs are serial per session. User input steers the active chat run;
  * startup/finishing races and background work use the FIFO queue. Steering uses
  * the existing run's subscription, never a second concurrent response collector.
+ *
+ * Nothing here talks to an interface. A turn is a series of events — its start,
+ * every SDK event, its end with the reply or error — and each channel sends
+ * what it shows in that order. What a background run reports is a delivery,
+ * released by the background outbox once the chat has been idle.
  */
 
 /** How long to wait before retrying a queue worker that crashed. */
 const WORKER_RESTART_DELAY_MS = 1_000;
 
+/** What the queue needs from the core: where its events and deliveries go. */
+export interface QueueSink {
+  emit(event: CoreEvent): void;
+  /** Sends a delivery to every attached channel and returns their receipts. */
+  deliver(item: Deliverable): Promise<Receipt[]>;
+  /** Which channels an event about a prompt from `origin` should alert. */
+  pingFor(origin: PromptOrigin): ChannelRef[];
+  /** Emits the current state after something that may have changed it. */
+  emitState(): void;
+}
+
 export interface PromptQueue {
-  /** Routes a prompt to a session and queues it, or runs it as a slash command. */
-  handleIncoming(prompt: IncomingPrompt): Promise<void>;
+  /** Routes a prompt to its session and queues it, or steers it into the chat run under way. */
+  handleIncoming(prompt: IncomingPrompt): Promise<SubmitResult>;
   /** True while either session is processing or has queued work. */
   isAssistantBusy(): boolean;
 }
@@ -41,31 +70,31 @@ export interface PromptQueue {
 export function createPromptQueue(options: {
   chatSession: ChatSession;
   backgroundSession: ChatSession;
-  restart: () => Promise<void>;
   isRunning: () => boolean;
+  sink: QueueSink;
 }): PromptQueue {
-  const { chatSession, backgroundSession, isRunning } = options;
+  const { chatSession, backgroundSession, isRunning, sink } = options;
+  let turnCounter = 0;
+  // The turn each session is running, so its SDK events can say which turn they belong to.
+  const activeTurn: Record<SessionKind, string | null> = { chat: null, background: null };
+  for (const [kind, session] of [
+    ['chat', chatSession],
+    ['background', backgroundSession],
+  ] as const) {
+    session.onAgentEvent((event) =>
+      sink.emit({ type: 'agent', turnId: activeTurn[kind], session: kind, event }),
+    );
+  }
 
-  const handleIncoming = async (prompt: IncomingPrompt): Promise<void> => {
-    const session = isBackgroundPrompt(prompt) ? backgroundSession : chatSession;
-    const chat = session.get();
-    const trimmed = prompt.text.trim();
-    // Anything headed for the chat, commands included, restarts the cooldown
-    // held background messages wait out.
-    if (!isBackgroundPrompt(prompt)) backgroundOutbox()?.noteChatActivity();
-
-    if (prompt.attachments.length === 0 && trimmed.startsWith('/')) {
-      const handled = await handleCommand(
-        {
-          chat,
-          session: chatSession,
-          backgroundSession,
-          restart: options.restart,
-        },
-        trimmed,
-      );
-      if (handled) return;
+  const handleIncoming = async (prompt: IncomingPrompt): Promise<SubmitResult> => {
+    const kind: SessionKind = isBackgroundPrompt(prompt) ? 'background' : 'chat';
+    const chat = (kind === 'background' ? backgroundSession : chatSession).get();
+    if (!isRunning()) {
+      cleanupAttachments(prompt);
+      return { status: 'rejected', reason: 'shutting-down' };
     }
+    // Anything headed for the chat restarts the cooldown held background messages wait out.
+    if (kind === 'chat') backgroundOutbox()?.noteChatActivity();
 
     // A completion report is the tail of work the agent already started, so it is
     // delivered even when the queue is full.
@@ -75,87 +104,111 @@ export function createPromptQueue(options: {
       chat.queue.length + chat.pi.pendingSteeringCount >= MAX_QUEUED_PROMPTS
     ) {
       cleanupAttachments(prompt);
-      if (!isBackgroundPrompt(prompt)) {
-        await sendTelegramMessage(
-          `⚠️ Queue full (${MAX_QUEUED_PROMPTS} pending). Wait or use /abort.`,
-        );
+      if (prompt.origin.kind !== 'user') {
+        console.warn(`${originLabel(prompt.origin)} dropped: the ${kind} queue is full`);
       }
-      return;
+      return { status: 'rejected', reason: 'queue-full' };
     }
 
-    const isTelegram = !prompt.source || prompt.source === 'telegram';
-    if (isTelegram && chat.processing && !trimmed.startsWith('/')) {
+    // An unknown slash command is queued as text rather than steered into a turn.
+    if (prompt.origin.kind === 'user' && chat.processing && !prompt.text.trim().startsWith('/')) {
       let steered: boolean;
       try {
         steered = await chat.pi.trySteer(prompt);
       } catch (error) {
         cleanupAttachments(prompt);
-        await sendTelegramMessage(`❌ ${sanitizeError(errorMessage(error))}`);
-        return;
+        return { status: 'rejected', reason: 'error', error: errorMessage(error) };
       }
       if (steered) {
         chat.messageCount++;
-        // A failed acknowledgement must not retry or discard accepted work.
-        await sendTelegramMessage('↪️ Steering current task.').catch((error) => {
-          console.error('failed to acknowledge steering:', errorMessage(error));
-        });
-        return;
+        emitInput(prompt, true);
+        sink.emitState();
+        return { status: 'steered' };
       }
     }
 
     chat.queue.push(prompt);
     chat.messageCount++;
-    startQueueProcessing(chat);
+    emitInput(prompt, false);
+    startQueueProcessing(chat, kind);
+    sink.emitState();
+    return { status: 'queued' };
   };
+
+  function emitInput(prompt: IncomingPrompt, steered: boolean): void {
+    if (prompt.origin.kind !== 'user') return;
+    sink.emit({ type: 'input', from: prompt.origin.channel, text: prompt.text, steered });
+  }
 
   /**
    * Starts the worker if it is not already draining. A crash here must not leave
    * queued prompts stranded, so the worker is restarted while work remains.
    */
-  function startQueueProcessing(chat: ChatState): void {
-    void processQueue(chat).catch((error) => {
+  function startQueueProcessing(chat: ChatState, kind: SessionKind): void {
+    void processQueue(chat, kind).catch((error) => {
       console.error('queue worker failed unexpectedly:', errorMessage(error));
       chat.processing = false;
 
       if (isRunning() && chat.queue.length > 0) {
-        setTimeout(() => startQueueProcessing(chat), WORKER_RESTART_DELAY_MS);
+        setTimeout(() => startQueueProcessing(chat, kind), WORKER_RESTART_DELAY_MS);
       }
     });
   }
 
-  async function processQueue(chat: ChatState): Promise<void> {
+  async function processQueue(chat: ChatState, kind: SessionKind): Promise<void> {
     if (chat.processing) return;
 
     while (chat.queue.length > 0 && isRunning()) {
       const prompt = chat.queue.shift();
       if (!prompt) break;
       if (prompt.isSuperseded?.()) {
-        console.log(`${prompt.source ?? 'prompt'} skipped, already handled: ${prompt.label ?? ''}`);
+        console.log(
+          `${originLabel(prompt.origin)} skipped, already handled: ${prompt.label ?? ''}`,
+        );
         cleanupAttachments(prompt);
         continue;
       }
       chat.processing = true;
 
-      const isBackground = isBackgroundPrompt(prompt);
+      const isBackground = kind === 'background';
       if (!isBackground) backgroundOutbox()?.noteChatActivity();
-      // Background runs have no user watching, so no typing indicator.
-      const typing = isBackground ? { stop: () => undefined } : startTyping();
-      // Own state per prompt: background and foreground sessions can overlap.
-      const toolNotifications = createToolNotifications(prompt);
+      const turnId = `${kind}-${++turnCounter}`;
+      activeTurn[kind] = turnId;
+      sink.emit({ type: 'turn_start', turnId, session: kind, origin: prompt.origin });
+      sink.emitState();
+      let ended = false;
+      const endTurn = (outcome: TurnOutcome): void => {
+        ended = true;
+        if (activeTurn[kind] === turnId) activeTurn[kind] = null;
+        sink.emit({
+          type: 'turn_end',
+          turnId,
+          session: kind,
+          ping: sink.pingFor(prompt.origin),
+          ...outcome,
+        });
+      };
       let deferredSteers = 0;
       try {
-        const logLabel = prompt.source && prompt.source !== 'telegram' ? prompt.source : 'prompt';
-        console.log(`${logLabel}: ${prompt.text.slice(0, 120)}`);
+        console.log(`${originLabel(prompt.origin)}: ${prompt.text.slice(0, 120)}`);
         if (prompt.model) await chat.pi.useModel(prompt.model);
         const response = await chat.pi.runPrompt(prompt.text, prompt.attachments, {
-          onToolCall: toolNotifications.notify,
           ...(prompt.resumeSessionFile ? { resumeSessionFile: prompt.resumeSessionFile } : {}),
           ...(isBackground ? { transcript: backgroundRunTranscript(prompt) } : {}),
           ...(!isBackground
             ? {
                 recoverTransportErrors: true,
                 onAutoRecovery: () =>
-                  sendTelegramMessage('🔄 Temporary model error. Continuing automatically...'),
+                  sink.emit({
+                    type: 'notice',
+                    text: {
+                      format: 'plain',
+                      text: '🔄 Temporary model error. Continuing automatically...',
+                    },
+                    level: 'warn',
+                    to: 'all',
+                    ping: sink.pingFor(prompt.origin),
+                  }),
               }
             : {}),
           onSteeringSettled: (steered, disposition) => {
@@ -166,67 +219,91 @@ export function createPromptQueue(options: {
             } else cleanupAttachments(steered);
           },
         });
-        // Flush before the response so notifications cannot arrive after the
-        // answer they describe.
-        await toolNotifications.finish();
-        if (isBackground && isSilentResponse(response, prompt)) {
-          console.log('background task completed with no user-visible update');
-        } else if (isBackground) {
+        const silent = isSilentResponse(response, prompt);
+        if (silent) console.log(`${kind} turn completed with no user-visible update`);
+        endTurn(
+          silent
+            ? { outcome: 'silent' }
+            : {
+                outcome: 'replied',
+                // Only a reply that must be sent gets here blank: an unattended run's is silent.
+                reply: { format: 'telegram-html', text: response.text || '(no response)' },
+              },
+        );
+        if (isBackground && !silent) {
           // Held until the chat has been idle for the cooldown. The note goes
           // with the message, so the chat agent learns of it only once the
           // user has actually been sent it.
-          await deliverToChat('background', prompt.source ?? 'report', () =>
+          await deliverToChat('background', originLabel(prompt.origin), () =>
             deliverBackgroundResponse(prompt, response),
           );
-        } else {
-          await sendPiResponse(response, {
-            suppressNoop: prompt.suppressNoop,
-            source: prompt.source,
-          });
         }
         enqueuePendingNewSessionTask(chat, prompt);
       } catch (error) {
         const message = errorMessage(error);
         console.error('error:', message);
-        await toolNotifications.finish();
-        try {
-          await deliverToChat(isBackground ? 'background' : 'chat', 'error', () =>
-            sendTelegramMessage(`❌ ${sanitizeError(message)}`),
-          );
-        } catch (notificationError) {
-          console.error(
-            'failed to send prompt error notification:',
-            errorMessage(notificationError),
-          );
+        // A chat turn's channels show the error with the turn; a background
+        // run has no one watching, so its error waits in the outbox like a report.
+        if (!ended) endTurn({ outcome: 'error', error: message });
+        if (isBackground) {
+          try {
+            await deliverToChat('background', 'error', async () =>
+              sink.emit({
+                type: 'notice',
+                text: { format: 'plain', text: `❌ ${summarizeError(message)}` },
+                level: 'error',
+                to: 'all',
+                ping: sink.pingFor(prompt.origin),
+              }),
+            );
+          } catch (notificationError) {
+            console.error(
+              'failed to send prompt error notification:',
+              errorMessage(notificationError),
+            );
+          }
         }
       } finally {
         cleanupAttachments(prompt);
-        typing.stop();
+        if (activeTurn[kind] === turnId) activeTurn[kind] = null;
         chat.processing = false;
         // The cooldown counts from the end of the chat's last turn.
         if (!isBackground) backgroundOutbox()?.noteChatActivity();
+        sink.emitState();
       }
     }
   }
 
   /**
-   * A background run's response and, when the user was sent something, the
+   * Delivers a background run's report and, when a channel took it, writes the
    * note that tells the chat session about it. A background run sends its
    * message without the chat agent ever seeing it, so the next chat turn would
-   * otherwise not know what the user was just sent. Skipped during shutdown so
-   * a late report cannot land after the restart note that marks a clean exit.
+   * otherwise not know what the user was just sent. Throws when every channel
+   * failed, as a failed send always has. Skipped during shutdown so a late
+   * report cannot land after the restart note that marks a clean exit.
    */
   async function deliverBackgroundResponse(
     prompt: IncomingPrompt,
     response: PiPromptResult,
   ): Promise<void> {
-    const delivered = await sendPiResponse(response, {
-      suppressNoop: prompt.suppressNoop,
-      source: prompt.source,
+    const receipts = await sink.deliver({
+      kind: 'report',
+      text: { format: 'telegram-html', text: response.text || '(no response)' },
+      origin: prompt.origin,
+      ...(prompt.label ? { label: prompt.label } : {}),
+      ping: sink.pingFor(prompt.origin),
     });
-    if (!delivered || !isRunning()) return;
+    if (!receipts.some((receipt) => receipt.ok)) {
+      const failures = receipts.filter((receipt) => !receipt.ok && !receipt.skipped);
+      if (failures.length > 0) {
+        throw new Error(failures.map((receipt) => receipt.error ?? 'delivery failed').join('; '));
+      }
+      console.warn(`background ${originLabel(prompt.origin)} reached no channel`);
+      return;
+    }
+    if (!isRunning()) return;
     const note = backgroundReportNote({
-      source: prompt.source,
+      origin: prompt.origin,
       ...(prompt.label ? { label: prompt.label } : {}),
       ...(prompt.model ? { model: prompt.model } : {}),
       report: response.text,
@@ -254,7 +331,7 @@ function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): 
   chat.queue.unshift({
     text: task,
     attachments: [],
-    ...(prompt.source ? { source: prompt.source } : {}),
+    origin: prompt.origin,
     ...(prompt.session ? { session: prompt.session } : {}),
   });
   chat.messageCount++;
@@ -267,7 +344,7 @@ function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): 
  * is gone; such strays go with the scheduled tasks.
  */
 function backgroundRunTranscript(prompt: IncomingPrompt): RunTranscript {
-  if (prompt.source === 'heartbeat') {
+  if (prompt.origin.kind === 'heartbeat') {
     return { dir: HEARTBEAT_SESSIONS_DIR, prefix: 'telegram-heartbeat', name: 'heartbeat' };
   }
   return {

@@ -3,9 +3,12 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
 import type { CallbackMenu } from './callback-menu.ts';
-import { sendTelegramInlineKeyboard, type InlineKeyboardButton } from './telegram.ts';
+import {
+  sendTelegramInlineKeyboard,
+  type InlineKeyboardButton,
+} from './channels/telegram/telegram.ts';
 import { textResult } from './tool-result.ts';
-import type { IncomingPrompt, SessionKind } from './types.ts';
+import type { SessionKind } from './types.ts';
 
 const MENU_CALLBACK_PREFIX = 'menu:';
 const MENU_CALLBACK_CANCEL = 'cancel';
@@ -122,10 +125,11 @@ function registerSendMenu(pi: ExtensionAPI, session: SessionKind): void {
  * The keyboard sent by send_telegram_menu. Callback data is
  * `menu:<menuId>:<index|cancel>`: Cancel belongs to one menu rather than the
  * shared `<prefix>cancel` button, so it is handled in select. A menu is
- * single-use and is forgotten on the first tap, whatever the tap was.
+ * single-use and is forgotten on the first tap, whatever the tap was. The
+ * answer is submitted as the user's own message, so it can steer a turn.
  */
 export function telegramMenuCallbackMenu(
-  enqueuePrompt: (prompt: IncomingPrompt) => Promise<void>,
+  submitAnswer: (text: string) => Promise<void>,
 ): CallbackMenu {
   return {
     prefix: MENU_CALLBACK_PREFIX,
@@ -148,22 +152,14 @@ export function telegramMenuCallbackMenu(
       menus.delete(menu.id);
 
       if (parsed.action === MENU_CALLBACK_CANCEL) {
-        await enqueuePrompt({
-          text: buildMenuCancelledPrompt(menu),
-          attachments: [],
-          source: 'telegram',
-        });
+        await submitAnswer(buildMenuCancelledPrompt(menu));
         return { toast: 'Cancelled', text: `${menu.text}\n\nCancelled.` };
       }
 
       const option = menu.options[parsed.optionIndex];
       if (!option) return null;
 
-      await enqueuePrompt({
-        text: buildMenuSelectionPrompt(menu, option),
-        attachments: [],
-        source: 'telegram',
-      });
+      await submitAnswer(buildMenuSelectionPrompt(menu, option));
       return {
         toast: `Selected: ${option.label}`,
         text: `${menu.text}\n\nSelected: ${option.label}`,

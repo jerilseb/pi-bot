@@ -3,19 +3,19 @@
 /**
  * Standalone Telegram → Pi chat bridge.
  *
- * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID: polls for
- * updates, keeps one foreground Pi SDK session plus a background one that
- * starts a fresh transcript for every heartbeat or scheduled-task run, queues
- * prompts, and sends Pi's final response back. Supports text, images,
- * downloaded files, optional audio transcription, local extensions,
- * generated file uploads, model refs across Pi providers, and scheduled heartbeat prompts.
+ * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID: keeps one
+ * foreground Pi SDK session plus a background one that starts a fresh
+ * transcript for every heartbeat or scheduled-task run, queues prompts, and
+ * sends Pi's final response back. Supports text, images, downloaded files,
+ * optional audio transcription, local extensions, generated file uploads, model
+ * refs across Pi providers, and scheduled heartbeat prompts.
  *
  * This module is the orchestrator: it constructs the runtimes and sessions,
- * wires the pieces together, and owns the polling loop and process lifecycle.
- * Everything else is a dedicated module — the prompt queue (prompt-queue),
- * message ingestion (inbound), tool-call batching (tool-notification-batch),
- * commands, menus, chat-session, discovery, system-prompt, env-guard,
- * heartbeat, cron.
+ * the agent core (core) and the Telegram channel attached to it, wires the
+ * pieces together, and owns the startup sequence and process lifecycle.
+ * Everything else is a dedicated module — the prompt queue (prompt-queue), the
+ * Telegram channel and its polling loop (channels/telegram), commands, menus,
+ * chat-session, discovery, system-prompt, env-guard, heartbeat, cron.
  */
 
 import * as fs from 'node:fs';
@@ -34,12 +34,12 @@ import {
   MODEL,
   POST_RESTART_TASKS_PATH,
   PROJECT_EXTENSIONS_DIR,
+  CHANNEL_DRAIN_TIMEOUT_MS,
   RESTART_EXIT_DELAY_MS,
   HEARTBEAT_SESSIONS_DIR,
   SCHEDULED_TASKS_SESSIONS_DIR,
   SESSIONS_DIR,
   SUBAGENT_SESSIONS_DIR,
-  TELEGRAM_POLL_TIMEOUT_MS,
   TMP_DIR,
   ensureBotSettingsFile,
   isAllowedTelegramChat,
@@ -52,15 +52,16 @@ import {
   contextGistSystemPromptExtension,
   loadContextGist,
 } from './src/context-gist.ts';
+import { LocalCore } from './src/core.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { dispatchCallbackQuery } from './src/callback-menu.ts';
+import { TelegramChannel } from './src/channels/telegram/channel.ts';
+import { registerBotCommands } from './src/channels/telegram/telegram.ts';
 import { discoverExtensionPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
-import { ingestTelegramMessage } from './src/inbound.ts';
 import { jobStopCallbackAction } from './src/job-stop-action.ts';
 import { modelCallbackMenu } from './src/model-menu.ts';
-import { createPromptQueue } from './src/prompt-queue.ts';
 import { reasoningCallbackMenu } from './src/reasoning-menu.ts';
 import { toolCallCallbackMenu } from './src/tool-call-menu.ts';
 import { transcriptCallbackMenu } from './src/transcript-menu.ts';
@@ -93,9 +94,7 @@ import {
   memorySystemPromptExtension,
   readSystemPrompt,
 } from './src/system-prompt.ts';
-import { registerBotCommands, sendTelegramMessage, telegram } from './src/telegram.ts';
-import type { TelegramUpdate } from './src/types.ts';
-import { errorMessage, sleep } from './src/util.ts';
+import { errorMessage } from './src/util.ts';
 import { voiceStatusText } from './src/voice.ts';
 
 validateConfiguration();
@@ -156,7 +155,6 @@ ensurePostRestartTasksFile();
 
 const chatSession = createChatSession(CHAT_PI_RUNTIME);
 const backgroundSession = createChatSession(BACKGROUND_PI_RUNTIME);
-let offset = 0;
 let running = true;
 
 // What background runs send waits until the chat has been idle for
@@ -164,22 +162,24 @@ let running = true;
 const outbox = new BackgroundOutbox({ isChatBusy: () => chatSession.isBusy() });
 setBackgroundOutbox(outbox);
 
-const { handleIncoming } = createPromptQueue({
+const core = new LocalCore({
   chatSession,
   backgroundSession,
   restart,
   isRunning: () => running,
 });
+const telegramChannel = new TelegramChannel({ core, cwd: process.cwd() });
+core.attach(telegramChannel);
 
 // Neither waits for the chat, only for the background run before it.
 const heartbeat = createHeartbeatController({
-  handleIncoming,
+  handleIncoming: (prompt) => core.enqueue(prompt),
   isBackgroundBusy: () => backgroundSession.isBusy(),
   isRunning: () => running,
 });
 
 const cron = createCronController({
-  handleIncoming,
+  handleIncoming: (prompt) => core.enqueue(prompt),
   isBackgroundBusy: () => backgroundSession.isBusy(),
   isRunning: () => running,
 });
@@ -191,19 +191,19 @@ const CALLBACK_MENUS = [
   toolCallCallbackMenu,
   transcriptCallbackMenu,
   subagentToolCallCallbackMenu,
-  telegramMenuCallbackMenu(handleIncoming),
+  telegramMenuCallbackMenu((text) => telegramChannel.submitAnswer(text)),
 ];
 // Buttons on messages the bot keeps editing itself: the live job messages' Stop buttons.
 const CALLBACK_ACTIONS = [jobStopCallbackAction];
 
 // Backgrounded bash sessions report back to the agent that started them as
 // internal background-bash-report prompts that go through the normal prompt
-// queue, rather than sending direct Telegram messages.
+// queue, rather than sending messages of their own.
 setBackgroundBashReportHandler(async (report) => {
-  await handleIncoming(backgroundBashReportPrompt(report));
+  await core.enqueue(backgroundBashReportPrompt(report));
 });
 setSubagentReportHandler(async (report) => {
-  await handleIncoming(subagentReportPrompt(report));
+  await core.enqueue(subagentReportPrompt(report));
 });
 setSubagentToolCallsSetting(subagentToolCallsEnabled);
 
@@ -295,51 +295,20 @@ async function noteUncleanExit(): Promise<void> {
     );
 }
 
-async function pollTelegram(): Promise<void> {
+async function run(): Promise<void> {
   logStartupBanner();
 
   await registerBotCommands(telegramCommandMenu());
   await noteUncleanExit();
   heartbeat.start();
   cron.start();
-  await notifyAppStarted();
+  core.notice('✅ Bot is up and running.');
   await enqueuePostRestartTasks();
 
-  while (running) {
-    try {
-      const params = new URLSearchParams({
-        offset: String(offset),
-        timeout: '30',
-        allowed_updates: JSON.stringify(['message', 'callback_query']),
-      });
-      const data = await telegram<{ ok: boolean; result: TelegramUpdate[] }>(
-        `getUpdates?${params}`,
-        undefined,
-        TELEGRAM_POLL_TIMEOUT_MS,
-      );
-      if (!data.ok) {
-        await sleep(5000);
-        continue;
-      }
-
-      for (const update of data.result) {
-        offset = update.update_id + 1;
-
-        if (update.callback_query) {
-          await dispatchCallbackQuery(update.callback_query, CALLBACK_MENUS, CALLBACK_ACTIONS);
-          continue;
-        }
-
-        if (!update.message) continue;
-
-        void ingestTelegramMessage(update.message, handleIncoming);
-      }
-    } catch (error) {
-      if (!running) break;
-      console.error('Polling error:', errorMessage(error));
-      await sleep(5000);
-    }
-  }
+  await telegramChannel.poll({
+    isRunning: () => running,
+    onCallbackQuery: (query) => dispatchCallbackQuery(query, CALLBACK_MENUS, CALLBACK_ACTIONS),
+  });
 }
 
 function logStartupBanner(): void {
@@ -355,14 +324,6 @@ function logStartupBanner(): void {
   console.log(heartbeatStatusText());
   console.log(cronStatusText());
   console.log(`Post-restart tasks: ${POST_RESTART_TASKS_PATH}`);
-}
-
-async function notifyAppStarted(): Promise<void> {
-  try {
-    await sendTelegramMessage('✅ Bot is up and running.');
-  } catch (error) {
-    console.error('failed to send startup notification:', errorMessage(error));
-  }
 }
 
 async function enqueuePostRestartTasks(): Promise<void> {
@@ -384,16 +345,13 @@ async function enqueuePostRestartTasks(): Promise<void> {
 
     console.log(`enqueueing post-restart task: ${formatPostRestartTask(task)}`);
     try {
-      await sendTelegramMessage(
-        `🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`,
-      );
-      // Not 'telegram': a Telegram-sourced prompt steers a run already in
-      // progress, so a second task would be folded into the first one's turn
-      // instead of getting its own.
-      await handleIncoming({
+      core.notice(`🔁 Running post-restart task${task.title ? `: ${task.title}` : ''}`);
+      // Not user input: that steers a run already in progress, so a second task
+      // would be folded into the first one's turn instead of getting its own.
+      await core.enqueue({
         text: buildPostRestartPrompt(task),
         attachments: [],
-        source: 'post-restart',
+        origin: { kind: 'post-restart', taskId: task.id },
       });
     } catch (error) {
       console.error(`failed to enqueue post-restart task ${task.id}:`, errorMessage(error));
@@ -434,6 +392,8 @@ async function shutdown(): Promise<void> {
   backgroundSession.clear();
   await stopAllBackgroundSessions();
   await stopAllSubagents();
+  // Channels send in the background; let what the cleared turns left go out.
+  await core.drain(CHANNEL_DRAIN_TIMEOUT_MS);
 }
 
 /** A stop from outside: note what is being cut short, then shut down. */
@@ -446,4 +406,4 @@ async function shutdownFromSignal(): Promise<void> {
 process.on('SIGINT', () => void shutdownFromSignal().then(() => process.exit(0)));
 process.on('SIGTERM', () => void shutdownFromSignal().then(() => process.exit(0)));
 
-await pollTelegram();
+await run();

@@ -1,7 +1,7 @@
 import type { CallbackMenu } from './callback-menu.ts';
 import type { ChatSession } from './chat-session.ts';
 import { ALLOWED_MODELS } from './config.ts';
-import type { InlineKeyboardButton } from './telegram.ts';
+import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
 
 const MODEL_CALLBACK_PREFIX = 'model:';
 

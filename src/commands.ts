@@ -28,14 +28,15 @@ import {
   fetchOpenAIUsage,
   OPENAI_CODEX_PROVIDER,
 } from './openai-usage.ts';
-import { cleanupAttachments, discardPendingIngestion } from './inbound.ts';
+import { cleanupAttachments } from './attachments.ts';
+import { discardPendingIngestion } from './channels/telegram/inbound.ts';
 import { runRestartGate } from './restart-flow.ts';
-import { escapeTelegramHtml } from './telegram-html.ts';
+import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
 import {
   sendTelegramInlineKeyboard,
   sendTelegramMessage,
   type TelegramBotCommand,
-} from './telegram.ts';
+} from './channels/telegram/telegram.ts';
 import { errorMessage } from './util.ts';
 
 export interface CommandContext {

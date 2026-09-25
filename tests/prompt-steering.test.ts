@@ -24,7 +24,11 @@ function fixture() {
   const run = new PromptSteering(session, (prompt, disposition) => {
     settled.push({ prompt, disposition });
   });
-  const prompt = (text: string): IncomingPrompt => ({ text, attachments: [] });
+  const prompt = (text: string): IncomingPrompt => ({
+    text,
+    attachments: [],
+    origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
+  });
   const deliver = (text: string) => {
     const index = steering.indexOf(text);
     if (index !== -1) steering.splice(index, 1);
@@ -38,6 +42,7 @@ test('steers text and images in the current run; retains attachments until finis
   const prompt: IncomingPrompt = {
     text: 'Inspect this instead',
     attachments: [{ type: 'image', path: '/unused/image.png' }],
+    origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
   };
   const images: ImageContent[] = [{ type: 'image', data: 'AA==', mimeType: 'image/png' }];
   assert.equal(await f.run.trySteer(prompt, { message: prompt.text, images }), true);

@@ -92,6 +92,7 @@ test('wrapper steers file prompts and retains ownership until the existing run f
   const prompt: IncomingPrompt = {
     text: 'use this file instead',
     attachments: [{ type: 'file', path: '/unused/report.txt', filename: 'report.txt' }],
+    origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
   };
   assert.equal(await f.pi.trySteer(prompt), true);
   assert.match(f.queued[0], /report.txt: \/unused\/report.txt/);
@@ -110,7 +111,11 @@ test('wrapper steers file prompts and retains ownership until the existing run f
 test('wrapper defers an unconsumed tail message and removes it from the SDK queue', async () => {
   const f = fixture();
   const { run } = await f.start();
-  const prompt: IncomingPrompt = { text: 'last instant', attachments: [] };
+  const prompt: IncomingPrompt = {
+    text: 'last instant',
+    attachments: [],
+    origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
+  };
   await f.pi.trySteer(prompt);
   f.release();
   await run;
@@ -121,7 +126,11 @@ test('wrapper defers an unconsumed tail message and removes it from the SDK queu
 test('wrapper abort clears SDK steering and never replays cancelled prompts', async () => {
   const f = fixture();
   const { run } = await f.start();
-  const prompt: IncomingPrompt = { text: 'cancel me', attachments: [] };
+  const prompt: IncomingPrompt = {
+    text: 'cancel me',
+    attachments: [],
+    origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
+  };
   await f.pi.trySteer(prompt);
   f.pi.abort();
   assert.equal(f.aborted(), true);
@@ -136,7 +145,14 @@ test('agent_end and a pending session reset both prevent new steering', async ()
     const { run } = await f.start();
     if (mode === 'ending') f.emit({ type: 'agent_end', messages: [], willRetry: false });
     else await f.pi.requestNewSession();
-    assert.equal(await f.pi.trySteer({ text: 'next', attachments: [] }), false);
+    assert.equal(
+      await f.pi.trySteer({
+        text: 'next',
+        attachments: [],
+        origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
+      }),
+      false,
+    );
     f.release();
     await run;
   }
@@ -149,10 +165,24 @@ test('an accepted steer tells waits in this session, a refused one does not', as
     signals++;
   });
   try {
-    assert.equal(await f.pi.trySteer({ text: 'too early', attachments: [] }), false);
+    assert.equal(
+      await f.pi.trySteer({
+        text: 'too early',
+        attachments: [],
+        origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
+      }),
+      false,
+    );
     assert.equal(signals, 0);
     const { run } = await f.start();
-    assert.equal(await f.pi.trySteer({ text: 'change of plan', attachments: [] }), true);
+    assert.equal(
+      await f.pi.trySteer({
+        text: 'change of plan',
+        attachments: [],
+        origin: { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } },
+      }),
+      true,
+    );
     assert.equal(signals, 1);
     f.release();
     await run;

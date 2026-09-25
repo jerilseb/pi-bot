@@ -2,10 +2,9 @@ import { isAllowedTelegramChat } from './config.ts';
 import {
   answerTelegramCallbackQuery,
   editTelegramMessageText,
-  summarizeError,
-} from './telegram.ts';
-import type { TelegramCallbackQuery } from './types.ts';
-import { errorMessage } from './util.ts';
+} from './channels/telegram/telegram.ts';
+import type { TelegramCallbackQuery } from './channels/telegram/types.ts';
+import { errorMessage, summarizeError } from './util.ts';
 
 /**
  * The lifecycle every inline-keyboard menu shares, defined once.

@@ -8,7 +8,7 @@ import {
 } from './config.ts';
 import { synthesizeTtsAudio, textToSpeechStatusText, type TtsAudioResult } from './speech.ts';
 import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
-import { telegram } from './telegram.ts';
+import { telegram } from './channels/telegram/telegram.ts';
 import type { SessionKind } from './types.ts';
 
 const SendVoiceNoteParams = Type.Object({

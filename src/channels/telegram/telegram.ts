@@ -1,6 +1,6 @@
-import { ALLOWED_CHAT_ID, TELEGRAM_API, TELEGRAM_API_TIMEOUT_MS } from './config.ts';
+import { ALLOWED_CHAT_ID, TELEGRAM_API, TELEGRAM_API_TIMEOUT_MS } from '../../config.ts';
 import { escapeTelegramHtml, sanitizeTelegramHtml, splitTelegramMessage } from './telegram-html.ts';
-import { errorMessage } from './util.ts';
+import { errorMessage, summarizeError } from '../../util.ts';
 
 /**
  * Telegram Bot API transport for the single allowed chat: sending messages,
@@ -9,7 +9,7 @@ import { errorMessage } from './util.ts';
  * Every send goes out in HTML parse mode. Telegram rejects the whole message on
  * malformed markup, so sendTelegramMessage walks a fallback ladder — raw, then
  * sanitized, then fully escaped — rather than dropping the message. The escaping
- * and splitting machinery itself lives in src/telegram-html.ts.
+ * and splitting machinery itself lives in telegram-html.ts.
  */
 
 /** One entry of the Telegram command menu. Built from the table in src/commands.ts. */
@@ -232,19 +232,6 @@ function isTelegramHtmlParseError(error: unknown): boolean {
 
 function isTelegramNotModifiedError(error: unknown): boolean {
   return errorMessage(error).toLowerCase().includes('message is not modified');
-}
-
-/**
- * Reduces a thrown error to one length-capped line fit for the chat. Not
- * escaped: for a send that escapes on its own, such as editTelegramMessageText.
- */
-export function summarizeError(error: string): string {
-  const firstUsefulLine = error
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith('at ') && !line.startsWith('node:'));
-  const message = firstUsefulLine || 'Something went wrong.';
-  return message.length > 500 ? `${message.slice(0, 500)}…` : message;
 }
 
 /** summarizeError, escaped for an HTML send. */

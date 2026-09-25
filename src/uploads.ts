@@ -13,8 +13,8 @@ import {
   TELEGRAM_PHOTO_UPLOAD_LIMIT,
 } from './config.ts';
 import { deliverToChat, heldDeliveryNote } from './background-outbox.ts';
-import { escapeTelegramHtml } from './telegram-html.ts';
-import { telegram } from './telegram.ts';
+import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
+import { telegram } from './channels/telegram/telegram.ts';
 import type { SessionKind } from './types.ts';
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];

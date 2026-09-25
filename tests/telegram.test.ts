@@ -5,7 +5,7 @@ import {
   editTelegramMessageHtml,
   sendTelegramHtmlMessage,
   sendTelegramMessage,
-} from '../src/telegram.ts';
+} from '../src/channels/telegram/telegram.ts';
 
 const PARSE_ERROR = "Bad Request: can't parse entities: Unsupported start tag";
 

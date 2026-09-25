@@ -51,7 +51,7 @@ describe('formatSessionEvent', () => {
 describe('backgroundReportNote', () => {
   it('names a scheduled task, its model, and quotes the report', () => {
     const note = backgroundReportNote({
-      source: 'cron',
+      origin: { kind: 'cron', taskId: 'task-1' },
       label: 'Morning check',
       model: 'test/m',
       report: ' all good ',
@@ -62,14 +62,18 @@ describe('backgroundReportNote', () => {
   });
 
   it('describes a heartbeat message', () => {
-    const note = backgroundReportNote({ source: 'heartbeat', model: 'test/m', report: 'hi' });
+    const note = backgroundReportNote({
+      origin: { kind: 'heartbeat' },
+      model: 'test/m',
+      report: 'hi',
+    });
     assert.equal(note?.kind, 'heartbeat');
     assert.match(note?.text ?? '', /heartbeat run on test\/m/);
   });
 
   it('names the command a background-bash report came from', () => {
     const note = backgroundReportNote({
-      source: 'background-bash-report',
+      origin: { kind: 'job-report', source: 'background-bash-report' },
       label: 'npm test',
       report: 'tests failed',
     });
@@ -80,7 +84,7 @@ describe('backgroundReportNote', () => {
 
   it('names the first task a sub-agent report came from', () => {
     const note = backgroundReportNote({
-      source: 'subagent-report',
+      origin: { kind: 'job-report', source: 'subagent-report' },
       label: 'summarise the logs (+1 more)',
       model: 'test/m',
       report: 'two summaries',
@@ -92,8 +96,10 @@ describe('backgroundReportNote', () => {
   });
 
   it('has nothing to say about chat-session replies', () => {
-    assert.equal(backgroundReportNote({ source: 'telegram', report: 'x' }), null);
-    assert.equal(backgroundReportNote({ source: undefined, report: 'x' }), null);
+    const user = { kind: 'user', channel: { id: 'telegram', kind: 'telegram' } } as const;
+    assert.equal(backgroundReportNote({ origin: user, report: 'x' }), null);
+    const postRestart = { kind: 'post-restart', taskId: 'task-1' } as const;
+    assert.equal(backgroundReportNote({ origin: postRestart, report: 'x' }), null);
   });
 });
 

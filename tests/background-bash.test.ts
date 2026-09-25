@@ -41,7 +41,7 @@ function snapshot(content: string, overrides: Partial<OutputSnapshot> = {}): Out
 test('a report returns to the chat session on whatever model the chat is using', () => {
   const prompt = backgroundBashReportPrompt(report({ session: 'chat', model: 'test/old-chat' }));
   assert.equal(prompt.session, 'chat');
-  assert.equal(prompt.source, 'background-bash-report');
+  assert.deepEqual(prompt.origin, { kind: 'job-report', source: 'background-bash-report' });
   assert.equal(prompt.suppressNoop, true);
   assert.equal(prompt.model, undefined);
   assert.match(prompt.text, /bg_abc123 finished with exit code 1/);

@@ -8,7 +8,7 @@ import {
   renderStatus,
   type StatusSnapshot,
 } from '../src/status.ts';
-import { sanitizeTelegramHtml } from '../src/telegram-html.ts';
+import { sanitizeTelegramHtml } from '../src/channels/telegram/telegram-html.ts';
 
 /**
  * /status is one Telegram HTML message. Telegram rejects the whole message on

@@ -1,4 +1,4 @@
-import { type PiRuntime, SdkPiSession } from './pi-session.ts';
+import { type PiEventListener, type PiRuntime, SdkPiSession } from './pi-session.ts';
 import type { IncomingPrompt } from './types.ts';
 
 export interface ChatState {
@@ -24,10 +24,19 @@ export interface ChatSession {
   isBusy(): boolean;
   /** Disposes the session and forgets the tracked state. */
   clear(): void;
+  /**
+   * Hears every SDK event from this chat's Pi sessions, including the ones
+   * created after it subscribes. Returns an unsubscribe.
+   */
+  onAgentEvent(listener: PiEventListener): () => void;
 }
 
 export function createChatSession(runtime: PiRuntime): ChatSession {
   let chat: ChatState | null = null;
+  const listeners = new Set<PiEventListener>();
+  const onEvent: PiEventListener = (event) => {
+    for (const listener of [...listeners]) listener(event);
+  };
 
   return {
     get(): ChatState {
@@ -35,7 +44,7 @@ export function createChatSession(runtime: PiRuntime): ChatSession {
         chat = {
           queue: [],
           processing: false,
-          pi: new SdkPiSession(runtime),
+          pi: new SdkPiSession(runtime, { onEvent }),
           messageCount: 0,
           startedAt: Date.now(),
         };
@@ -55,6 +64,13 @@ export function createChatSession(runtime: PiRuntime): ChatSession {
       if (!chat) return;
       chat.pi.cleanup();
       chat = null;
+    },
+
+    onAgentEvent(listener: PiEventListener): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }

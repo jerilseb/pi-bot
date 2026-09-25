@@ -1,5 +1,10 @@
 import { USAGE_FETCH_TIMEOUT_MS } from './config.ts';
-import { telegramCode as code, formatPercent, titleCase, usageBar } from './telegram-format.ts';
+import {
+  telegramCode as code,
+  formatPercent,
+  titleCase,
+  usageBar,
+} from './channels/telegram/telegram-format.ts';
 
 const ELEVENLABS_SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
 

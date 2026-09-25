@@ -33,7 +33,7 @@ import {
   type SubagentTaskStatus,
 } from './subagent-progress.ts';
 import { readSubagentSystemPrompt } from './system-prompt.ts';
-import { describeToolCall } from './tool-notifications.ts';
+import { describeToolCall } from './tool-call-description.ts';
 import { textResult } from './tool-result.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';

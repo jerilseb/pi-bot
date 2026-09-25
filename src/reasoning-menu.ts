@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { CallbackMenu } from './callback-menu.ts';
 import type { ChatSession } from './chat-session.ts';
-import type { InlineKeyboardButton } from './telegram.ts';
+import type { InlineKeyboardButton } from './channels/telegram/telegram.ts';
 
 const REASONING_CALLBACK_PREFIX = 'reasoning:';
 const HIDDEN_REASONING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal']);

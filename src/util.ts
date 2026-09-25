@@ -1,3 +1,4 @@
+import type { PromptOrigin } from './contract.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 
 export interface ModelRef {
@@ -9,24 +10,38 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isBackgroundSource(source: IncomingPrompt['source']): boolean {
-  return source === 'heartbeat' || source === 'cron';
-}
-
-/** Which of the bot's two Pi sessions runs a prompt. An explicit session wins over source. */
-export function promptSessionKind(prompt: Pick<IncomingPrompt, 'source' | 'session'>): SessionKind {
+/** Which of the bot's two Pi sessions runs a prompt. An explicit session wins over origin. */
+export function promptSessionKind(prompt: Pick<IncomingPrompt, 'origin' | 'session'>): SessionKind {
   if (prompt.session) return prompt.session;
-  return isBackgroundSource(prompt.source) ? 'background' : 'chat';
+  const { kind } = prompt.origin;
+  return kind === 'heartbeat' || kind === 'cron' ? 'background' : 'chat';
 }
 
 /** True for prompts that run unattended in the background session. */
-export function isBackgroundPrompt(prompt: Pick<IncomingPrompt, 'source' | 'session'>): boolean {
+export function isBackgroundPrompt(prompt: Pick<IncomingPrompt, 'origin' | 'session'>): boolean {
   return promptSessionKind(prompt) === 'background';
 }
 
 /** True for a completion report from background work (background bash, sub-agents). */
-export function isJobReportPrompt(prompt: Pick<IncomingPrompt, 'source'>): boolean {
-  return prompt.source === 'background-bash-report' || prompt.source === 'subagent-report';
+export function isJobReportPrompt(prompt: Pick<IncomingPrompt, 'origin'>): boolean {
+  return prompt.origin.kind === 'job-report';
+}
+
+/** A short name for where a prompt came from, for logs and outbox labels. */
+export function originLabel(origin: PromptOrigin): string {
+  if (origin.kind === 'user') return 'prompt';
+  if (origin.kind === 'job-report') return origin.source;
+  return origin.kind;
+}
+
+/** Reduces a thrown error to one length-capped line fit for a chat message. Not escaped. */
+export function summarizeError(error: string): string {
+  const firstUsefulLine = error
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith('at ') && !line.startsWith('node:'));
+  const message = firstUsefulLine || 'Something went wrong.';
+  return message.length > 500 ? `${message.slice(0, 500)}…` : message;
 }
 
 /** The text on one line, cut to maxChars so it fits a label or a note. */

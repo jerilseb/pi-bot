@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { TOOL_CALL_BATCH_MAX_ITEMS, TOOL_CALL_BATCH_MS } from '../src/config.ts';
-import { createToolNotifications } from '../src/tool-notification-batch.ts';
+import { createToolNotifications } from '../src/channels/telegram/tool-notification-batch.ts';
 
 interface Delivery {
   method: string;
@@ -49,7 +49,7 @@ function captureDeliveries(t: TestContext, immediate = false): Delivery[] {
 for (const mode of ['collapsed', 'stream'] as const) {
   test(`${mode}: finish waits for delivery started by another flush waiter`, async (t) => {
     const deliveries = captureDeliveries(t);
-    const batch = createToolNotifications({ source: 'telegram' }, mode);
+    const batch = createToolNotifications(mode);
     for (let i = 0; i < TOOL_CALL_BATCH_MAX_ITEMS * 2; i++) batch.notify(`🛠 call ${i}`);
 
     let finished = false;
@@ -79,46 +79,37 @@ for (const mode of ['collapsed', 'stream'] as const) {
   });
 }
 
-for (const prompt of [
-  { source: 'heartbeat' },
-  { source: 'cron' },
-  // A completion report returning to the background session is just as unattended.
-  { source: 'background-bash-report', session: 'background' },
-] as const) {
-  const label = prompt.session ? `${prompt.source} in ${prompt.session}` : prompt.source;
-  test(`${label} lifecycle cannot flush, clear or close foreground notifications`, async (t) => {
-    const deliveries = captureDeliveries(t);
-    const background = createToolNotifications(prompt, 'collapsed');
-    background.notify('background call');
-    const foreground = createToolNotifications({ source: 'telegram' }, 'collapsed');
-    foreground.notify('🛠 first');
-    const first = foreground.flush();
-    assert.equal(deliveries.length, 1);
-
-    // Background completion while the foreground send is in flight must not wait on it.
-    await background.finish();
-    const anotherBackground = createToolNotifications(prompt, 'off');
-    await anotherBackground.finish();
-    foreground.notify('🛠 second');
-    deliveries[0].complete();
-    await nextTurn();
-    assert.equal(deliveries.length, 2);
-    assert.equal(deliveries[1].method, 'editMessageText');
-    assert.equal(deliveries[1].messageId, 1);
-    assert.match(deliveries[1].text, /2 tool calls/);
-    assert.match(deliveries[1].text, /first\nsecond/);
-    deliveries[1].complete();
-    await first;
-    await foreground.finish();
-  });
-}
-
-test('different prompts own different messages, even when finishes overlap', async (t) => {
+test("another turn's lifecycle cannot flush, clear or close this one's notifications", async (t) => {
   const deliveries = captureDeliveries(t);
-  const first = createToolNotifications({ source: 'telegram' }, 'collapsed');
+  const other = createToolNotifications('off');
+  other.notify('other call');
+  const foreground = createToolNotifications('collapsed');
+  foreground.notify('🛠 first');
+  const first = foreground.flush();
+  assert.equal(deliveries.length, 1);
+
+  // Another turn finishing while this one's send is in flight must not wait on it.
+  await other.finish();
+  await createToolNotifications('off').finish();
+  foreground.notify('🛠 second');
+  deliveries[0].complete();
+  await nextTurn();
+  assert.equal(deliveries.length, 2);
+  assert.equal(deliveries[1].method, 'editMessageText');
+  assert.equal(deliveries[1].messageId, 1);
+  assert.match(deliveries[1].text, /2 tool calls/);
+  assert.match(deliveries[1].text, /first\nsecond/);
+  deliveries[1].complete();
+  await first;
+  await foreground.finish();
+});
+
+test('different turns own different messages, even when finishes overlap', async (t) => {
+  const deliveries = captureDeliveries(t);
+  const first = createToolNotifications('collapsed');
   first.notify('🛠 first prompt');
   const finishingFirst = first.finish();
-  const second = createToolNotifications({ source: 'telegram' }, 'collapsed');
+  const second = createToolNotifications('collapsed');
   second.notify('🛠 second prompt');
   const finishingSecond = second.finish();
   assert.deepEqual(
@@ -136,10 +127,10 @@ test('different prompts own different messages, even when finishes overlap', asy
   assert.equal(deliveries.length, 2);
 });
 
-test('off mode sends nothing and does not affect another prompt mode', async (t) => {
+test('off mode sends nothing and does not affect another turn mode', async (t) => {
   const deliveries = captureDeliveries(t, true);
-  const off = createToolNotifications({ source: 'telegram' }, 'off');
-  const collapsed = createToolNotifications({ source: 'telegram' }, 'collapsed');
+  const off = createToolNotifications('off');
+  const collapsed = createToolNotifications('collapsed');
   for (let i = 0; i < 20; i++) off.notify('ignored');
   await off.finish();
   collapsed.notify('🛠 visible');
@@ -152,7 +143,7 @@ test('off mode sends nothing and does not affect another prompt mode', async (t)
 test('fixed timer flushes, and finish cancels timers and rejects late notifications', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const deliveries = captureDeliveries(t, true);
-  const batch = createToolNotifications({ source: 'telegram' }, 'collapsed');
+  const batch = createToolNotifications('collapsed');
   batch.notify('🛠 first');
   t.mock.timers.tick(TOOL_CALL_BATCH_MS - 1);
   batch.notify('🛠 second');
@@ -173,7 +164,7 @@ test('fixed timer flushes, and finish cancels timers and rejects late notificati
 test('a failed delivery releases the drain and finish still waits for queued work', async (t) => {
   const deliveries = captureDeliveries(t);
   t.mock.method(console, 'error', () => {});
-  const batch = createToolNotifications({ source: 'telegram' }, 'collapsed');
+  const batch = createToolNotifications('collapsed');
   for (let i = 0; i < TOOL_CALL_BATCH_MAX_ITEMS * 2; i++) batch.notify(`🛠 call ${i}`);
   let finished = false;
   const finishing = batch.finish().then(() => {

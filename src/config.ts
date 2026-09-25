@@ -185,6 +185,23 @@ export const TELEGRAM_DOCUMENT_UPLOAD_LIMIT = 50 * 1024 * 1024;
 export const TELEGRAM_VOICE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
+// Interfaces: the channels (Telegram, later a terminal UI) that use the core
+// ---------------------------------------------------------------------------
+
+/**
+ * How recently a channel must have been used for something unprompted (a
+ * background report, a heartbeat or cron message) to alert it rather than
+ * every durable channel. See src/core.ts.
+ */
+export const ACTIVE_WINDOW_MS = 10 * 60_000;
+/**
+ * How long shutdown waits for each channel to finish its pending sends. Each
+ * channel sends in the background, in event order, so a reply or error may
+ * still be going out when the process is asked to exit.
+ */
+export const CHANNEL_DRAIN_TIMEOUT_MS = 5_000;
+
+// ---------------------------------------------------------------------------
 // Queueing and response behavior
 // ---------------------------------------------------------------------------
 

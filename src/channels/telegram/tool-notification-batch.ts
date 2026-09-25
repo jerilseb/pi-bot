@@ -4,15 +4,14 @@ import {
   TOOL_CALL_COLLAPSED_MAX_CHARS,
   type ToolCallMode,
   toolCallMode,
-} from './config.ts';
+} from '../../config.ts';
+import { errorMessage } from '../../util.ts';
 import {
   editTelegramMessageHtml,
   sendTelegramHtmlMessage,
   sendTelegramMessage,
 } from './telegram.ts';
 import { renderCollapsedToolCalls } from './tool-notifications.ts';
-import type { IncomingPrompt } from './types.ts';
-import { errorMessage, isBackgroundPrompt } from './util.ts';
 
 export interface ToolNotifications {
   notify(notification: string): void;
@@ -21,20 +20,25 @@ export interface ToolNotifications {
 }
 
 /**
- * One notification lifecycle per prompt, not per chat: a user prompt can run
- * while the separate background session is still processing. Each instance
- * owns its mode, timer, delivery promise and collapsed message. Background
- * instances are silent and cannot reset or flush a foreground instance.
+ * One notification lifecycle per chat turn, not per chat: each instance owns
+ * its mode, timer, delivery promise and collapsed message, so one turn's
+ * instance cannot reset or flush another's. Background turns get none; the
+ * Telegram channel shows only chat turns.
  *
- * The mode is snapshotted at creation, so /toolcalls applies to the next prompt.
+ * The mode is snapshotted at creation, so /toolcalls applies to the next turn.
  * A fixed timer (not a debounce) or a full batch triggers delivery. Collapsed
  * mode edits one silent expandable message; stream sends one per batch.
+ *
+ * Nothing is sent before `after` settles: the channel passes the point in its
+ * send queue where the turn began, so a turn's tool calls cannot overtake the
+ * reply to the turn before it.
  */
 export function createToolNotifications(
-  prompt: Pick<IncomingPrompt, 'source' | 'session'>,
   mode: ToolCallMode = toolCallMode(),
+  options: { after?: Promise<unknown> } = {},
 ): ToolNotifications {
-  const enabled = !isBackgroundPrompt(prompt) && mode !== 'off';
+  const { after } = options;
+  const enabled = mode !== 'off';
   const notifications: string[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   let sending: Promise<void> | null = null;
@@ -96,6 +100,7 @@ export function createToolNotifications(
   }
 
   async function deliver(pending: string[]): Promise<void> {
+    if (after) await after;
     if (mode !== 'collapsed') {
       await sendTelegramMessage(pending.join('\n'));
       return;

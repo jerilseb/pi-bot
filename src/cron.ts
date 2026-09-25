@@ -29,7 +29,7 @@ export interface CronController {
 }
 
 export function createCronController(options: {
-  handleIncoming: (prompt: IncomingPrompt) => Promise<void>;
+  handleIncoming: (prompt: IncomingPrompt) => Promise<unknown>;
   /** True while the background session is running or has queued a prompt. */
   isBackgroundBusy: () => boolean;
   isRunning: () => boolean;
@@ -106,7 +106,7 @@ export function createCronController(options: {
       await options.handleIncoming({
         text: buildCronPrompt(job),
         attachments: [],
-        source: 'cron',
+        origin: { kind: 'cron', taskId: job.id },
         suppressNoop: true,
         model: job.model,
         label: job.title ?? job.id,

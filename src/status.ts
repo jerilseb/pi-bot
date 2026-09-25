@@ -1,5 +1,5 @@
-import { escapeTelegramHtml } from './telegram-html.ts';
-import { usageBar } from './telegram-format.ts';
+import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
+import { usageBar } from './channels/telegram/telegram-format.ts';
 
 /**
  * The /status message, rendered from a plain snapshot so the layout is pure and

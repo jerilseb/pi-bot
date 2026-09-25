@@ -6,7 +6,7 @@ import {
   escapeTelegramHtml,
   sanitizeTelegramHtml,
   splitTelegramMessage,
-} from '../src/telegram-html.ts';
+} from '../src/channels/telegram/telegram-html.ts';
 
 /**
  * Tests for the Telegram HTML machinery. These are the functions that decide

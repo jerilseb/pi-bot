@@ -1,5 +1,5 @@
 import type { SessionManager } from '@earendil-works/pi-coding-agent';
-import type { IncomingPrompt } from './types.ts';
+import type { PromptOrigin } from './contract.ts';
 
 /**
  * Notes about the bot itself, recorded in the Pi session.
@@ -84,11 +84,11 @@ export function formatSessionEvent(text: string): string {
 /**
  * The note recorded in the chat session when a background-session run sends
  * the user a message. Quotes the message so the chat agent can refer back to
- * it. Null for sources that run in the chat session, which needs no note about
+ * it. Null for origins that run in the chat session, which needs no note about
  * its own replies.
  */
 export function backgroundReportNote(options: {
-  source: IncomingPrompt['source'];
+  origin: PromptOrigin;
   label?: string;
   model?: string;
   report: string;
@@ -97,7 +97,8 @@ export function backgroundReportNote(options: {
   const model = options.model ? ` on ${options.model}` : '';
   let kind: SessionEventKind;
   let intro: string;
-  switch (options.source) {
+  const { origin } = options;
+  switch (origin.kind === 'job-report' ? origin.source : origin.kind) {
     case 'cron':
       kind = 'scheduled-task';
       intro = `A scheduled task${label} ran${model} in a separate background session and sent this report to the user:`;

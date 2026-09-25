@@ -1,6 +1,11 @@
 import { USAGE_FETCH_TIMEOUT_MS } from './config.ts';
-import { escapeTelegramHtml } from './telegram-html.ts';
-import { telegramCode as code, formatPercent, titleCase, usageBar } from './telegram-format.ts';
+import { escapeTelegramHtml } from './channels/telegram/telegram-html.ts';
+import {
+  telegramCode as code,
+  formatPercent,
+  titleCase,
+  usageBar,
+} from './channels/telegram/telegram-format.ts';
 import { errorMessage, isRecord } from './util.ts';
 
 const OPENAI_CODEX_PROVIDER = 'openai-codex';

@@ -7,7 +7,7 @@ import {
   editTelegramMessageHtml,
   type InlineKeyboardButton,
   sendTelegramHtmlMessage,
-} from './telegram.ts';
+} from './channels/telegram/telegram.ts';
 import { errorMessage } from './util.ts';
 
 /**

@@ -6,7 +6,7 @@ import {
   dispatchCallbackQuery,
 } from '../src/callback-menu.ts';
 import { ALLOWED_CHAT_ID } from '../src/config.ts';
-import type { TelegramCallbackQuery } from '../src/types.ts';
+import type { TelegramCallbackQuery } from '../src/channels/telegram/types.ts';
 
 interface ApiCall {
   method: string;

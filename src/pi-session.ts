@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
@@ -38,7 +38,6 @@ import {
   type SessionEventKind,
   sessionEventMessage,
 } from './session-notes.ts';
-import { formatToolStartNotification } from './tool-notifications.ts';
 import type { Attachment, IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
 import { PromptSteering, type SteeringDisposition } from './prompt-steering.ts';
 import { notifySteeringMessage } from './steering-signal.ts';
@@ -65,7 +64,6 @@ import { telegramVoiceNoteExtension } from './voice.ts';
 export const NO_MODEL_NAME = 'per-prompt';
 
 export interface PiRunPromptOptions {
-  onToolCall?: (notification: string) => void;
   onSteeringSettled?: (prompt: IncomingPrompt, disposition: SteeringDisposition) => void;
   /** Enables one fresh continuation after the SDK exhausts its transient retries. */
   recoverTransportErrors?: boolean;
@@ -435,8 +433,14 @@ function resolveUsableModel(modelRuntime: ModelRuntime, modelRef: ModelRef): Mod
   return model;
 }
 
+/** Hears every event of every AgentSession an SdkPiSession runs, across replacements. */
+export type PiEventListener = (event: AgentSessionEvent) => void;
+
 export class SdkPiSession {
   private session: AgentSession | null = null;
+  private readonly onEvent: PiEventListener | undefined;
+  /** Detaches onEvent from the live AgentSession; cleared with it. */
+  private unsubscribeEvents: (() => void) | null = null;
   private starting: Promise<AgentSession> | null = null;
   private runtime: PiRuntime;
   private selectedModelRef: ModelRef | null;
@@ -455,9 +459,14 @@ export class SdkPiSession {
   /** Session-per-prompt only: what the next start() opens or creates. */
   private nextRun: { resumeSessionFile?: string; transcript?: RunTranscript } = {};
 
-  constructor(runtime: PiRuntime) {
+  /**
+   * onEvent is subscribed to each AgentSession this creates, since the live
+   * one is replaced by a model switch, /new, and every session-per-prompt run.
+   */
+  constructor(runtime: PiRuntime, options: { onEvent?: PiEventListener } = {}) {
     this.runtime = runtime;
     this.selectedModelRef = runtime.modelName ? parseModelRef(runtime.modelName) : null;
+    this.onEvent = options.onEvent;
   }
 
   /** The selected model, or NO_MODEL_NAME until a prompt names one. */
@@ -588,15 +597,9 @@ export class SdkPiSession {
         promptError = '';
         notifyRecovery(event.errorMessage);
       }
-      this.collectPromptEvent(
-        event,
-        session,
-        reply,
-        (message) => {
-          promptError = message;
-        },
-        options.onToolCall,
-      );
+      collectResponseEvent(event, reply, (message) => {
+        promptError = message;
+      });
     });
 
     try {
@@ -712,6 +715,11 @@ export class SdkPiSession {
 
   getSessionStats(): SessionStats | null {
     return this.session?.getSessionStats() ?? null;
+  }
+
+  /** The live session's messages; empty until the transcript is loaded. */
+  get messages(): AgentMessage[] {
+    return this.session?.messages ?? [];
   }
 
   /** How full the context window is, from the loaded transcript; undefined before it loads. */
@@ -853,6 +861,8 @@ export class SdkPiSession {
   cleanup(): void {
     this.transportRecoveryAbortController?.abort();
     this.transportRecoveryAbortController = null;
+    this.unsubscribeEvents?.();
+    this.unsubscribeEvents = null;
     this.session?.dispose();
     this.session = null;
     this.starting = null;
@@ -910,11 +920,27 @@ export class SdkPiSession {
 
     this.starting = this.createSession();
     try {
-      this.session = await this.starting;
-      return this.session;
+      const session = await this.starting;
+      this.session = session;
+      this.forwardEvents(session);
+      return session;
     } finally {
       this.starting = null;
     }
+  }
+
+  private forwardEvents(session: AgentSession): void {
+    this.unsubscribeEvents?.();
+    this.unsubscribeEvents = null;
+    const { onEvent } = this;
+    if (!onEvent) return;
+    this.unsubscribeEvents = session.subscribe((event) => {
+      try {
+        onEvent(event);
+      } catch (error) {
+        console.error('Pi event listener failed:', getErrorMessage(error));
+      }
+    });
   }
 
   private async createSession(): Promise<AgentSession> {
@@ -997,20 +1023,6 @@ export class SdkPiSession {
     });
     if (transcript?.name) manager.appendSessionInfo(transcript.name);
     return manager;
-  }
-
-  private collectPromptEvent(
-    event: AgentSessionEvent,
-    session: AgentSession,
-    reply: RunText,
-    setError: (message: string) => void,
-    onToolCall: ((notification: string) => void) | undefined,
-  ): void {
-    collectResponseEvent(event, reply, setError);
-
-    if (event.type === 'tool_execution_start') {
-      onToolCall?.(formatToolStartNotification(event, this.runtime.cwd));
-    }
   }
 }
 

@@ -121,7 +121,7 @@ test('a report returns to the chat session on whatever model the chat is using',
     { text: 'done', source: 'subagent-report', label: 'the task', isSuperseded: () => false },
   );
   assert.equal(prompt.session, 'chat');
-  assert.equal(prompt.source, 'subagent-report');
+  assert.deepEqual(prompt.origin, { kind: 'job-report', source: 'subagent-report' });
   assert.equal(prompt.suppressNoop, true);
   assert.equal(prompt.label, 'the task');
   assert.equal(prompt.model, undefined);

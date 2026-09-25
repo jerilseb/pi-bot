@@ -206,7 +206,7 @@ test('a job still running after the yield is backgrounded and reports once when 
   assert.equal(report.tasks[1]?.output, 'second result');
 
   const prompt = subagentReportPrompt(report);
-  assert.equal(prompt.source, 'subagent-report');
+  assert.deepEqual(prompt.origin, { kind: 'job-report', source: 'subagent-report' });
   assert.equal(prompt.session, 'chat');
   assert.equal(prompt.suppressNoop, true);
   assert.equal(prompt.model, undefined);

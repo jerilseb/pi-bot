@@ -34,7 +34,7 @@ for (const state of ['idle', 'processing', 'queued', 'processing-and-queued'] as
     const cleanup = t.mock.method(chat.pi, 'cleanup', () => {});
     chat.processing = state === 'processing' || state === 'processing-and-queued';
     if (state === 'queued' || state === 'processing-and-queued') {
-      chat.queue.push({ text: 'pending work', attachments: [] });
+      chat.queue.push({ text: 'pending work', attachments: [], origin: { kind: 'heartbeat' } });
     }
     chat.messageCount = 3;
     const pendingCount = chat.queue.length;
