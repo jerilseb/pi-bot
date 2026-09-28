@@ -26,26 +26,17 @@ import {
   SEND_LOCAL_IMAGES,
   SESSIONS_DIR,
   SUBAGENTS_ENABLED,
-  TRANSPORT_RECOVERY_DELAY_MS,
-  TRANSPORT_RECOVERY_MAX_CONTINUATIONS,
 } from './config.ts';
 import { backgroundBashExtension } from './background-bash.ts';
 import {
   appendSessionEvent,
-  isConversationCleared,
   lastSessionEventKind,
-  markConversationCleared,
   type SessionEventKind,
   sessionEventMessage,
 } from './session-notes.ts';
 import type { Attachment, IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
-import { PromptSteering, type SteeringDisposition } from './prompt-steering.ts';
+import { PromptSteering } from './prompt-steering.ts';
 import { notifySteeringMessage } from './steering-signal.ts';
-import {
-  isTransientTransportError,
-  TRANSPORT_RECOVERY_PROMPT,
-  waitForTransportRecovery,
-} from './transport-recovery.ts';
 import {
   errorMessage as getErrorMessage,
   formatModelRef,
@@ -63,12 +54,24 @@ import { telegramVoiceNoteExtension } from './voice.ts';
 /** Stands in for the model name on a session whose prompts each carry their own. */
 export const NO_MODEL_NAME = 'per-prompt';
 
+/**
+ * The file beside the chat's transcripts that names the one to resume. A new
+ * conversation writes its transcript's path there as it starts, and /new and
+ * start_new_session delete it. The SDK writes a transcript only with its first
+ * assistant message, so a restart before then finds the pointer naming a file
+ * not on disk yet and starts fresh, rather than resuming the conversation that
+ * was just ended.
+ */
+const CURRENT_CHAT_POINTER = 'current-chat';
+
 export interface PiRunPromptOptions {
-  onSteeringSettled?: (prompt: IncomingPrompt, disposition: SteeringDisposition) => void;
-  /** Enables one fresh continuation after the SDK exhausts its transient retries. */
-  recoverTransportErrors?: boolean;
-  /** Called once when either SDK retry or fallback continuation begins. */
-  onAutoRecovery?: (error: string) => void | Promise<void>;
+  /** Called for each prompt steered into the run, once the run is over. */
+  onSteeringSettled?: (prompt: IncomingPrompt) => void;
+  /**
+   * Called once, when the SDK first retries a failed request in this run. How
+   * often it retries is Pi's `retry` setting in files/settings.json.
+   */
+  onAutoRetry?: (error: string) => void;
   /**
    * Session-per-prompt runtimes only: the transcript to continue instead of
    * starting a fresh one, e.g. the run a job report belongs to.
@@ -182,7 +185,7 @@ export async function createPiRuntime(options: {
  * answers a single task and is disposed. Workers share the runtime's model
  * catalogue, settings, and extension paths, but get only the worker
  * extension factories and a caller-supplied system prompt — no Telegram tools,
- * no steering, no transport recovery.
+ * no steering.
  *
  * The transcript is persisted under request.sessionDir with the parent's file
  * in its header, and framed by two custom entries of request.customType: a
@@ -314,12 +317,17 @@ function abortOnRunStart(session: AgentSession, event: AgentSessionEvent, aborte
 const PROMPT_ABORTED_MESSAGE = 'Request was aborted';
 
 /**
- * The bot's resource loader: no skills and nothing from the user's Pi agent
- * directory, only the project extensions and the given factories. Shared by the
+ * The bot's resource loader: no skills and no extensions from the user's Pi
+ * agent directory, only the project's and the given factories. Shared by the
  * chat and background sessions and by sub-agent workers, which differ only in
- * which factories and system prompt they get.
+ * which factories and system prompt they get, and by the smoke check, which
+ * loads the project's extensions exactly as a session does.
+ *
+ * The project's extensions come from the runtime's extension paths: the
+ * project root, a Pi package whose package.json names extensions/ under "pi",
+ * so Pi discovers each one there.
  */
-async function loadResources(
+export async function loadResources(
   runtime: PiRuntime,
   options: {
     extensionFactories: Array<(pi: ExtensionAPI) => void>;
@@ -367,10 +375,6 @@ class RunText {
    */
   dropLast(): void {
     this.messages.pop();
-  }
-
-  clear(): void {
-    this.messages = [];
   }
 
   /** Raw, with no placeholder: a blank reply is for the caller to judge. */
@@ -449,7 +453,6 @@ export class SdkPiSession {
   private pendingNewSessionRequest = false;
   private pendingNewSessionTask: string | null = null;
   private steering: PromptSteering | null = null;
-  private transportRecoveryAbortController: AbortController | null = null;
   /**
    * Bumped by every abort(). A run compares it with the value it began with, so
    * an abort that lands before there is anything to abort, while the session is
@@ -568,26 +571,13 @@ export class SdkPiSession {
       throw new Error('Pi SDK session is already processing a prompt');
     }
 
-    const steering = new PromptSteering(session, (prompt, disposition) => {
-      options.onSteeringSettled?.(prompt, disposition);
+    const steering = new PromptSteering(session, (prompt) => {
+      options.onSteeringSettled?.(prompt);
     });
     this.steering = steering;
     const reply = new RunText();
     let promptError = '';
-    let recoveryNotified = false;
-    let recoveryAttempts = 0;
-    let recoveryNotification = Promise.resolve();
-    const notifyRecovery = (message: string): void => {
-      if (recoveryNotified) return;
-      recoveryNotified = true;
-      try {
-        recoveryNotification = Promise.resolve(options.onAutoRecovery?.(message)).catch((error) => {
-          console.error('Automatic recovery callback failed:', getErrorMessage(error));
-        });
-      } catch (error) {
-        console.error('Automatic recovery callback failed:', getErrorMessage(error));
-      }
-    };
+    let retryAnnounced = false;
     const unsubscribe = session.subscribe((event) => {
       abortOnRunStart(session, event, aborted());
       steering.observe(event);
@@ -595,7 +585,14 @@ export class SdkPiSession {
         // Discard the failed attempt's partial text and error before the SDK retries.
         reply.dropLast();
         promptError = '';
-        notifyRecovery(event.errorMessage);
+        if (!retryAnnounced) {
+          retryAnnounced = true;
+          try {
+            options.onAutoRetry?.(event.errorMessage);
+          } catch (error) {
+            console.error('Automatic retry callback failed:', getErrorMessage(error));
+          }
+        }
       }
       collectResponseEvent(event, reply, (message) => {
         promptError = message;
@@ -603,70 +600,26 @@ export class SdkPiSession {
     });
 
     try {
-      let nextText = text;
-      let nextAttachments = attachments;
-      while (true) {
-        // Starting the session, or waiting to recover, may have outlasted an abort.
-        if (aborted()) throw new Error(PROMPT_ABORTED_MESSAGE);
-        promptError = '';
-        const prompt = buildPiPrompt(nextText, nextAttachments);
-        try {
-          await session.prompt(prompt.message, {
-            ...(prompt.images?.length ? { images: prompt.images } : {}),
-          });
-        } catch (error) {
-          promptError ||= getErrorMessage(error);
-        }
-
-        if (!promptError) {
-          await recoveryNotification;
-          return reply.result();
-        }
-
-        const canRecover =
-          options.recoverTransportErrors === true &&
-          recoveryAttempts < TRANSPORT_RECOVERY_MAX_CONTINUATIONS &&
-          isTransientTransportError(promptError) &&
-          !this.pendingNewSessionRequest &&
-          !steering.isCancelled &&
-          steering.pendingCount === 0;
-        if (!canRecover) {
-          await recoveryNotification;
-          throw new Error(promptError);
-        }
-
-        recoveryAttempts++;
-        notifyRecovery(promptError);
-        reply.clear();
-        const recoveryController = new AbortController();
-        this.transportRecoveryAbortController = recoveryController;
-        try {
-          await waitForTransportRecovery(TRANSPORT_RECOVERY_DELAY_MS, recoveryController.signal);
-        } catch {
-          throw new Error(promptError);
-        } finally {
-          if (this.transportRecoveryAbortController === recoveryController) {
-            this.transportRecoveryAbortController = null;
-          }
-        }
-        if (this.pendingNewSessionRequest || steering.isCancelled) throw new Error(promptError);
-
-        steering.resume();
-        nextText = TRANSPORT_RECOVERY_PROMPT;
-        nextAttachments = [];
+      // Starting the session may have outlasted an abort.
+      if (aborted()) throw new Error(PROMPT_ABORTED_MESSAGE);
+      const prompt = buildPiPrompt(text, attachments);
+      try {
+        await session.prompt(prompt.message, {
+          ...(prompt.images?.length ? { images: prompt.images } : {}),
+        });
+      } catch (error) {
+        promptError ||= getErrorMessage(error);
       }
+      if (promptError) throw new Error(promptError);
+      return reply.result();
     } finally {
       unsubscribe();
-      try {
-        await steering.finish();
-      } finally {
-        this.steering = null;
-        this.transportRecoveryAbortController = null;
-        this.applyPendingNewSession();
-        // The run is over, and nothing resumes a session-per-prompt transcript
-        // except through its file.
-        if (this.runtime.sessionPerPrompt) this.cleanup();
-      }
+      steering.finish();
+      this.steering = null;
+      this.applyPendingNewSession();
+      // The run is over, and nothing resumes a session-per-prompt transcript
+      // except through its file.
+      if (this.runtime.sessionPerPrompt) this.cleanup();
     }
   }
 
@@ -693,7 +646,7 @@ export class SdkPiSession {
     const { level } = await this.getThinkingState();
     this.pendingNewSessionRequest = true;
     this.pendingNewSessionTask = task?.trim() || null;
-    await this.markConversationCleared();
+    this.forgetStoredConversation();
     return this.pendingNewSessionTask
       ? `Fresh session queued using ${this.modelName} (reasoning: ${level}). The provided task will run automatically in the new Pi conversation after the current response finishes.`
       : `Fresh session queued using ${this.modelName} (reasoning: ${level}). The next user message will start a new Pi conversation.`;
@@ -762,7 +715,6 @@ export class SdkPiSession {
   abort(): boolean {
     this.abortGeneration++;
     const turnUnderWay = this.steering !== null;
-    this.transportRecoveryAbortController?.abort();
     this.steering?.cancel();
     this.session?.clearQueue();
     void this.session?.abort();
@@ -847,34 +799,52 @@ export class SdkPiSession {
 
   /**
    * Opens the conversation this chat would resume, without starting an agent:
-   * the most recent session file, unless /new or start_new_session marked it
-   * cleared. Null when there is nothing to resume — always, for a
-   * session-per-prompt runtime, which never resumes on its own.
+   * the transcript its pointer names. Null when there is nothing to resume: no
+   * pointer, since /new or start_new_session cleared it; a transcript not on
+   * disk yet; or a session-per-prompt runtime, which never resumes on its own.
    */
   private async openStoredSessionManager(): Promise<SessionManager | null> {
     if (this.runtime.sessionPerPrompt) return null;
-    const existing = await findMostRecentSessionForId(
-      this.runtime.cwd,
-      this.runtime.sessionDir,
-      buildTelegramSessionId(this.runtime.sessionPrefix),
-    );
-    if (!existing) return null;
-    const manager = SessionManager.open(existing.path, this.runtime.sessionDir, this.runtime.cwd);
-    return isConversationCleared(manager) ? null : manager;
+    let file: string;
+    try {
+      file = fs.readFileSync(this.transcriptPointer, 'utf8').trim();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+    if (!file || !fs.existsSync(file)) return null;
+    return SessionManager.open(file, this.runtime.sessionDir, this.runtime.cwd);
+  }
+
+  /** The file naming the chat's current transcript; see CURRENT_CHAT_POINTER. */
+  private get transcriptPointer(): string {
+    return path.join(this.runtime.sessionDir, CURRENT_CHAT_POINTER);
+  }
+
+  /** Makes `manager`'s transcript the one the next start resumes. */
+  private pointAt(manager: SessionManager): void {
+    const file = manager.getSessionFile();
+    if (!file) return;
+    try {
+      fs.writeFileSync(this.transcriptPointer, `${file}\n`, 'utf8');
+    } catch (error) {
+      // The chat still works; only resuming it after a restart is lost.
+      console.error('Failed to record the chat transcript:', error);
+    }
   }
 
   /**
-   * Marks the conversation being replaced, so a restart before its successor
-   * reaches disk starts fresh instead of resuming it. Written when the swap is
-   * requested, not when it is applied: until then the request is only in memory.
+   * Forgets the conversation being replaced, so a restart before its successor
+   * starts fresh instead of resuming it. Done when the swap is requested, not
+   * when it is applied: until then the request is only in memory.
    */
-  private async markConversationCleared(): Promise<void> {
+  private forgetStoredConversation(): void {
+    if (this.runtime.sessionPerPrompt) return;
     try {
-      const manager = this.session?.sessionManager ?? (await this.openStoredSessionManager());
-      if (manager) markConversationCleared(manager);
+      fs.rmSync(this.transcriptPointer, { force: true });
     } catch (error) {
       // /new must still work; only its survival across a restart is lost.
-      console.error('Failed to mark conversation cleared:', error);
+      console.error('Failed to clear the chat transcript pointer:', error);
     }
   }
 
@@ -886,8 +856,6 @@ export class SdkPiSession {
   }
 
   cleanup(): void {
-    this.transportRecoveryAbortController?.abort();
-    this.transportRecoveryAbortController = null;
     this.unsubscribeEvents?.();
     this.unsubscribeEvents = null;
     this.session?.dispose();
@@ -1021,9 +989,11 @@ export class SdkPiSession {
       if (stored) return stored;
     }
 
-    return SessionManager.create(this.runtime.cwd, this.runtime.sessionDir, {
+    const manager = SessionManager.create(this.runtime.cwd, this.runtime.sessionDir, {
       id: buildTelegramSessionId(this.runtime.sessionPrefix),
     });
+    this.pointAt(manager);
+    return manager;
   }
 
   /**
@@ -1057,7 +1027,7 @@ function withoutSystemMessages(messages: AgentMessage[]): AgentMessage[] {
   return messages.filter((message) => message.role !== 'system');
 }
 
-/** Keeps the historical `<prefix>-<chatId>` shape so existing sessions/ files still resume. */
+/** Transcript IDs keep the historical `<prefix>-<chatId>` shape. */
 function buildTelegramSessionId(prefix: string): string {
   const sanitized = `${prefix}-${ALLOWED_CHAT_ID}`
     .replace(/[^A-Za-z0-9._-]+/g, '-')
@@ -1065,19 +1035,6 @@ function buildTelegramSessionId(prefix: string): string {
     .replace(/[^A-Za-z0-9]+$/, '');
 
   return sanitized || `${prefix}-unknown`;
-}
-
-async function findMostRecentSessionForId(
-  cwd: string,
-  sessionDir: string,
-  sessionId: string,
-): Promise<{ path: string } | null> {
-  const sessions = await SessionManager.list(cwd, sessionDir);
-  return (
-    sessions
-      .filter((session) => session.id === sessionId)
-      .sort((a, b) => b.modified.getTime() - a.modified.getTime())[0] ?? null
-  );
 }
 
 function buildPiPrompt(

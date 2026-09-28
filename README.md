@@ -150,7 +150,7 @@ npm run dev
 npm run systemd:install
 ```
 
-The startup logs show the active chat model, background model, and enabled extensions.
+The startup logs show the active chat model and the features that are on.
 
 ## Configuration
 
@@ -205,6 +205,16 @@ Pi's own `cacheWarming` setting is written as `"streaming"`, Pi's default, so th
 ```json
 {
   "cacheWarming": "streaming"
+}
+```
+
+Pi's own `retry` setting is written with `maxRetries` 4, one more than Pi's default of 3: a model request that fails transiently, such as a dropped connection or an overloaded provider, is retried with backoff that many times before the turn fails. A file written before the key existed lacks it and gets Pi's default.
+
+```json
+{
+  "retry": {
+    "maxRetries": 4
+  }
 }
 ```
 
@@ -266,7 +276,7 @@ Useful non-secret settings in `src/config.ts` include:
 - `CHAT_MODEL` and `ALLOWED_MODELS` (the heartbeat model is `HEARTBEAT_MODEL` in `.env`; scheduled tasks are pinned to a model at creation)
 - `ELEVENLABS_TTS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, and `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `SPEECH_TO_TEXT_PROVIDER` and `TEXT_TO_SPEECH_PROVIDER`
-- `MAX_QUEUED_PROMPTS`, `TRANSPORT_RECOVERY_MAX_CONTINUATIONS`, and `TRANSPORT_RECOVERY_DELAY_MS`
+- `MAX_QUEUED_PROMPTS` (how often a failed model request is retried is Pi's `retry` setting in `files/settings.json` — see below)
 - `TOOL_CALL_BATCH_MS`, `TOOL_CALL_BATCH_MAX_ITEMS`, and `TOOL_CALL_COLLAPSED_MAX_CHARS` (whether and how tool calls are shown at all is the `toolCalls` setting in `files/settings.json` — see below)
 - `SEND_LOCAL_IMAGES`, `LOCAL_IMAGE_UPLOAD_DIRS`, `SEND_LOCAL_DOCUMENTS`, `LOCAL_DOCUMENT_UPLOAD_DIRS`, and `DOCUMENT_UPLOAD_EXTS`
 - `HEARTBEAT_INTERVAL_SECONDS` (whether the heartbeat runs at all is a `files/settings.json` setting — see below)
@@ -276,7 +286,7 @@ Chat session state stays loaded between prompts; there is no idle timeout. Each 
 
 Ordinary Telegram messages sent while the chat agent is running **steer the current task** via the Pi SDK. The bot acknowledges them with “↪️ Steering current task.” They are delivered after the current assistant turn finishes its tool calls, before the next model call; running tools are not cancelled. Text, transcribed voice, and attachments use the same route. Messages arriving during startup or after the run stops accepting steering fall back to the serial queue, as do background jobs and completion reports. There is no explicit queue command. The pending limit includes both queued and undelivered steering messages. `/abort` and `/new` discard both kinds of pending work.
 
-The Pi SDK automatically retries transient provider and transport failures. The bot keeps only the final attempt's text/error, announces recovery once, and—if the SDK exhausts its retry budget on a foreground transport failure—starts one fresh continuation turn after a short delay. That continuation uses the saved conversation/tool results and explicitly avoids blindly replaying completed side effects. It does not run for authentication, quota, rate-limit, context, tool, abort, or background-task failures. `/abort` and `/new` cancel the recovery delay.
+The Pi SDK automatically retries transient provider and transport failures, with backoff, up to `retry.maxRetries` times (4, set in `files/settings.json`; Pi's default is 3). The bot keeps only the final attempt's text/error and announces the first retry of a chat turn once. Authentication, quota and context errors are not retried.
 
 ## Telegram commands
 

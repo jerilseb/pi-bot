@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { SettingsManager } from '@earendil-works/pi-coding-agent';
 import { SdkPiSession, type PiRuntime } from '../src/pi-session.ts';
-import { isConversationCleared } from '../src/session-notes.ts';
 
 /** Exercise the bot/SDK boundary without credentials, filesystem writes, or network. */
 function fixture() {
@@ -138,22 +137,18 @@ test('temporary background model selection leaves chat defaults untouched', asyn
   assert.deepEqual(f.calls, ['dispose']);
 });
 
-test('requesting a new session marks the live conversation cleared', async () => {
-  const { pi, session } = fixture();
-  const sessionManager = SessionManager.inMemory('/work');
-  Object.assign(session, { sessionManager });
+test('requesting a new session with a task queues the task for the new conversation', async () => {
+  const { pi } = fixture();
   assert.equal(
     await pi.requestNewSession('follow-up'),
     'Fresh session queued using test/old (reasoning: low). The provided task will run automatically in the new Pi conversation after the current response finishes.',
   );
-  assert.equal(isConversationCleared(sessionManager), true);
   assert.equal(pi.consumePendingNewSessionTask(), 'follow-up');
 });
 
 test('new session without a task reports the effective reasoning level', async () => {
   const { pi, session } = fixture();
   session.thinkingLevel = 'high';
-  Object.assign(session, { sessionManager: SessionManager.inMemory('/work') });
   assert.equal(
     await pi.requestNewSession(),
     'Fresh session queued using test/old (reasoning: high). The next user message will start a new Pi conversation.',

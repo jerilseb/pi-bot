@@ -19,9 +19,8 @@ import { parseModelRef } from './util.ts';
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, '..');
 export const SESSIONS_DIR = path.join(PROJECT_ROOT, 'sessions');
 /**
- * Sub-agent worker transcripts. A subdirectory, not SESSIONS_DIR itself: the
- * SDK's session listing is not recursive and the chat session lists SESSIONS_DIR
- * on every start, which must not mean parsing every worker transcript ever kept.
+ * Sub-agent worker transcripts. A subdirectory, not SESSIONS_DIR itself, so the
+ * chat's transcripts are not lost among every worker transcript ever kept.
  */
 export const SUBAGENT_SESSIONS_DIR = path.join(SESSIONS_DIR, 'subagent-sessions');
 /**
@@ -33,7 +32,6 @@ export const HEARTBEAT_SESSIONS_DIR = path.join(SESSIONS_DIR, 'heartbeat-session
 export const SCHEDULED_TASKS_SESSIONS_DIR = path.join(SESSIONS_DIR, 'scheduled-tasks-sessions');
 export const TMP_DIR = path.join(os.tmpdir(), 'pi-channel');
 
-export const PROJECT_EXTENSIONS_DIR = path.join(PROJECT_ROOT, 'extensions');
 export const FILES_DIR = path.join(PROJECT_ROOT, 'files');
 export const BOT_SETTINGS_PATH = path.join(FILES_DIR, 'settings.json');
 export const SYSTEM_PROMPT_PATH = path.join(FILES_DIR, 'system.md');
@@ -162,6 +160,9 @@ export function ensureBotSettingsFile(): void {
         defaultModel: model.model,
         defaultThinkingLevel: 'high',
         cacheWarming: 'streaming',
+        // How often Pi retries a request that failed transiently, with backoff:
+        // one more time than its default.
+        retry: { maxRetries: 4 },
         heartbeat: false,
         cronJobs: false,
         toolCalls: DEFAULT_TOOL_CALL_MODE,
@@ -358,11 +359,6 @@ export const TUI_RECONNECT_MAX_MS = 5_000;
 // ---------------------------------------------------------------------------
 
 export const MAX_QUEUED_PROMPTS = 5;
-// The Pi SDK already retries transient failures (3 attempts by default). After
-// that budget is exhausted, the foreground chat gets one fresh continuation
-// turn rather than replaying the original user prompt and its tool side effects.
-export const TRANSPORT_RECOVERY_MAX_CONTINUATIONS = 1;
-export const TRANSPORT_RECOVERY_DELAY_MS = 1_000;
 
 // ---------------------------------------------------------------------------
 // Usage commands (/openaiusage, /elevenlabsusage)
@@ -499,7 +495,6 @@ export const SUBAGENT_STOP_WAIT_MS = 5_000;
 // Pi resources and scheduled prompt config
 // ---------------------------------------------------------------------------
 
-export const EXTENSION_ENTRYPOINT_EXTS = new Set<string>(['.ts', '.js', '.mjs', '.cjs']);
 /**
  * Heartbeat runs only when settings.json holds `"heartbeat": true`. It is a
  * runtime setting rather than a constant here because it makes the bot act on

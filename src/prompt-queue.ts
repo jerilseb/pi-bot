@@ -197,7 +197,6 @@ export function createPromptQueue(options: {
           ...outcome,
         });
       };
-      let deferredSteers = 0;
       try {
         console.log(`${originLabel(prompt.origin)}: ${prompt.text.slice(0, 120)}`);
         if (prompt.model) await chat.pi.useModel(prompt.model);
@@ -206,8 +205,7 @@ export function createPromptQueue(options: {
           ...(isBackground ? { transcript: backgroundRunTranscript(prompt) } : {}),
           ...(!isBackground
             ? {
-                recoverTransportErrors: true,
-                onAutoRecovery: () =>
+                onAutoRetry: () =>
                   sink.emit({
                     type: 'notice',
                     text: {
@@ -220,13 +218,7 @@ export function createPromptQueue(options: {
                   }),
               }
             : {}),
-          onSteeringSettled: (steered, disposition) => {
-            if (disposition === 'deferred') {
-              // Requeue immediately so /abort during response delivery can still
-              // discard these. They precede messages queued during shutdown.
-              chat.queue.splice(deferredSteers++, 0, steered);
-            } else cleanupAttachments(steered);
-          },
+          onSteeringSettled: cleanupAttachments,
         });
         const silent = isSilentResponse(response, prompt);
         if (silent) console.log(`${kind} turn completed with no user-visible update`);

@@ -192,13 +192,12 @@ test('ordinary messages steer an active run instead of starting a second respons
   );
 });
 
-test('idle messages use the normal prompt worker with foreground recovery', async (t) => {
+test('idle messages use the normal prompt worker, and announce an SDK retry', async (t) => {
   const f = setup(t);
   await f.send('first');
   assert.equal(f.steer.mock.callCount(), 0);
   assert.deepEqual(f.runs, ['first']);
-  assert.equal(f.options()?.recoverTransportErrors, true);
-  await f.options()?.onAutoRecovery?.('WebSocket error');
+  f.options()?.onAutoRetry?.('WebSocket error');
   const [notice] = f.channel.of('notice');
   assert.equal(notice?.text.text, '🔄 Temporary model error. Continuing automatically...');
   assert.deepEqual(notice?.ping, [USER]);
@@ -272,8 +271,7 @@ test('background jobs and completion reports never steer', async (t) => {
     ['shell done', 'workers done'],
   );
   assert.deepEqual(f.backgroundRuns, ['cron task']);
-  assert.equal(f.backgroundOptions()?.recoverTransportErrors, undefined);
-  assert.equal(f.backgroundOptions()?.onAutoRecovery, undefined);
+  assert.equal(f.backgroundOptions()?.onAutoRetry, undefined);
   assert.deepEqual(
     f.background.queue.map((prompt) => prompt.text),
     ['heartbeat task'],
@@ -283,14 +281,13 @@ test('background jobs and completion reports never steer', async (t) => {
 });
 
 for (const command of ['/abort', '/new']) {
-  test(`${command} bypasses steering and clears deferred work`, async (t) => {
+  test(`${command} bypasses steering and clears queued work`, async (t) => {
     const f = setup(t);
     await f.send('first');
-    f.options()?.onSteeringSettled?.(
-      { text: 'late steer', attachments: [], origin: userOrigin },
-      'deferred',
-    );
+    f.steer.mock.mockImplementation(async () => false);
+    await f.send('queued while the run ends');
     assert.equal(f.chat.queue.length, 1);
+    f.steer.mock.resetCalls();
     assert.equal(await f.send(command), null);
     if (command === '/new') {
       assert.ok(f.channel.notices().some((notice) => notice.includes('Reasoning: **medium**')));
@@ -372,19 +369,6 @@ test('a queued report whose result was read meanwhile is dropped when its turn c
   f.gate.resolve();
   await until(() => !f.core.isAssistantBusy());
   assert.deepEqual(f.runs, ['poll the command', 'bg_2 finished']);
-});
-
-test('late steering is replayed before fallback queued prompts', async (t) => {
-  const f = setup(t);
-  await f.send('first');
-  f.steer.mock.mockImplementation(async () => false);
-  await f.send('queued at shutdown');
-  const late = (text: string): IncomingPrompt => ({ text, attachments: [], origin: userOrigin });
-  f.options()?.onSteeringSettled?.(late('late steer 1'), 'deferred');
-  f.options()?.onSteeringSettled?.(late('late steer 2'), 'deferred');
-  f.gate.resolve();
-  await until(() => !f.core.isAssistantBusy());
-  assert.deepEqual(f.runs, ['first', 'late steer 1', 'late steer 2', 'queued at shutdown']);
 });
 
 test('rejected steering reports an error without retrying it as a new prompt', async (t) => {
@@ -475,8 +459,8 @@ test('a background-bash report returns to the session that started the command',
   assert.deepEqual(f.runs, []);
   assert.deepEqual(f.backgroundRuns, ['bg_1 finished']);
   assert.equal(useModel.mock.calls[0]?.arguments[0], 'test/job-model');
-  // Unattended: no foreground recovery.
-  assert.equal(f.backgroundOptions()?.recoverTransportErrors, undefined);
+  // Unattended: no one to tell about a retry.
+  assert.equal(f.backgroundOptions()?.onAutoRetry, undefined);
   // The user got a message from the background session, so the chat is told.
   assert.equal(f.note.mock.callCount(), 1);
   const [kind, text] = f.note.mock.calls[0]?.arguments as [string, string];
@@ -519,7 +503,7 @@ test('a background-bash report from the chat runs in the chat session', async (t
 
   assert.deepEqual(f.runs, ['bg_2 finished']);
   assert.deepEqual(f.backgroundRuns, []);
-  assert.equal(f.options()?.recoverTransportErrors, true);
+  assert.equal(typeof f.options()?.onAutoRetry, 'function');
 });
 
 test('a scheduled task that reports nothing leaves no note in the chat session', async (t) => {

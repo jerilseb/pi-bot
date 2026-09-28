@@ -44,22 +44,14 @@ async function until(condition: () => boolean): Promise<void> {
  */
 function fakeSession(setup: Promise<void> = Promise.resolve()) {
   const listeners = new Set<(event: AgentSessionEvent) => void>();
-  const entries: string[] = [];
   const fake = {
     prompts: [] as string[],
     aborts: 0,
     disposed: false,
-    cleared: false,
     isStreaming: false,
     thinkingLevel: 'medium',
     getAvailableThinkingLevels: () => ['off', 'low', 'medium', 'high'],
-    sessionManager: {
-      getEntries: () => [],
-      appendCustomEntry: (type: string) => {
-        entries.push(type);
-        fake.cleared = true;
-      },
-    },
+    sessionManager: { getEntries: () => [] },
     subscribe(listener: (event: AgentSessionEvent) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -153,7 +145,6 @@ test('/new while the reply is still being delivered moves the next message to a 
   // /new only aborts and queues the swap, as src/commands.ts does then.
   pi.abort();
   await pi.requestNewSession();
-  assert.equal(old.cleared, true);
 
   await pi.runPrompt('second', []);
   assert.deepEqual(old.prompts, ['first']);

@@ -6,16 +6,19 @@ import {
   HEARTBEAT_MODEL,
   HEARTBEAT_SESSIONS_DIR,
   MODEL,
-  PROJECT_EXTENSIONS_DIR,
   PROJECT_ROOT,
   SCHEDULED_TASKS_SESSIONS_DIR,
   SUBAGENT_SESSIONS_DIR,
 } from '../src/config.ts';
 import { collectConfigProblems } from '../src/config-validation.ts';
 import { contextGistSystemPromptExtension } from '../src/context-gist.ts';
-import { discoverExtensionPaths } from '../src/discovery.ts';
 import { protectedEnvToolAccessExtension } from '../src/env-guard.ts';
-import { assertModelUsable, createPiRuntime } from '../src/pi-session.ts';
+import {
+  assertModelUsable,
+  createPiRuntime,
+  loadResources,
+  type PiRuntime,
+} from '../src/pi-session.ts';
 import { scheduledTasksExtension } from '../src/scheduled-tasks.ts';
 import { subagentExtension } from '../src/subagent.ts';
 import { isRecord } from '../src/util.ts';
@@ -26,18 +29,6 @@ import {
   readSubagentSystemPrompt,
   readSystemPrompt,
 } from '../src/system-prompt.ts';
-
-const INDEX_ENTRYPOINTS = ['index.ts', 'index.js', 'index.mjs', 'index.cjs'] as const;
-
-type ExtensionModule = {
-  default?: unknown;
-};
-
-type PackageJson = {
-  pi?: {
-    extensions?: unknown;
-  };
-};
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -70,81 +61,38 @@ async function importAllSourceModules(): Promise<number> {
   return files.length;
 }
 
-function resolveExtensionImportPaths(extensionPath: string): string[] {
-  const stat = fs.statSync(extensionPath);
-  if (stat.isFile()) return [extensionPath];
-
-  const packageJsonPath = path.join(extensionPath, 'package.json');
-  if (fs.existsSync(packageJsonPath)) {
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as PackageJson;
-    const extensionEntries = packageJson.pi?.extensions;
-    if (Array.isArray(extensionEntries) && extensionEntries.length > 0) {
-      return extensionEntries.map((entry) => {
-        assert(
-          typeof entry === 'string',
-          `${packageJsonPath}: pi.extensions entries must be strings.`,
-        );
-        return path.resolve(extensionPath, entry);
-      });
-    }
-  }
-
-  for (const entrypoint of INDEX_ENTRYPOINTS) {
-    const candidate = path.join(extensionPath, entrypoint);
-    if (fs.existsSync(candidate)) return [candidate];
-  }
-
-  throw new Error(`Could not find an importable extension entrypoint for ${extensionPath}.`);
-}
-
-async function importAndRegisterExtensions(extensionPaths: string[]): Promise<number> {
-  let registeredTools = 0;
-
-  const fakePi = {
-    registerTool(tool: unknown) {
-      assert(isRecord(tool), 'Extension attempted to register a non-object tool.');
-      assert(
-        typeof tool.name === 'string' && tool.name.trim(),
-        'Extension registered a tool without a name.',
-      );
-      registeredTools++;
-    },
-    on(eventName: unknown, callback: unknown) {
-      assert(
-        typeof eventName === 'string' && eventName.trim(),
-        'Extension registered an invalid event name.',
-      );
-      assert(
-        typeof callback === 'function',
-        `Extension event ${eventName} must use a function callback.`,
-      );
-      return () => undefined;
-    },
-  } as unknown as ExtensionAPI;
-
-  for (const extensionPath of extensionPaths) {
-    for (const importPath of resolveExtensionImportPaths(extensionPath)) {
-      const module = (await import(pathToFileURL(importPath).href)) as ExtensionModule;
-      assert(
-        typeof module.default === 'function',
-        `${importPath} must export a default extension function.`,
-      );
-      (module.default as (pi: ExtensionAPI) => void)(fakePi);
-    }
-  }
-
-  return registeredTools;
+/**
+ * Loads the project's extensions the way every session does, through Pi's
+ * resource loader, so an extension Pi cannot load fails the check instead of
+ * going missing from the agent after a restart.
+ */
+async function verifyProjectExtensions(
+  runtime: PiRuntime,
+): Promise<{ extensions: number; tools: number }> {
+  const loader = await loadResources(runtime, {
+    extensionFactories: [],
+    systemPromptOverride: () => readSystemPrompt(),
+  });
+  const { extensions, errors } = loader.getExtensions();
+  assert(
+    errors.length === 0,
+    `Extensions failed to load:\n${errors.map((e) => `- ${e.path}: ${e.error}`).join('\n')}`,
+  );
+  assert(extensions.length > 0, 'No project extensions were loaded.');
+  const tools = extensions.reduce((count, extension) => count + extension.tools.size, 0);
+  return { extensions: extensions.length, tools };
 }
 
 /**
  * Asserts that both runtimes build, and that every configured model resolves with
  * auth. The runtimes no longer resolve a model themselves, so these checks are
- * explicit — they mirror validateModels() in main.ts.
+ * explicit — they mirror validateModels() in main.ts. Returns the chat runtime.
  */
-async function createSmokeRuntimes(extensionPaths: string[]): Promise<void> {
+async function createSmokeRuntimes(): Promise<PiRuntime> {
   const common = {
     cwd: process.cwd(),
-    getExtensionPaths: () => extensionPaths,
+    // As in main.ts: the project root is a Pi package naming extensions/.
+    getExtensionPaths: () => [PROJECT_ROOT],
     systemPromptOverride: () => readSystemPrompt(),
     extensionFactories: [
       contextGistSystemPromptExtension,
@@ -171,6 +119,7 @@ async function createSmokeRuntimes(extensionPaths: string[]): Promise<void> {
   });
   // Scheduled tasks fall back to the chat model, already checked above.
   if (HEARTBEAT_MODEL) assertModelUsable(background.modelRuntime, HEARTBEAT_MODEL);
+  return chat;
 }
 
 /**
@@ -239,14 +188,13 @@ async function main(): Promise<void> {
   assert(readSubagentSystemPrompt().trim(), 'Sub-agent worker prompt is empty.');
 
   const importedModules = await importAllSourceModules();
-  const extensionPaths = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
-  const registeredTools = await importAndRegisterExtensions(extensionPaths);
-  await createSmokeRuntimes(extensionPaths);
+  const chat = await createSmokeRuntimes();
+  const loaded = await verifyProjectExtensions(chat);
   const scheduledTaskTools = verifyScheduledTaskTools();
   const subagentTools = verifySubagentTools();
 
   console.log(
-    `Smoke test passed: ${importedModules} src module(s), ${extensionPaths.length} extension path(s), ${registeredTools} registered tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s).`,
+    `Smoke test passed: ${importedModules} src module(s), ${loaded.extensions} extension(s), ${loaded.tools} extension tool(s), ${scheduledTaskTools} scheduled-task tool(s), ${subagentTools} sub-agent tool(s).`,
   );
 }
 

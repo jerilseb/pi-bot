@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { SdkPiSession, type PiRuntime } from '../src/pi-session.ts';
-import type { SteeringDisposition } from '../src/prompt-steering.ts';
 import { onSteeringMessage } from '../src/steering-signal.ts';
 import type { IncomingPrompt } from '../src/types.ts';
 
@@ -72,11 +71,11 @@ function fixture() {
   };
   // Inject only an already-started session; never touch settings, disk, or auth.
   Object.assign(pi, { session: sdk });
-  const settled: Array<{ prompt: IncomingPrompt; disposition: SteeringDisposition }> = [];
+  const settled: IncomingPrompt[] = [];
   const start = async () => {
     const run = pi.runPrompt('original', [], {
-      onSteeringSettled: (prompt, disposition) => {
-        settled.push({ prompt, disposition });
+      onSteeringSettled: (prompt) => {
+        settled.push(prompt);
       },
     });
     await Promise.resolve();
@@ -104,11 +103,11 @@ test('wrapper steers file prompts and retains ownership until the existing run f
   assert.deepEqual(f.settled, []);
   f.release();
   await run;
-  assert.deepEqual(f.settled, [{ prompt, disposition: 'done' }]);
+  assert.deepEqual(f.settled, [prompt]);
   assert.equal(await f.pi.trySteer(prompt), false);
 });
 
-test('wrapper defers an unconsumed tail message and removes it from the SDK queue', async () => {
+test('wrapper leaves a message steered as the run ends with Pi, which delivers it', async () => {
   const f = fixture();
   const { run } = await f.start();
   const prompt: IncomingPrompt = {
@@ -119,8 +118,9 @@ test('wrapper defers an unconsumed tail message and removes it from the SDK queu
   await f.pi.trySteer(prompt);
   f.release();
   await run;
-  assert.deepEqual(f.queued, []);
-  assert.deepEqual(f.settled, [{ prompt, disposition: 'deferred' }]);
+  // Pi's prompt() runs again while anything is queued; this fake does not.
+  assert.deepEqual(f.queued, ['last instant']);
+  assert.deepEqual(f.settled, [prompt]);
 });
 
 test('wrapper abort clears SDK steering and never replays cancelled prompts', async () => {
@@ -136,7 +136,7 @@ test('wrapper abort clears SDK steering and never replays cancelled prompts', as
   assert.equal(f.aborted(), true);
   assert.deepEqual(f.queued, []);
   await run;
-  assert.deepEqual(f.settled, [{ prompt, disposition: 'done' }]);
+  assert.deepEqual(f.settled, [prompt]);
 });
 
 test('agent_end and a pending session reset both prevent new steering', async () => {

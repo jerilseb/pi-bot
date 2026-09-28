@@ -3,6 +3,9 @@
   "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "high",
   "cacheWarming": "streaming",
+  "retry": {
+    "maxRetries": 4
+  },
   "heartbeat": false,
   "cronJobs": false,
   "toolCalls": "collapsed",

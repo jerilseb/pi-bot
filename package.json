@@ -5,6 +5,11 @@
   "license": "ISC",
   "author": "",
   "type": "module",
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
   "scripts": {
     "dev": "node main.ts",
     "tui": "node tui.ts",

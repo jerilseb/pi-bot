@@ -17,8 +17,7 @@
  * startup sequence and process lifecycle. Everything else is a dedicated
  * module — the prompt queue (prompt-queue), the Telegram channel and its
  * polling loop (channels/telegram), the terminal UI's socket (channels/socket),
- * commands, menus, chat-session, discovery, system-prompt, env-guard,
- * heartbeat, cron.
+ * commands, menus, chat-session, system-prompt, env-guard, heartbeat, cron.
  */
 
 import * as fs from 'node:fs';
@@ -35,7 +34,7 @@ import {
   HEARTBEAT_MODEL,
   MODEL,
   POST_RESTART_TASKS_PATH,
-  PROJECT_EXTENSIONS_DIR,
+  PROJECT_ROOT,
   CHANNEL_DRAIN_TIMEOUT_MS,
   RESTART_EXIT_DELAY_MS,
   HEARTBEAT_SESSIONS_DIR,
@@ -59,7 +58,6 @@ import { LocalCore } from './src/core.ts';
 import { createCronController, cronStatusText } from './src/cron.ts';
 import { SocketServer } from './src/channels/socket/server.ts';
 import { TelegramChannel } from './src/channels/telegram/channel.ts';
-import { discoverExtensionPaths } from './src/discovery.ts';
 import { protectedEnvToolAccessExtension } from './src/env-guard.ts';
 import { createHeartbeatController, heartbeatStatusText } from './src/heartbeat.ts';
 import { escapeMarkdown } from './src/markdown.ts';
@@ -98,7 +96,9 @@ validateConfiguration();
 ensureBotSettingsFile();
 await loadContextGist();
 
-const EXTENSION_PATHS = discoverExtensionPaths(PROJECT_EXTENSIONS_DIR);
+// The project root is a Pi package: package.json names extensions/ under "pi",
+// and Pi loads every extension it finds there.
+const EXTENSION_PATHS = [PROJECT_ROOT];
 
 // Both sessions get the same extensions, so one cannot quietly lack a guard or a
 // system-prompt block the other has. Sub-agent workers get only the env guard.
@@ -321,7 +321,6 @@ function logStartupBanner(): void {
   console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
   console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName ?? NO_MODEL_NAME}`);
   console.log('Pi runtime: SDK');
-  console.log(`Extensions: ${EXTENSION_PATHS.length ? EXTENSION_PATHS.join(', ') : 'none'}`);
   console.log(`Voice note tool: ${voiceStatusText()}`);
   console.log(`Context gist: ${contextGistStatusText()}`);
   console.log(`Tool call messages: ${toolCallMode()}`);
