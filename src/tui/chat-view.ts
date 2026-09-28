@@ -19,10 +19,13 @@ import {
 import {
   type Component,
   Container,
+  imageFallback,
   Markdown,
   Spacer,
+  stripTerminalSequences,
   Text,
   type TUI,
+  truncateToWidth,
 } from '@earendil-works/pi-tui';
 import type { ChannelRef, PromptOrigin } from '../contract.ts';
 import { formatFirstToolArgument } from '../tool-call-description.ts';
@@ -52,6 +55,12 @@ const BUILT_IN_TOOLS: Record<string, (cwd: string) => ToolRenderers> = {
 };
 
 const TOOL_ARGUMENT_WIDTH = 100;
+/**
+ * Screen rows a folded tool result takes, as in Pi's bash preview. Counted after
+ * wrapping: a fetched page's lines are whole paragraphs, so a count of lines
+ * would still fill the screen.
+ */
+const TOOL_PREVIEW_ROWS = 5;
 
 export class ChatView {
   readonly container = new Container();
@@ -314,7 +323,11 @@ export class ChatView {
     return input?.from ?? null;
   }
 
-  /** Pi's renderers for its own tools; the tool and its first argument for the rest. */
+  /**
+   * Pi's renderers for its own tools. The rest run in the bot's process, so this
+   * one has none of their renderers: the tool and its first argument, then its
+   * output folded to a few rows.
+   */
   private renderersFor(name: string): ToolRenderers {
     let renderers = this.toolRenderers.get(name);
     if (!renderers) {
@@ -331,6 +344,11 @@ export class ChatView {
             0,
           );
         },
+        renderResult: (
+          result: { content: Array<TextContent | ImageContent> },
+          { expanded }: { expanded: boolean },
+          theme: Theme,
+        ): Component => toolOutput(result.content, expanded, theme),
       };
       this.toolRenderers.set(name, renderers);
     }
@@ -363,6 +381,40 @@ export function internalPromptSummary(text: string, origin: PromptOrigin | null)
   if (/^This is a scheduled (?:heartbeat|task) run\b/.test(first)) return 'Scheduled run';
   if (origin && origin.kind !== 'user') return first || origin.kind;
   return null;
+}
+
+/** A tool's output, all of it when expanded, else its first TOOL_PREVIEW_ROWS screen rows. */
+function toolOutput(
+  content: Array<TextContent | ImageContent>,
+  expanded: boolean,
+  theme: Theme,
+): Component {
+  const output = content
+    .map((part) =>
+      part.type === 'text'
+        ? stripTerminalSequences(part.text).replace(/\r/g, '').replace(/\t/g, '   ')
+        : imageFallback(part.mimeType),
+    )
+    .join('\n')
+    .trim();
+  const text = new Text(
+    output
+      .split('\n')
+      .map((line) => theme.fg('toolOutput', line))
+      .join('\n'),
+    0,
+    0,
+  );
+  if (expanded) return text;
+  return {
+    render: (width) => {
+      const rows = text.render(width);
+      if (rows.length <= TOOL_PREVIEW_ROWS) return rows;
+      const more = theme.fg('muted', `… (${rows.length - TOOL_PREVIEW_ROWS} more lines, /expand)`);
+      return [...rows.slice(0, TOOL_PREVIEW_ROWS), truncateToWidth(more, width)];
+    },
+    invalidate: () => text.invalidate(),
+  };
 }
 
 function errorResult(message: AssistantMessage): {

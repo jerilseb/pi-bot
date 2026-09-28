@@ -122,6 +122,42 @@ test('a reply that is already streaming when the terminal connects is still draw
   assert.match(shown(), /Half a reply\./);
 });
 
+test("a tool's output is folded to a few screen rows, however long its lines, until /expand", () => {
+  const { chat, shown } = view();
+  const paragraph = (n: number): string => `Paragraph ${n} ${'word '.repeat(60)}`;
+  chat.load([
+    { role: 'user', content: 'Read the page', timestamp: 1 },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'c1', name: 'web_fetch', arguments: { url: 'https://x.test' } },
+      ],
+      usage,
+      stopReason: 'toolUse',
+      timestamp: 1,
+    },
+    {
+      role: 'toolResult',
+      toolCallId: 'c1',
+      toolName: 'web_fetch',
+      content: [{ type: 'text', text: [1, 2, 3, 4].map(paragraph).join('\n') }],
+      isError: false,
+      timestamp: 2,
+    },
+  ] as never);
+  const folded = shown();
+  assert.match(folded, /web_fetch https:\/\/x\.test/);
+  assert.match(folded, /Paragraph 1/);
+  assert.doesNotMatch(folded, /Paragraph 2/);
+  assert.match(folded, /… \(\d+ more lines, \/expand\)/);
+  assert.ok(folded.split('\n').length < 12, folded);
+
+  chat.toggleExpanded();
+  const expanded = shown();
+  assert.match(expanded, /Paragraph 4/);
+  assert.doesNotMatch(expanded, /more lines/);
+});
+
 test("the bot's own prompts are named from the turn's origin, or from their envelope", () => {
   assert.equal(
     internalPromptSummary('[subagent-report] Sub-agent job sub_1 succeeded.\n…', null),
