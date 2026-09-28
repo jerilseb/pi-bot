@@ -236,7 +236,7 @@ export function createPromptQueue(options: {
             : {
                 outcome: 'replied',
                 // Only a reply that must be sent gets here blank: an unattended run's is silent.
-                reply: { format: 'telegram-html', text: response.text || '(no response)' },
+                reply: { format: 'markdown', text: response.text || '(no response)' },
               },
         );
         if (isBackground && !silent) {
@@ -297,7 +297,7 @@ export function createPromptQueue(options: {
   ): Promise<void> {
     const receipts = await sink.deliver({
       kind: 'report',
-      text: { format: 'telegram-html', text: response.text || '(no response)' },
+      text: { format: 'markdown', text: response.text || '(no response)' },
       origin: prompt.origin,
       ...(prompt.label ? { label: prompt.label } : {}),
       ping: sink.pingFor(prompt.origin),

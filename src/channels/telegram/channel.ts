@@ -453,8 +453,6 @@ export function toTelegramHtml(text: RichText): string {
       return escapeTelegramHtml(text.text);
     case 'markdown':
       return markdownToTelegramHtml(text.text);
-    case 'telegram-html':
-      return text.text;
   }
 }
 

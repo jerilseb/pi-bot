@@ -72,11 +72,11 @@ const assistant = (text: string) =>
     timestamp: 1,
   }) as never;
 
-test("a transcript is drawn as the chat, the model's HTML as formatting and the bot's own prompts as one line", () => {
+test("a transcript is drawn as the chat, the model's Markdown as formatting and the bot's own prompts as one line", () => {
   const { chat, shown } = view();
   chat.load([
     { role: 'user', content: 'What is up?', timestamp: 1 },
-    assistant('All <b>good</b> &amp; quiet.'),
+    assistant('All **good** & quiet.'),
     {
       role: 'user',
       content: '[background-bash-report] Background bash bg_1 exited with code 0.\n\nOutput: ok',
@@ -87,7 +87,7 @@ test("a transcript is drawn as the chat, the model's HTML as formatting and the 
   assert.match(text, /What is up\?/);
   assert.match(text, /All good & quiet\./);
   assert.match(text, /⚙ Background bash bg_1 exited with code 0\./);
-  assert.doesNotMatch(text, /Output: ok|<b>|&amp;/);
+  assert.doesNotMatch(text, /Output: ok|\*\*/);
 });
 
 test('a message typed in Telegram is labelled; one typed here is not', () => {
@@ -118,7 +118,7 @@ test('a reply that is already streaming when the terminal connects is still draw
     message: assistant('Half a'),
     assistantMessageEvent: { type: 'text_delta' },
   } as never);
-  chat.agentEvent({ type: 'message_end', message: assistant('Half a <i>reply</i>.') } as never);
+  chat.agentEvent({ type: 'message_end', message: assistant('Half a *reply*.') } as never);
   assert.match(shown(), /Half a reply\./);
 });
 

@@ -163,12 +163,12 @@ export type CoreEvent =
   | { type: 'channels'; attached: ChannelRef[] };
 
 /**
- * Text as the core hands it over. The bot's own text is Markdown, which each
- * channel renders its own way; plain text is for the channel to escape. Model
- * replies are Telegram HTML, which is what the system prompt asks for.
+ * Text as the core hands it over. Model replies and the bot's own text are
+ * Markdown, which each channel renders its own way; plain text is for the
+ * channel to escape.
  */
 export interface RichText {
-  format: 'plain' | 'markdown' | 'telegram-html';
+  format: 'plain' | 'markdown';
   text: string;
 }
 

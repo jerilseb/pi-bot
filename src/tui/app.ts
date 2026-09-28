@@ -549,9 +549,6 @@ export class TerminalApp implements Channel {
       case 'markdown':
         this.chat.markdown(text.text, color);
         return;
-      case 'telegram-html':
-        this.chat.html(text.text);
-        return;
     }
   }
 

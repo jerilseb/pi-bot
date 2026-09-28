@@ -165,7 +165,7 @@ function reply(turnId: string, text: string, ping = pinged) {
     session: 'chat',
     ping,
     outcome: 'replied',
-    reply: { format: 'telegram-html', text },
+    reply: { format: 'markdown', text },
   } satisfies CoreEvent;
 }
 
@@ -175,7 +175,7 @@ test("a turn's tool calls go out before its reply, which waits for them", async 
   telegram.onEvent({ type: 'turn_start', turnId: 'chat-1', session: 'chat', origin: user });
   telegram.onEvent(toolCall('chat-1', 'ls'));
   telegram.onEvent(toolCall('chat-1', 'pwd'));
-  telegram.onEvent(reply('chat-1', '<b>Done</b>'));
+  telegram.onEvent(reply('chat-1', '**Done**'));
   await telegram.drain(1_000);
 
   const [tools, answer] = sent();
@@ -349,7 +349,7 @@ test('a reply that fails to send is replaced by the error', async (t) => {
 });
 
 function report(origin: PromptOrigin, ping = pinged): Deliverable {
-  return { kind: 'report', text: { format: 'telegram-html', text: '<b>News</b>' }, origin, ping };
+  return { kind: 'report', text: { format: 'markdown', text: '**News**' }, origin, ping };
 }
 
 test('a scheduled report gets its header; other reports go as they are', async (t) => {

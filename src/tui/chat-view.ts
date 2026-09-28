@@ -12,7 +12,6 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
   getMarkdownTheme,
-  type MarkdownTransformer,
   type Theme,
   ToolExecutionComponent,
   UserMessageComponent,
@@ -28,7 +27,6 @@ import {
 import type { ChannelRef, PromptOrigin } from '../contract.ts';
 import { formatFirstToolArgument } from '../tool-call-description.ts';
 import { dim, italic } from './style.ts';
-import { telegramHtmlToMarkdown } from './telegram-html.ts';
 
 /**
  * The chat as the terminal shows it: the conversation drawn with Pi's own
@@ -52,12 +50,6 @@ const BUILT_IN_TOOLS: Record<string, (cwd: string) => ToolRenderers> = {
   find: createFindToolDefinition,
   ls: createLsToolDefinition,
 };
-
-/** Model replies are Telegram HTML until they switch to Markdown. */
-const replyTransformer: MarkdownTransformer = (text, context) =>
-  context.messageType === 'assistant'
-    ? telegramHtmlToMarkdown(text, { streaming: context.isStreaming })
-    : text;
 
 const TOOL_ARGUMENT_WIDTH = 100;
 
@@ -205,18 +197,13 @@ export class ChatView {
     this.ui.requestRender();
   }
 
-  /** The bot's own Markdown: a command's answer, a background report. */
+  /** Markdown the bot shows outside a turn: a command's answer, a background report. */
   markdown(text: string, color?: (text: string) => string): void {
     this.container.addChild(new Spacer(1));
     this.container.addChild(
       new Markdown(text, 1, 0, this.markdownTheme, color ? { color } : undefined),
     );
     this.ui.requestRender();
-  }
-
-  /** A report's text, which is Telegram HTML like a reply. */
-  html(text: string): void {
-    this.markdown(telegramHtmlToMarkdown(text));
   }
 
   /** Opens or closes every tool's full output and every hidden thinking block. */
@@ -267,8 +254,6 @@ export class ChatView {
       !this.expanded,
       this.markdownTheme,
       'Thinking… (/expand)',
-      undefined,
-      [replyTransformer],
     );
     this.assistants.push(component);
     this.container.addChild(component);
