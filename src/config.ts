@@ -427,7 +427,8 @@ export const DOCUMENT_UPLOAD_EXTS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Background work: background runs, background bash, and sub-agents
+// Background work: background runs (scheduled tasks, heartbeat) and background
+// jobs (background bash, sub-agents)
 //
 // Every concurrency limit, timeout, TTL, and payload cap for background work
 // belongs in this section — only narrow display widths stay next to the

@@ -38,8 +38,9 @@ import {
  * get here: the core runs them before a message is submitted.
  *
  * Runs are serial per session. User input steers the active chat run;
- * startup/finishing races and background work use the FIFO queue. Steering uses
- * the existing run's subscription, never a second concurrent response collector.
+ * background runs, job reports and startup/finishing races use the FIFO queue.
+ * Steering uses the existing run's subscription, never a second concurrent
+ * response collector.
  *
  * Nothing here talks to an interface. A turn is a series of events — its start,
  * every SDK event, its end with the reply or error — and each channel sends

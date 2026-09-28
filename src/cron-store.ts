@@ -165,7 +165,7 @@ export function computeNextRunAt(job: CronJob, fromDate: Date = new Date()): str
   }
 
   if (job.kind === 'cron') {
-    if (!job.schedule) throw new Error('Cron jobs require schedule');
+    if (!job.schedule) throw new Error('A scheduled task of kind cron requires schedule');
     const expression = CronExpressionParser.parse(job.schedule, {
       currentDate: fromDate,
       ...(job.timezone ? { tz: job.timezone } : {}),

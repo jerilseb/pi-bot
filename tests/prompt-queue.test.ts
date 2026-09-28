@@ -257,7 +257,7 @@ test('startup and finish races fall back to FIFO exactly once', async (t) => {
   assert.deepEqual(f.runs, ['first', 'second']);
 });
 
-test('background jobs and completion reports never steer', async (t) => {
+test('background runs and job reports never steer', async (t) => {
   const f = setup(t);
   await f.send('first');
   await f.enqueue('shell done', bashReport);

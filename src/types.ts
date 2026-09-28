@@ -15,7 +15,7 @@ export interface Attachment {
 export type SessionKind = 'chat' | 'background';
 
 /**
- * Completion reports from background work the agent started earlier. They are
+ * Completion reports from background jobs the agent started earlier. They are
  * the tail of a turn already under way, so the queue admits them even when full.
  */
 export type JobReportSource = 'background-bash-report' | 'subagent-report';

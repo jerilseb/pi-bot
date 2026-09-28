@@ -183,7 +183,7 @@ function buildCronPrompt(job: CronJob): string {
   return buildAgentEnvelope({
     preamble: 'This is a scheduled task run for the Telegram assistant.',
     meta: [
-      ['Job ID', job.id],
+      ['Task ID', job.id],
       ['Title', job.title],
       ['Schedule', formatCronJob(job)],
       ['Current time', new Date().toISOString()],

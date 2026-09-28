@@ -22,7 +22,7 @@ export function isBackgroundPrompt(prompt: Pick<IncomingPrompt, 'origin' | 'sess
   return promptSessionKind(prompt) === 'background';
 }
 
-/** True for a completion report from background work (background bash, sub-agents). */
+/** True for a completion report from a background job (background bash, sub-agents). */
 export function isJobReportPrompt(prompt: Pick<IncomingPrompt, 'origin'>): boolean {
   return prompt.origin.kind === 'job-report';
 }
