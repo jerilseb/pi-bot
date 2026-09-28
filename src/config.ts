@@ -161,6 +161,7 @@ export function ensureBotSettingsFile(): void {
         defaultProvider: model.provider,
         defaultModel: model.model,
         defaultThinkingLevel: 'high',
+        cacheWarming: 'streaming',
         heartbeat: false,
         cronJobs: false,
         toolCalls: DEFAULT_TOOL_CALL_MODE,

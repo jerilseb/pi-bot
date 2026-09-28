@@ -121,21 +121,13 @@ export function contextGistStatusText(): string {
   return state.notice ? `on (${size}; ${state.notice})` : `on (${size})`;
 }
 
-function appendContextGistToSystemPrompt(systemPrompt: string): string {
-  if (state.kind !== 'loaded') return systemPrompt;
-  return [
-    systemPrompt,
-    '',
-    PREAMBLE,
-    '',
-    '<user-preferences>',
-    state.text,
-    '</user-preferences>',
-  ].join('\n');
-}
-
+/**
+ * A named section of Pi's prompt, like the memory blocks (see system-prompt.ts).
+ * Pi wraps it in <user-preferences> tags, so the preamble sits inside them.
+ */
 export function contextGistSystemPromptExtension(pi: ExtensionAPI): void {
-  pi.on('before_agent_start', async (event) => ({
-    systemPrompt: appendContextGistToSystemPrompt(event.systemPrompt),
-  }));
+  pi.on('before_agent_start', async (event) => {
+    if (state.kind !== 'loaded') return;
+    event.systemPromptOptions.sections['user-preferences'] = `${PREAMBLE}\n\n${state.text}`;
+  });
 }

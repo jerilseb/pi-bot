@@ -200,6 +200,14 @@ Sub-agent jobs the chat starts get a live progress message of their own, with a 
 
 It is read every time the message is redrawn, so a switch reaches jobs that are already running.
 
+Pi's own `cacheWarming` setting is written as `"streaming"`, Pi's default, so that a new default in a Pi upgrade cannot change what the bot spends unnoticed. During a long tool run, Pi may send one-token requests that stop the provider's prompt cache from expiring, when it estimates they save at least $0.05; they count toward the session's usage. It applies to the chat, background runs and sub-agent workers alike. `"off"` turns it off, and `"idle"` also keeps caches warm between runs. A file written before the key existed lacks it and gets Pi's default, the same value.
+
+```json
+{
+  "cacheWarming": "streaming"
+}
+```
+
 `files/settings.json` is owned by Pi's `SettingsManager`, which merges writes into the existing file, so these bot-only keys are not clobbered by `/models` or `/reasoning`. Writes from `/toolcalls` and `/subagent_toolcalls` merge the same way.
 
 The file is gitignored, but `files/settings.json.example` is checked in and shows the defaults the bot writes on first start. You do not need to copy it — startup creates `files/settings.json` if it is missing — it is there to document the shape.
@@ -387,7 +395,7 @@ files/heartbeat.md               Standing heartbeat instructions
 files/heartbeat-state.md         Durable heartbeat state
 files/cron-jobs.json             Scheduled tasks
 files/post-restart-tasks.json    Tasks queued to run after a restart
-files/settings.json              Active chat model, reasoning level, heartbeat/cron switches, tool-call mode
+files/settings.json              Active chat model, reasoning level, cache warming, heartbeat/cron switches, tool-call mode
 files/settings.json.example      Checked-in reference copy of the above defaults
 ```
 

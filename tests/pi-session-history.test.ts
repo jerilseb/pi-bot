@@ -17,6 +17,8 @@ function fixture() {
     sessionKind: 'chat',
   } as unknown as PiRuntime;
   const stored = SessionManager.inMemory('/work');
+  // Pi opens every transcript with the prompt and the tools as a system message.
+  stored.appendMessage({ role: 'system', content: 'the prompt', timestamp: 0 });
   stored.appendMessage({ role: 'user', content: 'from the transcript', timestamp: 1 });
   const pi = new SdkPiSession(runtime);
   // Stands in for reading sessions/: nothing here may touch the disk.
@@ -37,7 +39,20 @@ test("a loaded session's history is its own messages", async () => {
   const { pi } = fixture();
   const messages = [{ role: 'user', content: 'live', timestamp: 2 }];
   Object.assign(pi, { session: { messages } });
-  assert.equal(await pi.history(), messages);
+  assert.deepEqual(await pi.history(), messages);
+});
+
+test("Pi's system messages, the prompt and the tools, are not part of the history", async () => {
+  const { pi } = fixture();
+  const roles = async () => (await pi.history()).map((message) => message.role);
+  assert.deepEqual(await roles(), ['user']);
+  const messages = [
+    { role: 'system', content: 'the prompt', timestamp: 0 },
+    { role: 'user', content: 'live', timestamp: 2 },
+    { role: 'system', content: '', sections: { memory: 'changed' }, timestamp: 3 },
+  ];
+  Object.assign(pi, { session: { messages } });
+  assert.deepEqual(await roles(), ['user']);
 });
 
 test('after /new the history is empty, even before the new session starts', async () => {

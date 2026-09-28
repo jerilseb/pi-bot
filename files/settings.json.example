@@ -2,6 +2,7 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "high",
+  "cacheWarming": "streaming",
   "heartbeat": false,
   "cronJobs": false,
   "toolCalls": "collapsed",

@@ -62,14 +62,21 @@ function markdownBody(content: string): string {
   return content.replace(/^# .+$/m, '').trim();
 }
 
-function appendMemoryToSystemPrompt(systemPrompt: string): string {
+/**
+ * The bot's blocks are named sections of Pi's system prompt, set in
+ * before_agent_start, rather than text appended to the prompt and returned as a
+ * replacement. The transcript then records what the model was told, and when a
+ * block changes (the memory file, or the day's note path at midnight) Pi sends
+ * the model a patch of that one section instead of a new prompt, so the cached
+ * prefix of a long conversation survives. Returning `systemPrompt` would force
+ * a whole prompt for the run and give up both.
+ */
+function memorySection(): string {
   const today = todayLocalDate();
   const todayPath = ensureDailyMemoryFile(today);
   const memory = readMemory();
 
   return [
-    systemPrompt,
-    '',
     '## Memory system',
     `Long-term memory file: ${MEMORY_PATH}`,
     `Daily notes directory: ${DAILY_MEMORY_DIR}`,
@@ -90,15 +97,13 @@ function appendMemoryToSystemPrompt(systemPrompt: string): string {
 }
 
 export function memorySystemPromptExtension(pi: ExtensionAPI): void {
-  pi.on('before_agent_start', async (event) => ({
-    systemPrompt: appendMemoryToSystemPrompt(event.systemPrompt),
-  }));
+  pi.on('before_agent_start', async (event) => {
+    event.systemPromptOptions.sections.memory = memorySection();
+  });
 }
 
-function appendActiveModelToSystemPrompt(systemPrompt: string): string {
+function activeChatSettingsSection(): string {
   return [
-    systemPrompt,
-    '',
     '## Active chat settings',
     `The bot stores its active chat model and reasoning level in ${BOT_SETTINGS_PATH}.`,
     'The model is stored as defaultProvider plus defaultModel; reasoning is stored as defaultThinkingLevel.',
@@ -112,7 +117,7 @@ function appendActiveModelToSystemPrompt(systemPrompt: string): string {
 }
 
 export function activeModelSystemPromptExtension(pi: ExtensionAPI): void {
-  pi.on('before_agent_start', async (event) => ({
-    systemPrompt: appendActiveModelToSystemPrompt(event.systemPrompt),
-  }));
+  pi.on('before_agent_start', async (event) => {
+    event.systemPromptOptions.sections['chat-settings'] = activeChatSettingsSection();
+  });
 }

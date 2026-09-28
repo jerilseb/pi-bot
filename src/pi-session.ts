@@ -731,14 +731,18 @@ export class SdkPiSession {
    * The conversation as it stands, without starting an agent: the live
    * session's messages, or those of the transcript the next start would
    * resume. Empty once /new or start_new_session has cleared it.
+   *
+   * Without Pi's system messages, which carry the prompt and every tool's
+   * definition: they are the model's instructions, not part of the chat, and
+   * would otherwise go to every terminal that connects.
    */
   async history(): Promise<AgentMessage[]> {
     if (this.pendingNewSessionRequest || this.forceNewSessionOnNextStart) return [];
     const live = await this.liveSession();
-    if (live) return live.messages;
+    if (live) return withoutSystemMessages(live.messages);
     try {
       const manager = await this.openStoredSessionManager();
-      return manager ? manager.buildSessionContext().messages : [];
+      return manager ? withoutSystemMessages(manager.buildSessionContext().messages) : [];
     } catch (error) {
       console.error('Failed to read the stored conversation:', error);
       return [];
@@ -1047,6 +1051,10 @@ export class SdkPiSession {
     if (transcript?.name) manager.appendSessionInfo(transcript.name);
     return manager;
   }
+}
+
+function withoutSystemMessages(messages: AgentMessage[]): AgentMessage[] {
+  return messages.filter((message) => message.role !== 'system');
 }
 
 /** Keeps the historical `<prefix>-<chatId>` shape so existing sessions/ files still resume. */
