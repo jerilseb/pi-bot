@@ -24,7 +24,7 @@ import type {
 import { errorMessage } from '../../util.ts';
 import { type CallbackMenu, dispatchCallbackQuery } from './callback-menu.ts';
 import { CHOICE_CALLBACK_PREFIX, choiceKeyboard, parseChoiceCallback } from './choices.ts';
-import { TELEGRAM_COMMANDS } from './commands.ts';
+import { inMenuOrder, TELEGRAM_COMMANDS } from './commands.ts';
 import { ingestTelegramMessage, type TelegramInput } from './inbound.ts';
 import type { ProgressMessageOptions } from './job-progress.ts';
 import { jobStopCallbackAction } from './job-stop-action.ts';
@@ -212,7 +212,10 @@ export class TelegramChannel implements Channel {
   /** Registers the command menu: the core's commands and Telegram's own. */
   registerCommands(): Promise<void> {
     return registerBotCommands(
-      this.core.commands(this.ref).map(({ name, description }) => ({ command: name, description })),
+      inMenuOrder(this.core.commands(this.ref)).map(({ name, description }) => ({
+        command: name,
+        description,
+      })),
     );
   }
 

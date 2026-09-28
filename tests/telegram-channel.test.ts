@@ -5,8 +5,10 @@ import * as path from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { TELEGRAM_CHANNEL, TelegramChannel } from '../src/channels/telegram/channel.ts';
+import { TELEGRAM_COMMANDS } from '../src/channels/telegram/commands.ts';
 import { createWriteGate } from '../src/channels/telegram/job-progress.ts';
 import type { TelegramCallbackQuery } from '../src/channels/telegram/types.ts';
+import { coreCommands } from '../src/commands.ts';
 import {
   ALLOWED_CHAT_ID,
   MAX_QUEUED_PROMPTS,
@@ -34,6 +36,8 @@ interface ApiCall {
   buttons?: string[][];
   /** For an upload, the file's field and name. */
   file?: string;
+  /** For setMyCommands, the menu's command names. */
+  commands?: string[];
   silent: boolean;
   /** Set once Telegram has answered. */
   done: boolean;
@@ -61,6 +65,7 @@ function fakeTelegram(t: TestContext, options: { slow?: RegExp; fail?: RegExp } 
           }
         : {}),
       ...(payload.file ? { file: payload.file } : {}),
+      ...(payload.commands ? { commands: payload.commands.map((entry) => entry.command) } : {}),
       silent: payload.disable_notification === true || payload.disable_notification === 'true',
       done: false,
       afterEarlierDone: calls.every((earlier) => earlier.done),
@@ -87,6 +92,7 @@ interface Payload {
   disable_notification?: boolean | string;
   reply_markup?: { inline_keyboard: Array<Array<{ callback_data: string }>> };
   file?: string;
+  commands?: Array<{ command: string }>;
 }
 
 /** A JSON body, or a multipart upload's fields with its file as `field:name`. */
@@ -443,6 +449,30 @@ test("Telegram's own commands are handled here, not by the core", async (t) => {
   assert.deepEqual(commands, []);
   assert.deepEqual(submitted, []);
   assert.match(sent()[0]?.text ?? '', /^👋 Hi!/);
+});
+
+test("the command menu interleaves the core's commands and Telegram's own, /abort first", async (t) => {
+  const { calls } = fakeTelegram(t);
+  const { core } = fakeCore();
+  const unlisted = { name: 'unlisted', description: 'Not named in the order' };
+  core.commands = () => [unlisted, ...coreCommands(), ...TELEGRAM_COMMANDS];
+  await channel(core).registerCommands();
+  assert.deepEqual(calls.find((call) => call.method === 'setMyCommands')?.commands, [
+    'abort',
+    'new',
+    'restart',
+    'models',
+    'reasoning',
+    'openaiusage',
+    'start',
+    'help',
+    'status',
+    'toolcalls',
+    'subagent_toolcalls',
+    'transcripts',
+    'elevenlabsusage',
+    'unlisted',
+  ]);
 });
 
 function tap(data: string, messageId: number): TelegramCallbackQuery {

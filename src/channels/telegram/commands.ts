@@ -67,3 +67,34 @@ export const TELEGRAM_COMMANDS: readonly TelegramCommand[] = [
       ),
   },
 ];
+
+/**
+ * The order of Telegram's command menu, the same as the user's claude-bot: what
+ * acts on the conversation first, /abort at the top, then settings and usage.
+ * The core's commands and Telegram's own are interleaved, so this is applied
+ * to the whole list rather than to either table.
+ */
+const MENU_ORDER = [
+  'abort',
+  'new',
+  'restart',
+  'models',
+  'reasoning',
+  'openaiusage',
+  'start',
+  'help',
+  'status',
+  'toolcalls',
+  'subagent_toolcalls',
+  'transcripts',
+  'elevenlabsusage',
+];
+
+/** The commands in the menu's order. One it does not name goes last, in the order it came. */
+export function inMenuOrder<T extends CommandInfo>(commands: readonly T[]): T[] {
+  const rank = (name: string): number => {
+    const index = MENU_ORDER.indexOf(name);
+    return index === -1 ? MENU_ORDER.length : index;
+  };
+  return [...commands].sort((a, b) => rank(a.name) - rank(b.name));
+}
