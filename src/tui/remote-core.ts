@@ -173,6 +173,13 @@ export class RemoteCore implements AgentCore {
   }
 }
 
+/**
+ * A call the bot was sent but never answered, because the connection dropped
+ * first, so it may have taken effect: /restart always ends this way. A call
+ * made while disconnected fails with a plain Error instead, never having left.
+ */
+export class ConnectionLostError extends Error {}
+
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
@@ -234,7 +241,7 @@ class Connection {
     this.done = true;
     for (const [id, pending] of this.pending) {
       this.pending.delete(id);
-      pending.reject(new Error(`Lost the connection to the bot: ${reason}`));
+      pending.reject(new ConnectionLostError(`Lost the connection to the bot: ${reason}`));
     }
     this.stream.destroy();
     this.resolveClosed(reason);

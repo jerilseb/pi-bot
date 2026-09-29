@@ -36,7 +36,7 @@ import { ChatView } from './chat-view.ts';
 import { type FooterState, footerLine } from './footer.ts';
 import { JobsWidget, jobSummary } from './jobs.ts';
 import { Picker } from './picker.ts';
-import { RemoteCore } from './remote-core.ts';
+import { ConnectionLostError, RemoteCore } from './remote-core.ts';
 import { cyan, dim, levelColor, red, yellow } from './style.ts';
 import { WorkingEditor } from './working-editor.ts';
 
@@ -390,7 +390,12 @@ export class TerminalApp implements Channel {
         .then((handled) => {
           if (!handled) this.submitText(text);
         })
-        .catch((error: unknown) => this.failed(text, error));
+        .catch((error: unknown) => {
+          // The bot had the command and may have run it, as /restart always has, so it
+          // is not put back to be run again; the disconnect note says the link dropped.
+          if (error instanceof ConnectionLostError) return;
+          this.failed(text, error);
+        });
       return;
     }
     this.submitText(text);

@@ -11,7 +11,7 @@ import type {
   Deliverable,
   Receipt,
 } from '../src/contract.ts';
-import { RemoteCore } from '../src/tui/remote-core.ts';
+import { ConnectionLostError, RemoteCore } from '../src/tui/remote-core.ts';
 import { ScriptedCore, until } from './scripted-core.ts';
 
 /**
@@ -120,7 +120,12 @@ test("a delivery is answered with the terminal's own receipt", async (t) => {
 
 test('a call while disconnected fails at once, and one in flight fails when the link drops', async (t) => {
   const f = setup();
-  await assert.rejects(f.remote.command('/help'), /Not connected/);
+  // One that never left says so; the terminal puts it back in the editor.
+  await assert.rejects(
+    f.remote.command('/help'),
+    (error: Error) =>
+      !(error instanceof ConnectionLostError) && /Not connected/.test(error.message),
+  );
   let hold = (): void => {};
   f.core.command = () =>
     new Promise((resolve) => {
@@ -131,7 +136,12 @@ test('a call while disconnected fails at once, and one in flight fails when the 
   const inFlight = f.remote.command('/slow');
   await until(() => f.serverSides.length === 1);
   f.serverSides[0]?.destroy();
-  await assert.rejects(inFlight, /Lost the connection/);
+  // One the bot had may have run, as /restart always has, so the terminal does not put it back.
+  await assert.rejects(
+    inFlight,
+    (error: Error) =>
+      error instanceof ConnectionLostError && /Lost the connection/.test(error.message),
+  );
   hold();
 });
 
