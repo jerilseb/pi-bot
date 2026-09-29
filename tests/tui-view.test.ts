@@ -17,8 +17,9 @@ import type {
 import { ChatView, internalPromptSummary } from '../src/tui/chat-view.ts';
 import { footerLine } from '../src/tui/footer.ts';
 import { jobLines, jobSummary } from '../src/tui/jobs.ts';
+import { PromptEditor } from '../src/tui/prompt-editor.ts';
 import { promptBand } from '../src/tui/style.ts';
-import { WorkingEditor } from '../src/tui/working-editor.ts';
+import { WorkingIndicator } from '../src/tui/working-indicator.ts';
 
 /**
  * What the terminal draws, rendered off-screen: the chat from a transcript and
@@ -416,7 +417,7 @@ test("a job's lines show its progress, and its summary how it ended", () => {
 });
 
 test('the editor puts a ❯ before its text, between a line above and below', () => {
-  const editor = new WorkingEditor(screen(), {
+  const editor = new PromptEditor(screen(), {
     borderColor: (text) => text,
     selectList: getSelectListTheme(),
   });
@@ -438,19 +439,18 @@ test('the editor puts a ❯ before its text, between a line above and below', ()
   }
 });
 
-test("while the chat works, the editor's top border says so, as Pi's does", (t) => {
-  const editor = new WorkingEditor(screen(), {
-    borderColor: (text) => text,
-    selectList: getSelectListTheme(),
-  });
-  t.after(() => editor.setWorking(false));
-  const top = (width = 40): string => plain(editor.render(width)[0] ?? '');
-  assert.equal(top(), '─'.repeat(40));
-  editor.setWorking(true);
-  assert.match(top(), /^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─{27}$/);
-  assert.match(top(8), /^─[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]─{6}$/, 'too narrow for the word: the spinner alone');
-  editor.setWorking(false);
-  assert.equal(top(), '─'.repeat(40));
+test('while the chat works, a line above the editor says so, as Pi draws it', (t) => {
+  const working = new WorkingIndicator(screen());
+  t.after(() => working.setWorking(false));
+  const rows = (width = 40): string[] => working.render(width).map((row) => plain(row).trimEnd());
+  assert.deepEqual(rows(), [], 'nothing while idle');
+  working.setWorking(true);
+  const [line, ...below] = rows();
+  assert.match(line ?? '', /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working$/, "in the column of the editor's ❯");
+  assert.deepEqual(below, [''], 'a margin from the editor');
+  assert.ok(working.render(4).every((row) => visibleWidth(row) <= 4), 'cut to a narrow width');
+  working.setWorking(false);
+  assert.deepEqual(rows(), []);
 });
 
 /** The background a row opens with, as its SGR parameters after `48;`; null for none. */

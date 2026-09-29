@@ -38,7 +38,8 @@ import { JobsWidget, jobSummary } from './jobs.ts';
 import { Picker } from './picker.ts';
 import { ConnectionLostError, RemoteCore } from './remote-core.ts';
 import { cyan, dim, levelColor, red, yellow } from './style.ts';
-import { WorkingEditor } from './working-editor.ts';
+import { PromptEditor } from './prompt-editor.ts';
+import { WorkingIndicator } from './working-indicator.ts';
 
 /**
  * The terminal UI: a channel of the agent core like Telegram, reached through
@@ -125,9 +126,10 @@ export class TerminalApp implements Channel {
   private readonly chat: ChatView;
   private readonly jobs: JobsWidget;
   private readonly pending = new Text('', 1, 0);
+  /** Shows the chat working, whichever channel the turn came from. */
+  private readonly workingIndicator: WorkingIndicator;
   private readonly inputArea = new Container();
-  /** Shows the chat working in its top border, whichever channel the turn came from. */
-  private readonly editor: WorkingEditor;
+  private readonly editor: PromptEditor;
   private readonly footer = new Text('', 1, 0);
   private detach: (() => void) | null = null;
   private footerState: FooterState = {
@@ -153,7 +155,8 @@ export class TerminalApp implements Channel {
     this.tui = new TuiMainScreen(options.terminal);
     this.chat = new ChatView(this.tui);
     this.jobs = new JobsWidget(this.tui);
-    this.editor = new WorkingEditor(this.tui, {
+    this.workingIndicator = new WorkingIndicator(this.tui);
+    this.editor = new PromptEditor(this.tui, {
       borderColor: dim,
       selectList: getSelectListTheme(),
     });
@@ -169,6 +172,7 @@ export class TerminalApp implements Channel {
     this.tui.addChild(this.pending);
     // A margin between the chat and the editor, or a menu in its place.
     this.tui.addChild(new Spacer(1));
+    this.tui.addChild(this.workingIndicator);
     this.tui.addChild(this.inputArea);
     this.tui.addChild(this.footer);
     this.inputArea.addChild(this.editor);
@@ -195,7 +199,7 @@ export class TerminalApp implements Channel {
   stop(): void {
     this.detach?.();
     this.detach = null;
-    this.editor.setWorking(false);
+    this.workingIndicator.setWorking(false);
     this.jobs.dispose();
     this.tui.stop();
   }
@@ -571,7 +575,7 @@ export class TerminalApp implements Channel {
 
   private setBusy(busy: boolean): void {
     this.busy = busy;
-    this.editor.setWorking(busy);
+    this.workingIndicator.setWorking(busy);
   }
 
   private refreshPending(): void {
