@@ -252,7 +252,7 @@ export class TerminalApp implements Channel {
       case 'image':
       case 'document':
         this.chat.note(
-          `${item.kind === 'image' ? '🖼' : '📄'} ${item.path}${item.caption ? dim(` · ${item.caption}`) : ''}`,
+          `${item.kind === 'image' ? '🖼️' : '📄'} ${item.path}${item.caption ? dim(` · ${item.caption}`) : ''}`,
         );
         break;
       case 'voice':
@@ -371,7 +371,7 @@ export class TerminalApp implements Channel {
 
   private disconnected(reason: string, retryInMs: number): void {
     if (this.footerState.connection.status === 'connected') {
-      this.chat.note(yellow(`⚠ Lost the connection to the bot: ${reason}`));
+      this.chat.note(yellow(`⚠️ Lost the connection to the bot: ${reason}`));
     }
     this.footerState = { ...this.footerState, connection: { status: 'lost', retryInMs } };
     this.setBusy(false);
@@ -578,7 +578,7 @@ export class TerminalApp implements Channel {
     const lines = [
       ...this.chat.unseen.map(({ from, text }) =>
         dim(
-          `⏳ ${from.id === this.ref.id ? '' : `${from.kind === 'telegram' ? '📱 ' : '🖥 '}`}${oneLine(text)}`,
+          `⏳ ${from.id === this.ref.id ? '' : `${from.kind === 'telegram' ? '📱 ' : '🖥️ '}`}${oneLine(text)}`,
         ),
       ),
       ...this.staged.map((attachment) => dim(`📎 ${attachment.filename ?? attachment.path}`)),

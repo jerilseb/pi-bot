@@ -25,7 +25,7 @@ export function footerLine(footer: FooterState): string {
   if (connection.status === 'connecting') return dim('Connecting to the bot…');
   if (connection.status === 'lost') {
     const seconds = Math.max(1, Math.round(connection.retryInMs / 1000));
-    return yellow(`⚠ Not connected to the bot · retrying in ${seconds}s`);
+    return yellow(`⚠️ Not connected to the bot · retrying in ${seconds}s`);
   }
   const parts: string[] = [];
   if (state) {
@@ -38,7 +38,7 @@ export function footerLine(footer: FooterState): string {
     if (state.background.busy) parts.push('🌙 background working');
     if (state.held) parts.push(`📬 ${state.held} held`);
   }
-  if (footer.jobs) parts.push(`⚙ ${footer.jobs} job${footer.jobs === 1 ? '' : 's'}`);
+  if (footer.jobs) parts.push(`⚙️ ${footer.jobs} job${footer.jobs === 1 ? '' : 's'}`);
   const others = footer.channels.filter((ref) => ref.id !== footer.self?.id);
   if (others.length) parts.push(`also on ${others.map(channelName).join(', ')}`);
   return dim(parts.join(' · '));

@@ -199,7 +199,7 @@ export class ChatView {
         const text = userText(message.content);
         const internal = internalPromptSummary(text, origin);
         if (internal) {
-          this.note(dim(`⚙ ${internal}`));
+          this.note(dim(`── ${internal} ──`));
           return;
         }
         const from = this.takeInput(text);
@@ -284,7 +284,7 @@ export function channelName(ref: ChannelRef): string {
 function userText(content: string | Array<TextContent | ImageContent>): string {
   if (typeof content === 'string') return content;
   return content
-    .map((part) => (part.type === 'text' ? part.text : `🖼 image (${part.mimeType})`))
+    .map((part) => (part.type === 'text' ? part.text : `🖼️ image (${part.mimeType})`))
     .join('\n');
 }
 

@@ -105,7 +105,7 @@ test("a transcript is drawn as the chat, the model's Markdown as formatting and 
   const text = shown();
   assert.match(text, /What is up\?/);
   assert.match(text, /All good & quiet\./);
-  assert.match(text, /⚙ Background bash bg_1 exited with code 0\./);
+  assert.match(text, /── Background bash bg_1 exited with code 0\. ──/);
   assert.doesNotMatch(text, /Output: ok|\*\*/);
 });
 
@@ -344,7 +344,7 @@ test('the footer says what the chat is doing, what waits, and who else is here',
   );
   assert.equal(
     line,
-    'openai-codex/gpt-6-luna · high · 🟡 working · 📥 2 queued · ↪️ 1 steering · 📬 3 held · ⚙ 1 job · also on Telegram',
+    'openai-codex/gpt-6-luna · high · 🟡 working · 📥 2 queued · ↪️ 1 steering · 📬 3 held · ⚙️ 1 job · also on Telegram',
   );
   assert.match(
     plain(
@@ -373,7 +373,7 @@ test("a job's lines show its progress, and its summary how it ended", () => {
     stopRequested: true,
     lastLine: 'ok 12',
   };
-  assert.deepEqual(jobLines(bash, 65_000).map(plain), ['⏹ npm test · stopping… · 1m', '   ok 12']);
+  assert.deepEqual(jobLines(bash, 65_000).map(plain), ['⏹️ npm test · stopping… · 1m', '   ok 12']);
   assert.equal(
     jobSummary(
       { ...bash, status: 'exited', exitCode: 1, statusText: 'exited with code 1', endedAt: 5_000 },

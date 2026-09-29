@@ -140,29 +140,29 @@ function isUnfinished(task: SubagentTaskSnapshot): boolean {
 }
 
 function bashIcon(job: BashJobSnapshot): string {
-  if (job.status === 'running') return job.stopRequested ? '⏹' : '⏳';
+  if (job.status === 'running') return job.stopRequested ? '⏹️' : '⏳';
   if (job.status === 'exited') return job.exitCode === 0 ? '✅' : '❌';
-  if (job.status === 'stopped') return '⏹';
+  if (job.status === 'stopped') return '⏹️';
   return '❌';
 }
 
 function jobIcon(status: SubagentJobSnapshot['status']): string {
   if (status === 'running') return '⏳';
   if (status === 'succeeded') return '✅';
-  if (status === 'stopped') return '⏹';
+  if (status === 'stopped') return '⏹️';
   return '❌';
 }
 
 function taskIcon(task: SubagentTaskSnapshot): string {
   switch (task.status) {
     case 'queued':
-      return '⏸';
+      return '⏸️';
     case 'running':
-      return task.stopRequested ? '⏹' : '⏳';
+      return task.stopRequested ? '⏹️' : '⏳';
     case 'succeeded':
       return '✅';
     case 'stopped':
-      return '⏹';
+      return '⏹️';
     case 'failed':
       return '❌';
   }
