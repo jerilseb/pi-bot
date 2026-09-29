@@ -570,6 +570,7 @@ export class TerminalApp implements Channel {
 
   private setState(state: CoreState): void {
     this.footerState.state = state;
+    this.chat.state(state.chat);
     this.setBusy(state.chat.busy);
   }
 

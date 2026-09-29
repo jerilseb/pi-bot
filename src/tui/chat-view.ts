@@ -2,7 +2,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { type AgentSessionEvent, getMarkdownTheme } from '@earendil-works/pi-coding-agent';
 import { getCapabilities, Markdown, type RgbColor, Text, type TUI } from '@earendil-works/pi-tui';
-import type { ChannelRef, PromptOrigin } from '../contract.ts';
+import type { ChannelRef, PromptOrigin, SessionState } from '../contract.ts';
 import { AssistantReply } from './assistant-reply.ts';
 import { ChatLog } from './chat-log.ts';
 import { CustomNote } from './custom-note.ts';
@@ -105,6 +105,14 @@ export class ChatView {
 
   input(from: ChannelRef, text: string): void {
     this.unseenInputs.push({ from, text: text.trim() });
+  }
+
+  /**
+   * What the chat session is doing. Once nothing runs, waits or steers, input
+   * the chat has not shown never will be: /abort dropped it, say.
+   */
+  state(state: SessionState): void {
+    if (!state.busy && state.queued === 0 && state.steering === 0) this.unseenInputs.length = 0;
   }
 
   turnStart(origin: PromptOrigin): void {

@@ -131,6 +131,21 @@ test('a message typed in Telegram is labelled; one typed here is not', () => {
   assert.match(shown(), /❯ from here/);
 });
 
+test('input /abort dropped stops waiting once nothing runs, waits or steers', () => {
+  const { chat } = view();
+  chat.setSelf(self);
+  chat.input(self, 'queued behind the turn');
+  chat.input(telegram, 'steering the turn');
+  const state = { busy: true, queued: 1, steering: 1, model: 'openai-codex/gpt-6-luna' };
+  chat.state(state);
+  assert.equal(chat.unseen.length, 2);
+  // /abort cleared the queue and the steering; the aborted run is still ending.
+  chat.state({ ...state, queued: 0, steering: 0 });
+  assert.equal(chat.unseen.length, 2);
+  chat.state({ ...state, busy: false, queued: 0, steering: 0 });
+  assert.equal(chat.unseen.length, 0);
+});
+
 test('a reply that is already streaming when the terminal connects is still drawn', () => {
   const { chat, shown } = view();
   chat.turnStart({ kind: 'user', channel: self });
