@@ -1,6 +1,6 @@
 {
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-luna",
+  "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "high",
   "cacheWarming": "streaming",
   "retry": {
