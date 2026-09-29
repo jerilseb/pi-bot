@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { getSelectListTheme, initTheme } from '@earendil-works/pi-coding-agent';
-import { stripTerminalSequences, type Terminal, TuiMainScreen } from '@earendil-works/pi-tui';
+import {
+  stripTerminalSequences,
+  type Terminal,
+  TuiMainScreen,
+  visibleWidth,
+} from '@earendil-works/pi-tui';
+import { formatSessionEvent } from '../src/session-notes.ts';
 import type {
   BashJobSnapshot,
   ChannelRef,
@@ -11,6 +17,7 @@ import type {
 import { ChatView, internalPromptSummary } from '../src/tui/chat-view.ts';
 import { footerLine } from '../src/tui/footer.ts';
 import { jobLines, jobSummary } from '../src/tui/jobs.ts';
+import { promptBand } from '../src/tui/style.ts';
 import { WorkingEditor } from '../src/tui/working-editor.ts';
 
 /**
@@ -40,14 +47,11 @@ function screen(): TuiMainScreen {
 }
 
 function view() {
-  const chat = new ChatView(screen(), '/work');
-  const shown = (): string =>
-    chat.container
-      .render(80)
-      .map((line) => plain(line).trimEnd())
-      .filter(Boolean)
-      .join('\n');
-  return { chat, shown };
+  const chat = new ChatView(screen());
+  const rows = (width = 80): string[] =>
+    chat.container.render(width).map((line) => plain(line).trimEnd());
+  const shown = (): string => rows().filter(Boolean).join('\n');
+  return { chat, rows, shown };
 }
 
 const telegram: ChannelRef = { id: 'telegram', kind: 'telegram' };
@@ -60,17 +64,32 @@ const usage = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-const assistant = (text: string) =>
+const reply = (content: unknown[], stopReason = 'stop') =>
   ({
     role: 'assistant',
-    content: [{ type: 'text', text }],
+    content,
     api: 'x',
     provider: 'x',
     model: 'x',
     usage,
-    stopReason: 'stop',
+    stopReason,
     timestamp: 1,
   }) as never;
+const assistant = (text: string) => reply([{ type: 'text', text }]);
+const call = (id: string, name: string, args: unknown) => ({
+  type: 'toolCall',
+  id,
+  name,
+  arguments: args,
+});
+const result = (id: string, name: string, text: string, isError = false) => ({
+  role: 'toolResult',
+  toolCallId: id,
+  toolName: name,
+  content: [{ type: 'text', text }],
+  isError,
+  timestamp: 2,
+});
 
 test("a transcript is drawn as the chat, the model's Markdown as formatting and the bot's own prompts as one line", () => {
   const { chat, shown } = view();
@@ -106,8 +125,9 @@ test('a message typed in Telegram is labelled; one typed here is not', () => {
     message: { role: 'user', content: 'from here', timestamp: 2 },
   } as never);
   assert.equal(chat.unseen.length, 0);
-  assert.equal(shown().match(/From Telegram:/g)?.length, 1);
-  assert.match(shown(), /From Telegram:\n\s*from my phone/);
+  assert.equal(shown().match(/Telegram:/g)?.length, 1);
+  assert.match(shown(), /❯ Telegram: from my phone/);
+  assert.match(shown(), /❯ from here/);
 });
 
 test('a reply that is already streaming when the terminal connects is still drawn', () => {
@@ -122,40 +142,171 @@ test('a reply that is already streaming when the terminal connects is still draw
   assert.match(shown(), /Half a reply\./);
 });
 
-test("a tool's output is folded to a few screen rows, however long its lines, until /expand", () => {
-  const { chat, shown } = view();
+test('a tool call is one row saying what it came to, a failure two, until /expand', () => {
+  const { chat, rows, shown } = view();
   const paragraph = (n: number): string => `Paragraph ${n} ${'word '.repeat(60)}`;
   chat.load([
     { role: 'user', content: 'Read the page', timestamp: 1 },
-    {
-      role: 'assistant',
-      content: [
-        { type: 'toolCall', id: 'c1', name: 'web_fetch', arguments: { url: 'https://x.test' } },
+    reply(
+      [
+        call('c1', 'web_fetch', { url: 'https://x.test' }),
+        call('c2', 'bash', { command: 'npm test' }),
       ],
-      usage,
-      stopReason: 'toolUse',
-      timestamp: 1,
-    },
-    {
-      role: 'toolResult',
-      toolCallId: 'c1',
-      toolName: 'web_fetch',
-      content: [{ type: 'text', text: [1, 2, 3, 4].map(paragraph).join('\n') }],
-      isError: false,
-      timestamp: 2,
-    },
+      'toolUse',
+    ),
+    result('c1', 'web_fetch', [1, 2, 3, 4].map(paragraph).join('\n')),
+    result('c2', 'bash', '# fail 1\n✖ cron.test.ts\n\nCommand exited with code 1', true),
+    assistant('One test fails.'),
   ] as never);
-  const folded = shown();
-  assert.match(folded, /web_fetch https:\/\/x\.test/);
-  assert.match(folded, /Paragraph 1/);
-  assert.doesNotMatch(folded, /Paragraph 2/);
-  assert.match(folded, /… \(\d+ more lines, \/expand\)/);
-  assert.ok(folded.split('\n').length < 12, folded);
+  assert.deepEqual(
+    rows(),
+    [
+      '❯ Read the page',
+      '',
+      '● web_fetch https://x.test · Paragraph 1 word word word word word word word w…',
+      '✗ bash npm test · exit 1',
+      '  ⎿ ✖ cron.test.ts',
+      '',
+      'One test fails.',
+    ].map((row) => (row ? ` ${row}` : row)),
+  );
 
   chat.toggleExpanded();
   const expanded = shown();
+  assert.match(expanded, /⎿ Paragraph 1/);
   assert.match(expanded, /Paragraph 4/);
-  assert.doesNotMatch(expanded, /more lines/);
+  assert.match(expanded, /Command exited with code 1/);
+});
+
+test('a tool call shows where it stands while it runs, and what it last printed', () => {
+  const { chat, shown } = view();
+  chat.turnStart({ kind: 'user', channel: self });
+  chat.agentEvent({
+    type: 'message_update',
+    message: reply([call('c1', 'bash', { command: 'make' })], 'toolUse'),
+    assistantMessageEvent: { type: 'toolcall_delta' },
+  } as never);
+  assert.match(shown(), /○ bash make$/);
+  chat.agentEvent({ type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash' } as never);
+  chat.agentEvent({
+    type: 'tool_execution_update',
+    toolCallId: 'c1',
+    partialResult: { content: [{ type: 'text', text: 'step 1\nstep 2\n' }] },
+  } as never);
+  assert.match(shown(), /○ bash make · step 2$/);
+  chat.agentEvent({
+    type: 'tool_execution_end',
+    toolCallId: 'c1',
+    result: { content: [{ type: 'text', text: 'step 1\nstep 2\ndone' }] },
+    isError: false,
+  } as never);
+  assert.match(shown(), /● bash make · 3 lines$/);
+});
+
+test('thinking shows as one line only while it is under way, and in full on /expand', () => {
+  const { chat, shown } = view();
+  chat.turnStart({ kind: 'user', channel: self });
+  const thinking = { type: 'thinking', thinking: 'Weighing it up.' };
+  chat.agentEvent({
+    type: 'message_update',
+    message: reply([thinking]),
+    assistantMessageEvent: { type: 'thinking_delta' },
+  } as never);
+  assert.match(shown(), /Thinking… \(\/expand\)/);
+  chat.agentEvent({
+    type: 'message_end',
+    message: reply([thinking, { type: 'text', text: 'Done.' }]),
+  } as never);
+  assert.equal(shown(), ' Done.');
+  chat.toggleExpanded();
+  assert.match(shown(), /Weighing it up\.\n\s*Done\./);
+});
+
+test('tool calls stack; every other block has one blank row before it', () => {
+  const { chat, rows } = view();
+  chat.load([
+    { role: 'user', content: 'Look around', timestamp: 1 },
+    reply([{ type: 'thinking', thinking: 'hidden' }, call('c1', 'ls', { path: '.' })], 'toolUse'),
+    result('c1', 'ls', 'a\nb'),
+    reply([call('c2', 'find', { pattern: '*.ts' })], 'toolUse'),
+    result('c2', 'find', 'No files found matching pattern'),
+    assistant('Nothing much.'),
+  ] as never);
+  chat.note('A note.');
+  assert.deepEqual(rows(), [
+    ' ❯ Look around',
+    '',
+    ' ● ls . · 2 entries',
+    ' ● find *.ts · no files',
+    '',
+    ' Nothing much.',
+    '',
+    ' A note.',
+  ]);
+});
+
+test("the bot's notes in the transcript are a divider named for the user, whole on /expand", () => {
+  const { chat, shown } = view();
+  const note = (kind: string, text: string) => ({
+    role: 'custom',
+    customType: 'pi-bot-event',
+    content: formatSessionEvent(text),
+    display: true,
+    details: { kind },
+    timestamp: 1,
+  });
+  chat.load([
+    note(
+      'restart',
+      'The bot process was restarted deliberately. This session resumed, but any in-flight work was dropped.',
+    ),
+    note('model', 'The chat model was changed from openai/a to openrouter/b.'),
+    note(
+      'scheduled-task',
+      'A scheduled task "Morning brief" ran on openai/a in a separate background session and sent this report to the user:\n<background_report>\nAll quiet.\n</background_report>',
+    ),
+    note(
+      'heartbeat',
+      'A heartbeat run sent this message to the user:\n<background_report>\nHi\n</background_report>',
+    ),
+  ] as never);
+  assert.equal(
+    shown(),
+    [
+      ' ── Bot restarted ──',
+      ' ── Model changed to openrouter/b ──',
+      ' ── Scheduled task "Morning brief" sent a report ──',
+      ' ── Heartbeat sent a message ──',
+    ].join('\n'),
+  );
+  chat.toggleExpanded();
+  assert.match(shown(), /── Bot restarted ──\n\s+The bot process was restarted deliberately\./);
+  assert.match(shown(), /All quiet\./);
+  assert.doesNotMatch(shown(), /bot-event|Automatic note/);
+});
+
+test('every row fits the width, however long the prompt, the argument or the output', () => {
+  const { chat, rows } = view();
+  const long = `${'長い'.repeat(30)} ${'x'.repeat(200)}`;
+  chat.load([
+    { role: 'user', content: long, timestamp: 1 },
+    reply(
+      [call('c1', 'bash', { command: long }), call('c2', 'web_search', { query: long })],
+      'toolUse',
+    ),
+    result('c1', 'bash', `${long}\n\nCommand exited with code 2`, true),
+    result('c2', 'web_search', long),
+    assistant(long),
+  ] as never);
+  for (const state of ['folded', 'expanded']) {
+    for (const width of [12, 20, 40, 80]) {
+      for (const row of chat.container.render(width)) {
+        assert.ok(visibleWidth(row) <= width, `${state}, ${width}: ${JSON.stringify(plain(row))}`);
+      }
+    }
+    chat.toggleExpanded();
+  }
+  assert.match(rows(40).join('\n'), /✗ bash .+ · exit 2/);
 });
 
 test("the bot's own prompts are named from the turn's origin, or from their envelope", () => {
@@ -277,4 +428,44 @@ test("while the chat works, the editor's top border says so, as Pi's does", (t) 
   assert.match(top(8), /^─[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]─{6}$/, 'too narrow for the word: the spinner alone');
   editor.setWorking(false);
   assert.equal(top(), '─'.repeat(40));
+});
+
+/** The background a row opens with, as its SGR parameters after `48;`; null for none. */
+function background(row: string): string | null {
+  const open = '\x1b[48;';
+  return row.startsWith(open) ? row.slice(open.length, row.indexOf('m')) : null;
+}
+
+test("a prompt sits on a band across the width, a shade of the terminal's own background", () => {
+  const { chat } = view();
+  chat.load([{ role: 'user', content: `A prompt ${'long '.repeat(30)}`, timestamp: 1 }] as never);
+  const band = (width: number): string[] =>
+    chat.container
+      .render(width)
+      .map((row) =>
+        ['A', 'B', 'C'].reduce((line, mark) => line.replaceAll(`\x1b]133;${mark}\x07`, ''), row),
+      );
+  for (const width of [20, 80]) {
+    const rows = band(width);
+    assert.ok(rows.length > 1);
+    for (const row of rows) {
+      assert.equal(visibleWidth(row), width);
+      assert.ok(background(row) && row.endsWith('\x1b[49m'), JSON.stringify(row));
+    }
+  }
+  // Pi's colours, until the terminal says what its background is.
+  assert.ok(['2;52;53;65', '5;237'].includes(background(band(80)[0] ?? '') ?? ''));
+  chat.setTerminalBackground({ r: 0, g: 0, b: 0 });
+  assert.ok(['2;33;33;33', '5;235'].includes(background(band(80)[0] ?? '') ?? ''));
+});
+
+test('a band is lighter than a dark background, darker than a light one, in either palette', () => {
+  const code = (band: ReturnType<typeof promptBand>): string | null => background(band.bg(''));
+  assert.equal(code(promptBand({ r: 30, g: 30, b: 30 }, true)), '2;59;59;59');
+  assert.equal(code(promptBand({ r: 255, g: 255, b: 255 }, true)), '2;237;237;237');
+  assert.equal(code(promptBand({ r: 255, g: 255, b: 255 }, false)), '5;255');
+  assert.equal(code(promptBand(null, false)), '5;237');
+  // The terminal's own text colour on its own background's band; Pi's text on Pi's.
+  assert.equal(promptBand({ r: 30, g: 30, b: 30 }, true).text('x'), 'x');
+  assert.equal(promptBand(null, true).text('x'), '\x1b[38;2;212;212;212mx\x1b[39m');
 });

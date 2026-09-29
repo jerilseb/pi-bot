@@ -339,7 +339,7 @@ Keys and commands of its own, besides the bot's commands (`/help` lists both):
 | `Ctrl+C` | Clear the editor; on an empty one, quit |
 | `/attach <path>` | Attach a local file to your next message; `/attach` alone drops it |
 | `/jobs` | Stop a running command or sub-agent task |
-| `/expand` | Show or hide full tool output and thinking |
+| `/expand` | Show or hide full tool output, thinking and notes |
 | `/quit` | Close the terminal; the bot keeps running |
 
 Several terminals can be open at once; each is its own interface.

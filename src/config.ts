@@ -353,6 +353,12 @@ export const TUI_HISTORY_MAX_MESSAGES = 200;
 /** A terminal UI client's reconnect backoff, doubling from the first to the last. */
 export const TUI_RECONNECT_MIN_MS = 500;
 export const TUI_RECONNECT_MAX_MS = 5_000;
+/**
+ * How long the terminal UI waits for the terminal to say what its background
+ * colour is (OSC 11), which the prompts' band is a shade of. A terminal that
+ * does not answer keeps Pi's own prompt colours.
+ */
+export const TUI_BACKGROUND_QUERY_MS = 1_000;
 
 // ---------------------------------------------------------------------------
 // Queueing and response behavior

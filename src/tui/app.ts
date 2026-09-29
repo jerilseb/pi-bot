@@ -14,7 +14,7 @@ import {
   TuiMainScreen,
 } from '@earendil-works/pi-tui';
 import type { Welcome } from '../channels/socket/protocol.ts';
-import { MAX_QUEUED_PROMPTS } from '../config.ts';
+import { MAX_QUEUED_PROMPTS, TUI_BACKGROUND_QUERY_MS } from '../config.ts';
 import type {
   Channel,
   ChannelCaps,
@@ -77,8 +77,8 @@ const TERMINAL_COMMANDS: TerminalCommand[] = [
   },
   {
     name: 'expand',
-    description: 'Show or hide full tool output and thinking',
-    help: 'show or hide full tool output and thinking in this terminal',
+    description: 'Show or hide full tool output, thinking and notes',
+    help: 'show or hide full tool output, thinking and notes in this terminal',
     run: (app) => app.toggleExpanded(),
   },
   {
@@ -151,7 +151,7 @@ export class TerminalApp implements Channel {
     this.cwd = options.cwd;
     this.onQuit = options.onQuit;
     this.tui = new TuiMainScreen(options.terminal);
-    this.chat = new ChatView(this.tui, this.cwd);
+    this.chat = new ChatView(this.tui);
     this.jobs = new JobsWidget(this.tui);
     this.editor = new WorkingEditor(this.tui, {
       borderColor: dim,
@@ -184,6 +184,11 @@ export class TerminalApp implements Channel {
   start(): void {
     this.tui.setFocus(this.editor);
     this.tui.start();
+    void this.tui
+      .queryTerminalBackgroundColor({ timeoutMs: TUI_BACKGROUND_QUERY_MS })
+      .then((background) => {
+        if (background) this.chat.setTerminalBackground(background);
+      });
     this.detach = this.core.attach(this);
   }
 
@@ -320,7 +325,9 @@ export class TerminalApp implements Channel {
 
   toggleExpanded(): void {
     const expanded = this.chat.toggleExpanded();
-    this.chat.note(dim(expanded ? 'Showing full tool output and thinking.' : 'Folded again.'));
+    this.chat.note(
+      dim(expanded ? 'Showing full tool output, thinking and notes.' : 'Folded again.'),
+    );
   }
 
   quit(): void {

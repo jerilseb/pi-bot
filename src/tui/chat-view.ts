@@ -1,78 +1,41 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, ImageContent, TextContent } from '@earendil-works/pi-ai';
-import {
-  type AgentSessionEvent,
-  AssistantMessageComponent,
-  CustomMessageComponent,
-  createBashToolDefinition,
-  createEditToolDefinition,
-  createFindToolDefinition,
-  createGrepToolDefinition,
-  createLsToolDefinition,
-  createReadToolDefinition,
-  createWriteToolDefinition,
-  getMarkdownTheme,
-  type Theme,
-  ToolExecutionComponent,
-  UserMessageComponent,
-} from '@earendil-works/pi-coding-agent';
-import {
-  type Component,
-  Container,
-  imageFallback,
-  Markdown,
-  Spacer,
-  stripTerminalSequences,
-  Text,
-  type TUI,
-  truncateToWidth,
-} from '@earendil-works/pi-tui';
+import { type AgentSessionEvent, getMarkdownTheme } from '@earendil-works/pi-coding-agent';
+import { getCapabilities, Markdown, type RgbColor, Text, type TUI } from '@earendil-works/pi-tui';
 import type { ChannelRef, PromptOrigin } from '../contract.ts';
-import { formatFirstToolArgument } from '../tool-call-description.ts';
-import { dim, italic } from './style.ts';
+import { AssistantReply } from './assistant-reply.ts';
+import { ChatLog } from './chat-log.ts';
+import { CustomNote } from './custom-note.ts';
+import { dim, promptBand } from './style.ts';
+import { ToolCall } from './tool-call.ts';
+import type { ToolOutcome } from './tool-summary.ts';
+import { UserPrompt } from './user-prompt.ts';
 
 /**
- * The chat as the terminal shows it: the conversation drawn with Pi's own
- * components, the way Pi's interactive mode draws a session, from the
- * transcript on connect and from the chat session's events as they stream.
- * Background runs are not shown here; what they send arrives as deliveries.
+ * The chat as the terminal shows it, kept short: a prompt beside a `❯` on a
+ * band of background, each tool call one row saying what it came to, the
+ * model's replies as Markdown, and the bot's notes as a line each. /expand
+ * opens tool output, thinking and notes in full. It is drawn from the transcript on connect and from the chat
+ * session's events as they stream, mapped the way Pi's interactive mode maps
+ * them. Background runs are not shown here; what they send arrives as
+ * deliveries.
  *
  * A message that someone typed in another channel is labelled with where it
  * came from, and a prompt the bot gave itself (a post-restart task, a job's
  * report) is one line saying what it was, not the envelope the agent read.
  */
 
-type ToolRenderers = NonNullable<ConstructorParameters<typeof ToolExecutionComponent>[4]>;
-
-const BUILT_IN_TOOLS: Record<string, (cwd: string) => ToolRenderers> = {
-  bash: createBashToolDefinition,
-  read: createReadToolDefinition,
-  edit: createEditToolDefinition,
-  write: createWriteToolDefinition,
-  grep: createGrepToolDefinition,
-  find: createFindToolDefinition,
-  ls: createLsToolDefinition,
-};
-
-const TOOL_ARGUMENT_WIDTH = 100;
-/**
- * Screen rows a folded tool result takes, as in Pi's bash preview. Counted after
- * wrapping: a fetched page's lines are whole paragraphs, so a count of lines
- * would still fill the screen.
- */
-const TOOL_PREVIEW_ROWS = 5;
-
 export class ChatView {
-  readonly container = new Container();
+  readonly container = new ChatLog();
   private readonly ui: TUI;
-  private readonly cwd: string;
   private readonly markdownTheme = getMarkdownTheme();
-  private readonly toolRenderers = new Map<string, ToolRenderers>();
-  private streaming: AssistantMessageComponent | null = null;
-  private readonly pendingTools = new Map<string, ToolExecutionComponent>();
-  /** Everything /expand opens and closes. */
+  private streaming: AssistantReply | null = null;
+  private readonly pendingTools = new Map<string, ToolCall>();
+  /** Everything /expand opens and closes, besides the replies' thinking. */
   private readonly expandable: Array<{ setExpanded(expanded: boolean): void }> = [];
-  private readonly assistants: AssistantMessageComponent[] = [];
+  private readonly replies: AssistantReply[] = [];
+  private readonly prompts: UserPrompt[] = [];
+  private band = promptBand(null, getCapabilities().trueColor);
   private expanded = false;
   /** Where the chat turn under way came from. */
   private turnOrigin: PromptOrigin | null = null;
@@ -80,9 +43,8 @@ export class ChatView {
   private readonly unseenInputs: Array<{ from: ChannelRef; text: string }> = [];
   private self: ChannelRef | null = null;
 
-  constructor(ui: TUI, cwd: string) {
+  constructor(ui: TUI) {
     this.ui = ui;
-    this.cwd = cwd;
   }
 
   /** Input the chat has not shown yet: queued, or steering the turn under way. */
@@ -95,16 +57,24 @@ export class ChatView {
     this.self = ref;
   }
 
+  /** What the terminal said its background is, which the prompts' band is a shade of. */
+  setTerminalBackground(background: RgbColor): void {
+    this.band = promptBand(background, getCapabilities().trueColor);
+    for (const prompt of this.prompts) prompt.setBand(this.band);
+    this.ui.requestRender();
+  }
+
   /** Draws the conversation afresh from a transcript. */
   load(history: AgentMessage[]): void {
     this.container.clear();
     this.expandable.length = 0;
-    this.assistants.length = 0;
+    this.replies.length = 0;
+    this.prompts.length = 0;
     this.pendingTools.clear();
     this.streaming = null;
     this.turnOrigin = null;
     this.unseenInputs.length = 0;
-    const results = new Map<string, ToolExecutionComponent>();
+    const results = new Map<string, ToolCall>();
     for (const message of history) {
       if (message.role === 'assistant') {
         this.addAssistant(message);
@@ -164,7 +134,7 @@ export class ChatView {
         const tool =
           this.pendingTools.get(event.toolCallId) ??
           this.addTool(event.toolName, event.toolCallId, event.args);
-        tool.markExecutionStarted();
+        tool.start();
         break;
       }
       case 'tool_execution_update':
@@ -201,25 +171,24 @@ export class ChatView {
 
   /** A line of the bot's own, such as a notice or what a menu now reads. */
   note(text: string): void {
-    this.container.addChild(new Spacer(1));
-    this.container.addChild(new Text(text, 1, 0));
+    this.container.add('note', new Text(text, 1, 0));
     this.ui.requestRender();
   }
 
   /** Markdown the bot shows outside a turn: a command's answer, a background report. */
   markdown(text: string, color?: (text: string) => string): void {
-    this.container.addChild(new Spacer(1));
-    this.container.addChild(
+    this.container.add(
+      'note',
       new Markdown(text, 1, 0, this.markdownTheme, color ? { color } : undefined),
     );
     this.ui.requestRender();
   }
 
-  /** Opens or closes every tool's full output and every hidden thinking block. */
+  /** Opens or closes every tool's full output, every note and every reply's thinking. */
   toggleExpanded(): boolean {
     this.expanded = !this.expanded;
     for (const component of this.expandable) component.setExpanded(this.expanded);
-    for (const assistant of this.assistants) assistant.setHideThinkingBlock(!this.expanded);
+    for (const reply of this.replies) reply.setShowThinking(this.expanded);
     this.ui.requestRender();
     return this.expanded;
   }
@@ -234,19 +203,18 @@ export class ChatView {
           return;
         }
         const from = this.takeInput(text);
-        this.container.addChild(new Spacer(1));
-        if (from && from.id !== this.self?.id) {
-          this.container.addChild(new Text(dim(italic(`From ${channelName(from)}:`)), 1, 0));
-        }
-        this.container.addChild(new UserMessageComponent(text, this.markdownTheme));
+        const label = from && from.id !== this.self?.id ? channelName(from) : null;
+        const prompt = new UserPrompt(text, label, this.band);
+        this.prompts.push(prompt);
+        this.container.add('prompt', prompt);
         return;
       }
       case 'custom': {
         if (!message.display) return;
-        const component = new CustomMessageComponent(message, undefined, this.markdownTheme);
-        component.setExpanded(this.expanded);
-        this.expandable.push(component);
-        this.container.addChild(component);
+        const note = new CustomNote(message);
+        note.setExpanded(this.expanded);
+        this.expandable.push(note);
+        this.container.add('note', note);
         return;
       }
       case 'compactionSummary':
@@ -257,44 +225,32 @@ export class ChatView {
     }
   }
 
-  private addAssistant(message?: AssistantMessage): AssistantMessageComponent {
-    const component = new AssistantMessageComponent(
-      message,
-      !this.expanded,
-      this.markdownTheme,
-      'Thinking… (/expand)',
-    );
-    this.assistants.push(component);
-    this.container.addChild(component);
-    return component;
+  private addAssistant(message?: AssistantMessage): AssistantReply {
+    const reply = new AssistantReply(this.markdownTheme, this.expanded);
+    if (message) reply.update(message, false);
+    this.replies.push(reply);
+    this.container.add('reply', reply);
+    return reply;
   }
 
-  private addTool(name: string, id: string, args: unknown): ToolExecutionComponent {
-    const tool = new ToolExecutionComponent(
-      name,
-      id,
-      args,
-      { showImages: false },
-      this.renderersFor(name),
-      this.ui,
-      this.cwd,
-    );
+  private addTool(name: string, id: string, args: unknown): ToolCall {
+    const tool = new ToolCall(name, args);
     tool.setExpanded(this.expanded);
     this.expandable.push(tool);
-    this.container.addChild(tool);
+    this.container.add('tool', tool);
     this.pendingTools.set(id, tool);
     return tool;
   }
 
   private startStreaming(message: AssistantMessage): void {
     this.streaming = this.addAssistant();
-    this.streaming.updateContent(message, true);
+    this.streaming.update(message, true);
   }
 
   /** Also starts one: a terminal that connects mid-reply first hears it as an update. */
   private updateStreaming(message: AssistantMessage): void {
     if (!this.streaming) this.streaming = this.addAssistant();
-    this.streaming.updateContent(message, true);
+    this.streaming.update(message, true);
     for (const content of message.content) {
       if (content.type !== 'toolCall') continue;
       const tool = this.pendingTools.get(content.id);
@@ -305,14 +261,11 @@ export class ChatView {
 
   private endStreaming(message: AssistantMessage): void {
     const streaming = this.streaming ?? this.addAssistant();
-    streaming.updateContent(message, false);
+    streaming.update(message, false);
     this.streaming = null;
-    const failed = message.stopReason === 'aborted' || message.stopReason === 'error';
-    for (const tool of this.pendingTools.values()) {
-      if (failed) tool.updateResult(errorResult(message));
-      else tool.setArgsComplete();
-    }
-    if (failed) this.pendingTools.clear();
+    if (message.stopReason !== 'aborted' && message.stopReason !== 'error') return;
+    for (const tool of this.pendingTools.values()) tool.updateResult(errorResult(message));
+    this.pendingTools.clear();
   }
 
   /** Where the message came from, if the core said: the first unseen input it ends with. */
@@ -321,38 +274,6 @@ export class ChatView {
     if (index === -1) return null;
     const [input] = this.unseenInputs.splice(0, index + 1).slice(-1);
     return input?.from ?? null;
-  }
-
-  /**
-   * Pi's renderers for its own tools. The rest run in the bot's process, so this
-   * one has none of their renderers: the tool and its first argument, then its
-   * output folded to a few rows.
-   */
-  private renderersFor(name: string): ToolRenderers {
-    let renderers = this.toolRenderers.get(name);
-    if (!renderers) {
-      renderers = BUILT_IN_TOOLS[name]?.(this.cwd) ?? {
-        renderCall: (args: unknown, theme: Theme): Component => {
-          const argument = formatFirstToolArgument(args);
-          const shown =
-            argument && argument.length > TOOL_ARGUMENT_WIDTH
-              ? `${argument.slice(0, TOOL_ARGUMENT_WIDTH - 1)}…`
-              : argument;
-          return new Text(
-            `${theme.fg('toolTitle', theme.bold(name))}${shown ? ` ${theme.fg('muted', shown)}` : ''}`,
-            0,
-            0,
-          );
-        },
-        renderResult: (
-          result: { content: Array<TextContent | ImageContent> },
-          { expanded }: { expanded: boolean },
-          theme: Theme,
-        ): Component => toolOutput(result.content, expanded, theme),
-      };
-      this.toolRenderers.set(name, renderers);
-    }
-    return renderers;
   }
 }
 
@@ -383,44 +304,7 @@ export function internalPromptSummary(text: string, origin: PromptOrigin | null)
   return null;
 }
 
-/** A tool's output, all of it when expanded, else its first TOOL_PREVIEW_ROWS screen rows. */
-function toolOutput(
-  content: Array<TextContent | ImageContent>,
-  expanded: boolean,
-  theme: Theme,
-): Component {
-  const output = content
-    .map((part) =>
-      part.type === 'text'
-        ? stripTerminalSequences(part.text).replace(/\r/g, '').replace(/\t/g, '   ')
-        : imageFallback(part.mimeType),
-    )
-    .join('\n')
-    .trim();
-  const text = new Text(
-    output
-      .split('\n')
-      .map((line) => theme.fg('toolOutput', line))
-      .join('\n'),
-    0,
-    0,
-  );
-  if (expanded) return text;
-  return {
-    render: (width) => {
-      const rows = text.render(width);
-      if (rows.length <= TOOL_PREVIEW_ROWS) return rows;
-      const more = theme.fg('muted', `… (${rows.length - TOOL_PREVIEW_ROWS} more lines, /expand)`);
-      return [...rows.slice(0, TOOL_PREVIEW_ROWS), truncateToWidth(more, width)];
-    },
-    invalidate: () => text.invalidate(),
-  };
-}
-
-function errorResult(message: AssistantMessage): {
-  content: Array<{ type: string; text: string }>;
-  isError: true;
-} {
+function errorResult(message: AssistantMessage): ToolOutcome {
   const text =
     message.stopReason === 'aborted' ? 'Operation aborted' : message.errorMessage || 'Error';
   return { content: [{ type: 'text', text }], isError: true };
