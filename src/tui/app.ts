@@ -189,8 +189,8 @@ export class TerminalApp implements Channel {
     this.tui.setFocus(this.editor);
     this.tui.start();
     void this.tui
-      .queryTerminalBackgroundColor({ timeoutMs: TUI_BACKGROUND_QUERY_MS })
-      .then((background) => {
+      .queryTerminalColors({ timeoutMs: TUI_BACKGROUND_QUERY_MS })
+      .then(({ background }) => {
         if (background) this.chat.setTerminalBackground(background);
       });
     this.detach = this.core.attach(this);

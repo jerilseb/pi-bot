@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import type {
   ExtensionAPI,
-  ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import webFetchExtension, { readBody } from '../extensions/web-fetch/index.ts';
@@ -33,7 +33,7 @@ function setup(t: TestContext, response: () => Response) {
       { url: 'https://x.test/page' },
       signal,
       undefined,
-      {} as ExtensionContext,
+      {} as ExtensionToolContext,
     );
     const [content] = result.content;
     assert.equal(content?.type, 'text');

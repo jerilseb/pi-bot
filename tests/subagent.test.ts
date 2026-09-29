@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type {
   ExtensionAPI,
-  ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import { SUBAGENT_MAX_CONCURRENT_WORKERS, SUBAGENT_MAX_TASKS_PER_JOB } from '../src/config.ts';
@@ -34,7 +34,7 @@ import type { SessionKind } from '../src/types.ts';
 
 function ctx(
   overrides: { model?: { provider: string; id: string } | null; sessionFile?: string } = {},
-): ExtensionContext {
+): ExtensionToolContext {
   const known = new Set(['chat-model', 'other']);
   return {
     cwd: '/work',
@@ -53,7 +53,7 @@ function ctx(
       getSessionFile: () => overrides.sessionFile ?? '/sessions/chat.jsonl',
       getLeafId: () => 'leaf-1',
     },
-  } as unknown as ExtensionContext;
+  } as unknown as ExtensionToolContext;
 }
 
 function fakeWorker() {

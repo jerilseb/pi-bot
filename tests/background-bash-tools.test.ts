@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import type {
   ExtensionAPI,
-  ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import {
@@ -60,7 +60,7 @@ function setup(t: TestContext) {
     return Response.json({ ok: true, result: { message_id: 1 } });
   });
   t.after(() => stopAllBackgroundSessions());
-  const ctx = { model: undefined } as unknown as ExtensionContext;
+  const ctx = { model: undefined } as unknown as ExtensionToolContext;
   const call = async (name: string, params: unknown): Promise<string> => {
     const tool = tools.get(name);
     assert.ok(tool, `tool ${name} registered`);

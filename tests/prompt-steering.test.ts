@@ -13,6 +13,7 @@ function fixture() {
     async steer(text: string, images?: ImageContent[]) {
       calls.push({ text, images });
       steering.push(text);
+      return 'queued' as const;
     },
     getSteeringMessages: () => steering,
     clearQueue: () => ({ steering: steering.splice(0), followUp: [] }),
