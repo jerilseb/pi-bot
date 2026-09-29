@@ -206,11 +206,13 @@ export class ChatView {
       case 'user': {
         const text = userText(message.content);
         const internal = internalPromptSummary(text, origin);
-        if (internal) {
+        // Input a channel sent is the user's even in a turn the bot started
+        // itself, as a message steered into a job's report is.
+        const from = this.takeInput(text, internal !== null);
+        if (internal && !from) {
           this.note(dim(`── ${internal} ──`));
           return;
         }
-        const from = this.takeInput(text);
         const label = from && from.id !== this.self?.id ? channelName(from) : null;
         const prompt = new UserPrompt(text, label, this.band);
         this.prompts.push(prompt);
@@ -276,9 +278,15 @@ export class ChatView {
     this.pendingTools.clear();
   }
 
-  /** Where the message came from, if the core said: the first unseen input it ends with. */
-  private takeInput(text: string): ChannelRef | null {
-    const index = this.unseenInputs.findIndex((input) => text.trimEnd().endsWith(input.text));
+  /**
+   * Where the message came from, if the core said: the first unseen input it
+   * ends with. An input of files alone has no text, which every message ends
+   * with, so it cannot claim one that reads as the bot's own prompt.
+   */
+  private takeInput(text: string, internal: boolean): ChannelRef | null {
+    const index = this.unseenInputs.findIndex(
+      (input) => (!internal || input.text !== '') && text.trimEnd().endsWith(input.text),
+    );
     if (index === -1) return null;
     const [input] = this.unseenInputs.splice(0, index + 1).slice(-1);
     return input?.from ?? null;

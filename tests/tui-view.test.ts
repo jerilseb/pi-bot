@@ -342,6 +342,31 @@ test("the bot's own prompts are named from the turn's origin, or from their enve
   assert.equal(internalPromptSummary('Just a question', null), null);
 });
 
+test("a message steered into a turn the bot started is the user's, not the bot's prompt", () => {
+  const { chat, shown } = view();
+  chat.setSelf(self);
+  // Files alone, sent from here: no text to tell its message by.
+  chat.input(self, '');
+  chat.turnStart({ kind: 'post-restart', taskId: 't' });
+  chat.agentEvent({
+    type: 'message_start',
+    message: {
+      role: 'user',
+      content: 'This is a post-restart task for the assistant.',
+      timestamp: 1,
+    },
+  } as never);
+  assert.equal(chat.unseen.length, 1);
+  chat.input(telegram, 'how is it going?');
+  chat.agentEvent({
+    type: 'message_start',
+    message: { role: 'user', content: 'how is it going?', timestamp: 2 },
+  } as never);
+  assert.equal(chat.unseen.length, 0);
+  assert.equal(shown().match(/── Post-restart task ──/g)?.length, 1);
+  assert.match(shown(), /❯ Telegram: how is it going\?/);
+});
+
 const STATE: CoreState = {
   chat: { busy: true, queued: 2, steering: 1, model: 'openai-codex/gpt-6-luna', reasoning: 'high' },
   background: { busy: false, queued: 0, steering: 0, model: 'per-prompt' },
