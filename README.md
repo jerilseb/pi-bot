@@ -324,7 +324,7 @@ npm run tui -- --socket /path/to/tui.sock
 What to expect:
 
 - **The conversation so far**, then replies as they stream, with tool calls and their output drawn the way Pi draws them. Messages sent from Telegram are labelled as such.
-- **Telegram sees terminal turns silently.** What you type in the terminal is posted to Telegram as “🖥 From the terminal”, and its reply follows, without a notification. The reply alerts the terminal instead, with the terminal bell.
+- **Telegram sees terminal turns silently.** What you type in the terminal is posted to Telegram under a 🖥, and its reply follows, without a notification. The reply alerts the terminal instead, with the terminal bell.
 - **Unprompted messages** (scheduled reports, heartbeat output, job reports) ring the bell in the terminal if it is the interface you used in the last 10 minutes. Otherwise Telegram notifies you. Background runs show only what they send, as in Telegram.
 - **Menus** (`/models`, `/reasoning`, questions from the agent) take the editor's place: arrow keys and Enter to choose, Esc to cancel.
 - **Running jobs** show live above the editor. `/jobs` picks one to stop.

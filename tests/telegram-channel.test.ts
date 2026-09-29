@@ -276,8 +276,8 @@ test('input typed in a terminal is mirrored silently, labelled, with its attachm
   assert.deepEqual(
     sent().map((call) => [call.text, call.silent]),
     [
-      ['🖥 <i>From the terminal:</i>\nlook at &lt;this&gt;\n📎 shot.png', true],
-      ['🖥 <i>From the terminal, steering the task under way:</i>\nand this', true],
+      ['🖥\nlook at &lt;this&gt;\n📎 shot.png', true],
+      ['🖥 <i>Steering the task under way:</i>\nand this', true],
     ],
   );
 });

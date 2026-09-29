@@ -386,9 +386,12 @@ export class TelegramChannel implements Channel {
 
   /** Input typed in another channel, labelled with where, and sent without a notification. */
   private mirror(event: Extract<CoreEvent, { type: 'input' }>): Promise<void> {
-    const where = event.from.kind === 'tui' ? '🖥 <i>From the terminal' : '<i>From elsewhere';
+    const where =
+      event.from.kind === 'tui'
+        ? `🖥${event.steered ? ' <i>Steering the task under way:</i>' : ''}`
+        : `<i>From elsewhere${event.steered ? ', steering the task under way' : ''}:</i>`;
     const lines = [
-      `${where}${event.steered ? ', steering the task under way' : ''}:</i>`,
+      where,
       ...(event.text.trim() ? [escapeTelegramHtml(event.text)] : []),
       ...event.attachments.map((name) => `📎 ${escapeTelegramHtml(name)}`),
     ];
