@@ -195,7 +195,7 @@ const CORE_COMMANDS: CoreCommand[] = [
         // tell an interruption from a turn that chose to end there.
         await chat.pi.noteEvent('abort', 'The user aborted your previous turn before it finished.');
       }
-      ctx.reply('⏹ Aborting current prompt and clearing queued/steering messages...', {
+      ctx.reply('⏹  Aborting current prompt and clearing queued/steering messages...', {
         to: 'all',
       });
     },
