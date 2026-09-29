@@ -415,6 +415,29 @@ test("a job's lines show its progress, and its summary how it ended", () => {
   ]);
 });
 
+test('the editor puts a ❯ before its text, between a line above and below', () => {
+  const editor = new WorkingEditor(screen(), {
+    borderColor: (text) => text,
+    selectList: getSelectListTheme(),
+  });
+  const rows = (width: number): string[] => editor.render(width).map((row) => plain(row));
+  assert.deepEqual(
+    rows(20).map((row) => row.trimEnd()),
+    ['─'.repeat(20), ' ❯', '─'.repeat(20)],
+  );
+  editor.setText(`first ${'word '.repeat(12)}`);
+  const wrapped = rows(30);
+  assert.ok(wrapped.length > 4, 'the text wraps');
+  assert.equal(wrapped[0], '─'.repeat(30));
+  assert.equal(wrapped.at(-1), '─'.repeat(30));
+  assert.match(wrapped[1] ?? '', /^ ❯ first word/);
+  for (const row of wrapped.slice(2, -1)) assert.match(row, /^ {3}\S/);
+  for (const width of [3, 4, 10, 30, 80]) {
+    for (const row of editor.render(width))
+      assert.ok(visibleWidth(row) <= width, `${width}: ${row}`);
+  }
+});
+
 test("while the chat works, the editor's top border says so, as Pi's does", (t) => {
   const editor = new WorkingEditor(screen(), {
     borderColor: (text) => text,

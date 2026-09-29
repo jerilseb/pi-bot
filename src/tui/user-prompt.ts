@@ -4,7 +4,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
-import { type Band, bold, cyan, dim, italic } from './style.ts';
+import { type Band, dim, italic, PROMPT_MARK } from './style.ts';
 
 /**
  * What someone typed, as the chat shows it: a `❯` and the text beside it,
@@ -46,7 +46,7 @@ export class UserPrompt implements Component {
     // A column either side, and the marker's two.
     const rows = wrapTextWithAnsi(`${label}${this.text}`, Math.max(1, width - 4));
     const lines = (rows.length ? rows : ['']).map((row, index) => {
-      const line = ` ${index === 0 ? cyan(bold('❯')) : ' '} ${this.band.text(row)}`;
+      const line = ` ${index === 0 ? PROMPT_MARK : ' '} ${this.band.text(row)}`;
       return this.band.bg(`${line}${' '.repeat(Math.max(0, width - visibleWidth(line)))}`);
     });
     lines[0] = `${PROMPT_START}${lines[0]}`;

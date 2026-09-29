@@ -21,6 +21,9 @@ export const yellow = sgr(33, 39);
 export const cyan = sgr(36, 39);
 export const gray = sgr(90, 39);
 
+/** The mark before a prompt, in the editor and in the chat alike. */
+export const PROMPT_MARK = cyan(bold('❯'));
+
 /** A band of background colour, and the colour of the text on it. */
 export interface Band {
   bg: (text: string) => string;
