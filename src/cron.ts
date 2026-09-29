@@ -181,7 +181,7 @@ function disableCronJob(job: CronJob, now: Date): CronJob {
 
 function buildCronPrompt(job: CronJob): string {
   return buildAgentEnvelope({
-    preamble: 'This is a scheduled task run for the Telegram assistant.',
+    preamble: 'This is a scheduled task run for the assistant.',
     meta: [
       ['Task ID', job.id],
       ['Title', job.title],
@@ -197,7 +197,7 @@ function buildCronPrompt(job: CronJob): string {
       },
     ],
     guidance: [
-      'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the scheduled instructions.',
+      'Only notify the user when there is something important, actionable, or explicitly requested by the scheduled instructions.',
     ],
     noopSentinel: CRON_NOOP,
   });

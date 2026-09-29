@@ -44,7 +44,7 @@ import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
  *
  * A job is one subagent_run call. Its tasks run concurrently within a global
  * worker cap, each in a fresh Pi session with its own transcript under
- * SUBAGENT_SESSIONS_DIR, a worker system prompt, and no Telegram-facing tools.
+ * SUBAGENT_SESSIONS_DIR, a worker system prompt, and no user-facing tools.
  * Workers cannot start sub-agents of their own. The job follows the background
  * bash choreography: wait a yield window, return results inline if every task
  * finished, otherwise return a job ID and deliver an internal report later.
@@ -67,7 +67,7 @@ import { clamp, errorMessage, formatDuration, oneLineLabel } from './util.ts';
  */
 
 /** Custom entry type framing a worker transcript: a start entry with metadata, an end entry with the outcome. */
-export const SUBAGENT_SESSION_ENTRY_TYPE = 'telegram-bot-subagent';
+export const SUBAGENT_SESSION_ENTRY_TYPE = 'pi-bot-subagent';
 
 /** What a worker session needs from its runner. */
 export interface WorkerRunRequest {
@@ -124,7 +124,7 @@ export interface SubagentTaskReport {
   index: number;
   task: string;
   status: SubagentTaskStatus;
-  /** The user stopped it from Telegram, which the report tells the agent not to undo. */
+  /** The user stopped it, which the report tells the agent not to undo. */
   stoppedByUser: boolean;
   runtime: string;
   output: string;
@@ -586,7 +586,7 @@ function startJob(
       description: task.description,
       cwd: task.cwd,
       model: task.model,
-      sessionId: `telegram-subagent-${id}-${index + 1}`,
+      sessionId: `subagent-${id}-${index + 1}`,
       sessionFile: null,
       status: 'queued',
       abort: new AbortController(),
@@ -761,7 +761,7 @@ function taskRuntime(task: SubagentTask): string {
 function taskOutput(task: SubagentTask): string {
   if (task.status === 'succeeded') return task.result ?? '';
   if (task.status === 'failed') return `Error: ${task.error ?? 'unknown error'}`;
-  if (stoppedByUser(task)) return 'Stopped by the user from Telegram before it finished.';
+  if (stoppedByUser(task)) return 'Stopped by the user before it finished.';
   return '';
 }
 
@@ -862,7 +862,7 @@ function userStopGuidance(tasks: SubagentTaskReport[]): string[] {
         : 'every task'
       : `task${stopped.length === 1 ? '' : 's'} ${stopped.join(', ')}`;
   return [
-    `The user stopped ${which} from Telegram on purpose. Do not start ${stopped.length === 1 ? 'it' : 'them'} again unless they ask.`,
+    `The user stopped ${which} on purpose. Do not start ${stopped.length === 1 ? 'it' : 'them'} again unless they ask.`,
   ];
 }
 

@@ -15,7 +15,7 @@ function fixture(t: TestContext) {
     modelName: null,
     cwd: dir,
     sessionDir: dir,
-    sessionPrefix: 'telegram-background',
+    sessionPrefix: 'background',
     sessionPerPrompt: true,
     sessionKind: 'background',
   } as unknown as PiRuntime;
@@ -35,16 +35,16 @@ test('every background run starts a transcript of its own, where and as the run 
   const { dir, createFor } = fixture(t);
   const heartbeatDir = path.join(dir, 'heartbeat-sessions');
   const first = createFor({
-    transcript: { dir: heartbeatDir, prefix: 'telegram-heartbeat', name: 'heartbeat' },
+    transcript: { dir: heartbeatDir, prefix: 'heartbeat', name: 'heartbeat' },
   });
   const second = createFor({});
 
   assert.notEqual(first.getSessionId(), second.getSessionId());
-  assert.match(first.getSessionId(), /^telegram-heartbeat-.+-[0-9a-f]{8}$/);
+  assert.match(first.getSessionId(), /^heartbeat-.+-[0-9a-f]{8}$/);
   assert.equal(path.dirname(first.getSessionFile() ?? ''), heartbeatDir);
   assert.equal(first.getSessionName(), 'heartbeat');
   // Without a transcript the runtime's directory and prefix apply.
-  assert.match(second.getSessionId(), /^telegram-background-/);
+  assert.match(second.getSessionId(), /^background-/);
   assert.equal(path.dirname(second.getSessionFile() ?? ''), dir);
   assert.equal(second.getSessionName(), undefined);
 });
@@ -52,7 +52,7 @@ test('every background run starts a transcript of its own, where and as the run 
 test('a job report resumes the transcript of the run that started the job', (t) => {
   const { dir, createFor } = fixture(t);
   const run = createFor({
-    transcript: { dir: path.join(dir, 'scheduled'), prefix: 'telegram-scheduled-task' },
+    transcript: { dir: path.join(dir, 'scheduled'), prefix: 'scheduled-task' },
   });
   run.appendMessage({ role: 'user', content: 'build it', timestamp: Date.now() });
   run.appendMessage({

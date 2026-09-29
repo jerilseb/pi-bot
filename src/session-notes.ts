@@ -27,7 +27,7 @@ import type { PromptOrigin } from './contract.ts';
  */
 
 /** Marks our entries in the session file so they can be found on reload. */
-export const SESSION_EVENT_TYPE = 'telegram-bot-event';
+export const SESSION_EVENT_TYPE = 'pi-bot-event';
 
 export type SessionEventKind =
   | 'restart'

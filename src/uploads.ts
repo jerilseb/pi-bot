@@ -27,7 +27,7 @@ const SendImageParams = Type.Object({
   }),
   caption: Type.Optional(
     Type.String({
-      description: 'Optional short caption shown beneath the image in Telegram.',
+      description: 'Optional short caption shown with the image.',
     }),
   ),
 });
@@ -39,13 +39,13 @@ const SendDocumentParams = Type.Object({
   }),
   caption: Type.Optional(
     Type.String({
-      description: 'Optional short caption shown beneath the document in Telegram.',
+      description: 'Optional short caption shown with the document.',
     }),
   ),
 });
 
 /** send_image for one of the bot's sessions; the background session's sends are held. */
-export function telegramImageExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+export function sendImageExtension(session: SessionKind): (pi: ExtensionAPI) => void {
   return (pi) => registerSendImage(pi, session);
 }
 
@@ -54,8 +54,8 @@ function registerSendImage(pi: ExtensionAPI, session: SessionKind): void {
     name: 'send_image',
     label: 'Send Image',
     description:
-      'Upload a local image file to the Telegram user. Use after generating or otherwise producing an image that the user should see.',
-    promptSnippet: 'Send an image file to the Telegram user.',
+      'Upload a local image file to the user. Use after generating or otherwise producing an image that the user should see.',
+    promptSnippet: 'Send an image file to the user.',
     promptGuidelines: [
       'Call this only when the user should actually see the image — not when merely discussing or analyzing one.',
       'Pass an absolute path to a file that already exists on disk (e.g. a generated image).',
@@ -89,7 +89,7 @@ function registerSendImage(pi: ExtensionAPI, session: SessionKind): void {
 }
 
 /** send_document for one of the bot's sessions; the background session's sends are held. */
-export function telegramDocumentExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+export function sendDocumentExtension(session: SessionKind): (pi: ExtensionAPI) => void {
   return (pi) => registerSendDocument(pi, session);
 }
 
@@ -97,9 +97,8 @@ function registerSendDocument(pi: ExtensionAPI, session: SessionKind): void {
   pi.registerTool({
     name: 'send_document',
     label: 'Send Document',
-    description:
-      'Upload a local document file (pdf, docx, csv, md, txt, etc.) to the Telegram user.',
-    promptSnippet: 'Send a document file to the Telegram user.',
+    description: 'Upload a local document file (pdf, docx, csv, md, txt, etc.) to the user.',
+    promptSnippet: 'Send a document file to the user.',
     promptGuidelines: [
       'Call this only when the user should actually receive the file — not when merely discussing or analyzing it.',
       'Pass an absolute path to a file that already exists on disk.',

@@ -43,13 +43,13 @@ import {
   parseModelRef,
   type ModelRef,
 } from './util.ts';
-import { telegramDocumentExtension, telegramImageExtension } from './uploads.ts';
-import { telegramRestartToolExtension } from './restart-tool.ts';
+import { sendDocumentExtension, sendImageExtension } from './uploads.ts';
+import { restartToolExtension } from './restart-tool.ts';
 import { scheduledTasksExtension } from './scheduled-tasks.ts';
-import { telegramNewSessionToolExtension } from './session-switch-tool.ts';
+import { newSessionToolExtension } from './session-switch-tool.ts';
 import { subagentExtension, type WorkerRunRequest, type WorkerRunResult } from './subagent.ts';
-import { telegramMenuExtension } from './telegram-menu.ts';
-import { telegramVoiceNoteExtension } from './voice.ts';
+import { sendMenuExtension } from './menu-tool.ts';
+import { sendVoiceNoteExtension } from './voice.ts';
 
 /** Stands in for the model name on a session whose prompts each carry their own. */
 export const NO_MODEL_NAME = 'per-prompt';
@@ -124,7 +124,7 @@ export interface PiRuntime {
   extensionFactories: Array<(pi: ExtensionAPI) => void>;
   /**
    * Factories a sub-agent worker session gets instead of extensionFactories and
-   * the Telegram tools: the guards that must hold for any agent this bot runs,
+   * the bot's own tools: the guards that must hold for any agent this bot runs,
    * without the chat's memory blocks or user-facing tools.
    */
   workerExtensionFactories?: Array<(pi: ExtensionAPI) => void>;
@@ -159,7 +159,7 @@ export async function createPiRuntime(options: {
   // separately at startup (assertModelUsable), so that check stays explicit
   // rather than being a side effect of constructing a runtime.
   const defaultModelName = options.model ? formatModelRef(parseModelRef(options.model)) : null;
-  // Keep Telegram model/reasoning preferences isolated from ~/.pi/agent/settings.json.
+  // Keep the bot's model/reasoning preferences isolated from ~/.pi/agent/settings.json.
   // ModelRuntime still uses Pi's normal agent directory, so provider logins remain shared.
   const settingsManager = SettingsManager.create(options.cwd, FILES_DIR);
 
@@ -184,7 +184,7 @@ export async function createPiRuntime(options: {
  * Runs one sub-agent worker: a fresh AgentSession with its own transcript that
  * answers a single task and is disposed. Workers share the runtime's model
  * catalogue, settings, and extension paths, but get only the worker
- * extension factories and a caller-supplied system prompt — no Telegram tools,
+ * extension factories and a caller-supplied system prompt — no user-facing tools,
  * no steering.
  *
  * The transcript is persisted under request.sessionDir with the parent's file
@@ -942,15 +942,13 @@ export class SdkPiSession {
     const resourceLoader = await loadResources(this.runtime, {
       extensionFactories: [
         ...this.runtime.extensionFactories,
-        ...(this.runtime.requestRestart
-          ? [telegramRestartToolExtension(this.runtime.requestRestart)]
-          : []),
-        telegramNewSessionToolExtension((task) => this.requestNewSession(task)),
+        ...(this.runtime.requestRestart ? [restartToolExtension(this.runtime.requestRestart)] : []),
+        newSessionToolExtension((task) => this.requestNewSession(task)),
         // Withheld when cron is off, so the agent cannot create jobs that would
         // never fire.
         ...(CRON_JOBS_ENABLED ? [scheduledTasksExtension] : []),
-        telegramMenuExtension(this.runtime.sessionKind),
-        telegramVoiceNoteExtension(this.runtime.sessionKind),
+        sendMenuExtension(this.runtime.sessionKind),
+        sendVoiceNoteExtension(this.runtime.sessionKind),
         backgroundBashExtension(this.runtime.sessionKind),
         // Withheld when sub-agents are off, so the agent cannot claim to have
         // delegated work.
@@ -962,8 +960,8 @@ export class SdkPiSession {
               }),
             ]
           : []),
-        ...(SEND_LOCAL_IMAGES ? [telegramImageExtension(this.runtime.sessionKind)] : []),
-        ...(SEND_LOCAL_DOCUMENTS ? [telegramDocumentExtension(this.runtime.sessionKind)] : []),
+        ...(SEND_LOCAL_IMAGES ? [sendImageExtension(this.runtime.sessionKind)] : []),
+        ...(SEND_LOCAL_DOCUMENTS ? [sendDocumentExtension(this.runtime.sessionKind)] : []),
       ],
       systemPromptOverride: this.runtime.systemPromptOverride,
     });
@@ -990,7 +988,7 @@ export class SdkPiSession {
     }
 
     const manager = SessionManager.create(this.runtime.cwd, this.runtime.sessionDir, {
-      id: buildTelegramSessionId(this.runtime.sessionPrefix),
+      id: buildSessionId(this.runtime.sessionPrefix),
     });
     this.pointAt(manager);
     return manager;
@@ -1016,7 +1014,7 @@ export class SdkPiSession {
     const dir = transcript?.dir ?? this.runtime.sessionDir;
     const prefix = transcript?.prefix ?? this.runtime.sessionPrefix;
     const manager = SessionManager.create(this.runtime.cwd, dir, {
-      id: `${buildTelegramSessionId(prefix)}-${randomBytes(4).toString('hex')}`,
+      id: `${buildSessionId(prefix)}-${randomBytes(4).toString('hex')}`,
     });
     if (transcript?.name) manager.appendSessionInfo(transcript.name);
     return manager;
@@ -1028,7 +1026,7 @@ function withoutSystemMessages(messages: AgentMessage[]): AgentMessage[] {
 }
 
 /** Transcript IDs keep the historical `<prefix>-<chatId>` shape. */
-function buildTelegramSessionId(prefix: string): string {
+function buildSessionId(prefix: string): string {
   const sanitized = `${prefix}-${ALLOWED_CHAT_ID}`
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[^A-Za-z0-9]+/, '')

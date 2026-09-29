@@ -17,7 +17,7 @@ function fixture(t: TestContext) {
     modelName: 'test/model',
     cwd: dir,
     sessionDir: dir,
-    sessionPrefix: 'telegram-chat',
+    sessionPrefix: 'chat',
     sessionPerPrompt: false,
     sessionKind: 'chat',
   } as unknown as PiRuntime;

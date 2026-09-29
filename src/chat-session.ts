@@ -10,9 +10,9 @@ export interface ChatState {
 }
 
 /**
- * Holds the single chat's state for one Pi runtime. The bot serves exactly one
- * Telegram chat (TELEGRAM_ALLOWED_CHAT_ID), so this is a lazily created
- * singleton rather than a registry. State stays loaded until explicitly cleared;
+ * Holds the single chat's state for one Pi runtime. The bot has exactly one
+ * chat, which every channel shares, so this is a lazily created singleton
+ * rather than a registry. State stays loaded until explicitly cleared;
  * elapsed time must never dispose a session that may still be doing work.
  */
 export interface ChatSession {

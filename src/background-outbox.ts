@@ -175,7 +175,7 @@ export async function deliverToChat(
   return outbox.send(label, deliver);
 }
 
-/** What a Telegram tool tells the agent when its send was held. */
+/** What a delivery tool tells the agent when its send was held. */
 export function heldDeliveryNote(what: string): string {
   const minutes = Math.round(BACKGROUND_DELIVERY_COOLDOWN_MS / 60_000);
   return `${what} queued: the user is busy in the chat, so it will be delivered once the chat has been idle for ${minutes} minute${minutes === 1 ? '' : 's'}.`;

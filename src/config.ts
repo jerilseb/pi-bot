@@ -86,7 +86,7 @@ export const CHAT_MODEL = 'openai-codex/gpt-6-luna';
  * Unset means the heartbeat does not run. Enabling it in files/settings.json
  * without setting its model is a startup error rather than a silent no-op, so a
  * half-configured heartbeat cannot look healthy until the moment it fails to
- * fire. Not changeable from Telegram.
+ * fire. Not changeable from the chat.
  *
  * Scheduled tasks need nothing here: each task is pinned at creation to the
  * chat model active at that moment (the /models selection), unless the user
@@ -371,7 +371,7 @@ export const USAGE_FETCH_TIMEOUT_MS = 30_000;
 // Restart lifecycle
 // ---------------------------------------------------------------------------
 
-/** Grace period after shutdown so final Telegram sends flush before the exit. */
+/** Grace period after shutdown so the channels' final sends flush before the exit. */
 export const RESTART_EXIT_DELAY_MS = 250;
 /** Delay before restart_bot restarts, so its tool result reaches the agent first. */
 export const RESTART_TOOL_DELAY_MS = 300;

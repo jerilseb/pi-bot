@@ -201,7 +201,7 @@ test('a running command has a Stop button, and none once a stop is on its way or
     ...ended,
     status: 'stopped',
     stopRequested: true,
-    statusDetail: 'stopped by the user from Telegram',
+    statusDetail: 'stopped by the user',
   });
   assert.deepEqual(stoppedByYou.keyboard, []);
   assert.match(stoppedByYou.html, /^⏹ <b>Background bash<\/b> · stopped by you · 1m 7s/);
@@ -232,14 +232,14 @@ test('a report of a command the user stopped says so, and not to start it again'
   const stopped = backgroundBashReportPrompt(
     report(
       { session: 'chat' },
-      { outcome: 'stopped by the user from Telegram after 2m 3s', stoppedByUser: true },
+      { outcome: 'stopped by the user after 2m 3s', stoppedByUser: true },
     ),
   ).text;
   assert.match(
     stopped,
     /^\[background-bash-report\] Background bash bg_abc123 stopped by the user/,
   );
-  assert.match(stopped, /The user stopped this command from Telegram on purpose\./);
+  assert.match(stopped, /The user stopped this command on purpose\./);
   assert.match(stopped, /Do not start it again unless they ask/);
   assert.match(stopped, /__BACKGROUND_BASH_NOOP__/);
 

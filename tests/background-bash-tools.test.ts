@@ -167,13 +167,13 @@ test('a stop from Telegram kills the command and reports that the user stopped i
   const report = f.reports[0];
   assert.ok(report);
   assert.equal(report.stoppedByUser, true);
-  assert.match(report.outcome, /^stopped by the user from Telegram after /);
+  assert.match(report.outcome, /^stopped by the user after /);
   const prompt = backgroundBashReportPrompt(report).text;
-  assert.match(prompt, /The user stopped this command from Telegram on purpose/);
+  assert.match(prompt, /The user stopped this command on purpose/);
   assert.match(prompt, /__BACKGROUND_BASH_NOOP__/);
 
   const read = await f.call('background_bash_read', { session_id: id });
-  assert.match(read, /Status: stopped by the user from Telegram, ran for/);
+  assert.match(read, /Status: stopped by the user, ran for/);
   assert.equal(await f.tapStop(), 'That job is no longer running.');
 
   // The message ends on the stop, with its button gone.
@@ -201,7 +201,7 @@ test('a wait in progress when the user stops the command returns it, and the rep
   await f.tapStop();
   const result = await waiting;
   assert.match(result, new RegExp(`^Session ${id}: finished\\.`));
-  assert.match(result, /stopped by the user from Telegram/);
+  assert.match(result, /stopped by the user/);
   await until(() => f.reports.length === 1);
   assert.equal(backgroundBashReportPrompt(f.reports[0]).isSuperseded?.(), true);
 });
@@ -212,7 +212,7 @@ test('a stop during the yield returns the stop inline, with no report to follow'
   await until(() => f.telegram.some((c) => c.method === 'sendMessage'));
   await f.tapStop();
   const result = await starting;
-  assert.match(result, /^Command stopped by the user from Telegram after /);
+  assert.match(result, /^Command stopped by the user after /);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.deepEqual(f.reports, []);
 });

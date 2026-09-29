@@ -8,7 +8,7 @@ import { textResult } from './tool-result.ts';
 import type { SessionKind } from './types.ts';
 
 /**
- * send_telegram_menu: a menu the agent sends every connected interface. The
+ * send_menu: a menu the agent sends every connected interface. The
  * first answer, from any of them, closes every copy and comes back into the
  * chat as the user's own message from that interface, so it can steer a turn
  * under way. A menu is single-use and expires.
@@ -18,7 +18,7 @@ const DEFAULT_MENU_EXPIRY_MINUTES = 60;
 const MAX_MENU_EXPIRY_MINUTES = 24 * 60;
 const MAX_MENU_OPTIONS = 12;
 
-const TelegramMenuOptionParams = Type.Object({
+const MenuOptionParams = Type.Object({
   label: Type.String({
     description: 'Button text shown to the user.',
     minLength: 1,
@@ -32,12 +32,12 @@ const TelegramMenuOptionParams = Type.Object({
   ),
 });
 
-const SendTelegramMenuParams = Type.Object({
+const SendMenuParams = Type.Object({
   text: Type.String({
-    description: 'Question or prompt to show above the inline keyboard.',
+    description: 'Question or prompt to show above the buttons.',
     minLength: 1,
   }),
-  options: Type.Array(TelegramMenuOptionParams, {
+  options: Type.Array(MenuOptionParams, {
     description: 'Selectable options. Use two options like Yes/No for confirmations.',
     minItems: 1,
     maxItems: MAX_MENU_OPTIONS,
@@ -61,42 +61,42 @@ const SendTelegramMenuParams = Type.Object({
   ),
 });
 
-type SendTelegramMenuParamsType = Static<typeof SendTelegramMenuParams>;
+type SendMenuParamsType = Static<typeof SendMenuParams>;
 
-interface TelegramMenuOption {
+interface MenuOption {
   label: string;
   value: string;
 }
 
-interface TelegramMenu {
+interface Menu {
   text: string;
-  options: TelegramMenuOption[];
+  options: MenuOption[];
   allowCancel: boolean;
 }
 
-/** send_telegram_menu for one of the bot's sessions; the background session's sends are held. */
-export function telegramMenuExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+/** send_menu for one of the bot's sessions; the background session's sends are held. */
+export function sendMenuExtension(session: SessionKind): (pi: ExtensionAPI) => void {
   return (pi) => registerSendMenu(pi, session);
 }
 
 function registerSendMenu(pi: ExtensionAPI, session: SessionKind): void {
   pi.registerTool({
-    name: 'send_telegram_menu',
-    label: 'Send Telegram Menu',
+    name: 'send_menu',
+    label: 'Send Menu',
     description:
-      'Send a Telegram inline button menu to the current chat. Use for yes/no confirmations or asking the user to select from multiple options. When the user taps a button, the selected option is sent back into the chat as a normal user prompt so you can continue from it.',
-    promptSnippet: 'Send Telegram inline menus for confirmations and option selection.',
+      'Send a button menu to the user. Use for yes/no confirmations or asking the user to select from multiple options. When the user taps a button, the selected option is sent back into the chat as a normal user prompt so you can continue from it.',
+    promptSnippet: 'Send button menus for confirmations and option selection.',
     promptGuidelines: [
-      'Use send_telegram_menu when you need the user to choose one of several options before continuing.',
+      'Use send_menu when you need the user to choose one of several options before continuing.',
       'For yes/no confirmations, pass two options such as ✅ Yes and ❌ No.',
       'Keep button labels short and clear.',
       'After sending the menu, explain briefly that you are waiting for the user to tap an option.',
     ],
-    parameters: SendTelegramMenuParams,
-    async execute(_toolCallId, params: SendTelegramMenuParamsType) {
+    parameters: SendMenuParams,
+    async execute(_toolCallId, params: SendMenuParamsType) {
       // Built now so invalid options still fail the call; the menu opens, and
       // its expiry clock starts, when it is actually sent.
-      const prepared = prepareTelegramMenu(params);
+      const prepared = prepareMenu(params);
       const host = toolHost();
       const result = await host.deliver(
         session,
@@ -158,12 +158,12 @@ function menuChoice(prepared: PreparedMenu, host: ToolHost): ChoiceSpec {
 }
 
 interface PreparedMenu {
-  menu: TelegramMenu;
+  menu: Menu;
   columns: number;
   expiresMinutes: number;
 }
 
-function prepareTelegramMenu(params: SendTelegramMenuParamsType): PreparedMenu {
+function prepareMenu(params: SendMenuParamsType): PreparedMenu {
   const expiresMinutes = normalizeExpiryMinutes(params.expires_minutes);
   return {
     menu: {
@@ -176,9 +176,7 @@ function prepareTelegramMenu(params: SendTelegramMenuParamsType): PreparedMenu {
   };
 }
 
-function normalizeMenuOptions(
-  options: SendTelegramMenuParamsType['options'],
-): TelegramMenuOption[] {
+function normalizeMenuOptions(options: SendMenuParamsType['options']): MenuOption[] {
   if (options.length === 0) throw new Error('A menu needs at least one option.');
   if (options.length > MAX_MENU_OPTIONS) {
     throw new Error(`A menu can have at most ${MAX_MENU_OPTIONS} options.`);
@@ -204,9 +202,9 @@ function normalizeExpiryMinutes(expiresMinutes: number | undefined): number {
   return Math.min(MAX_MENU_EXPIRY_MINUTES, Math.max(1, Math.floor(value)));
 }
 
-function buildMenuSelectionPrompt(menu: TelegramMenu, option: TelegramMenuOption): string {
+function buildMenuSelectionPrompt(menu: Menu, option: MenuOption): string {
   return [
-    'The user selected an option from a Telegram inline menu.',
+    'The user selected an option from a menu.',
     '',
     'Menu question:',
     menu.text,
@@ -221,9 +219,9 @@ function buildMenuSelectionPrompt(menu: TelegramMenu, option: TelegramMenuOption
   ].join('\n');
 }
 
-function buildMenuCancelledPrompt(menu: TelegramMenu): string {
+function buildMenuCancelledPrompt(menu: Menu): string {
   return [
-    'The user cancelled a Telegram inline menu.',
+    'The user cancelled a menu.',
     '',
     'Menu question:',
     menu.text,

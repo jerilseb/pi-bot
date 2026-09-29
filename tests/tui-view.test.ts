@@ -164,7 +164,7 @@ test("the bot's own prompts are named from the turn's origin, or from their enve
     'Sub-agent job sub_1 succeeded.',
   );
   assert.equal(
-    internalPromptSummary('This is a post-restart task for the Telegram assistant.', null),
+    internalPromptSummary('This is a post-restart task for the assistant.', null),
     'Post-restart task',
   );
   assert.equal(

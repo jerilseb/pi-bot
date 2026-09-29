@@ -160,7 +160,7 @@ The default chat model is configured in `src/config.ts`:
 export const CHAT_MODEL = "openai-codex/gpt-6-luna";
 ```
 
-The active chat model and reasoning level can be changed from Telegram with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `ALLOWED_MODELS` or startup fails.
+The active chat model and reasoning level can be changed from the chat, in Telegram or the terminal, with `/models` and `/reasoning`, and are persisted in `files/settings.json` as `defaultProvider`/`defaultModel`/`defaultThinkingLevel`. That file wins over `CHAT_MODEL`, and the resolved model must be listed in `ALLOWED_MODELS` or startup fails.
 
 The same file gates the two ways the bot can act unprompted:
 
@@ -222,7 +222,7 @@ Pi's own `retry` setting is written with `maxRetries` 4, one more than Pi's defa
 
 The file is gitignored, but `files/settings.json.example` is checked in and shows the defaults the bot writes on first start. You do not need to copy it — startup creates `files/settings.json` if it is missing — it is there to document the shape.
 
-Heartbeat runs take their model from `HEARTBEAT_MODEL` in `.env`. There is no default — an unset model means the heartbeat does not run, and turning it on in `files/settings.json` without setting the model is a startup error rather than a schedule that quietly never fires. It is separate from the chat model and cannot be changed from Telegram.
+Heartbeat runs take their model from `HEARTBEAT_MODEL` in `.env`. There is no default — an unset model means the heartbeat does not run, and turning it on in `files/settings.json` without setting the model is a startup error rather than a schedule that quietly never fires. It is separate from the chat model and cannot be changed from the chat.
 
 Scheduled tasks are pinned to a model when they are created: by default the chat model `/models` had selected at that moment, so switching models later does not change existing tasks. A task can be given a specific model instead ("schedule this with deepseek-v4.1-flash"), which the agent validates against Pi's catalogue at creation time, so a typo or a provider without auth fails there rather than when the task fires. Asking to update a task's model to "default" re-pins it to the current chat model. Each task's model shows in the task list.
 
@@ -284,7 +284,7 @@ Useful non-secret settings in `src/config.ts` include:
 
 Chat session state stays loaded between prompts; there is no idle timeout. Each background run's session is disposed when the run ends. Conversation resets and bot shutdown/restart still dispose the underlying Pi sessions.
 
-Ordinary Telegram messages sent while the chat agent is running **steer the current task** via the Pi SDK. The bot acknowledges them with “↪️ Steering current task.” They are delivered after the current assistant turn finishes its tool calls, before the next model call; running tools are not cancelled. Text, transcribed voice, and attachments use the same route. Messages arriving during startup or after the run stops accepting steering fall back to the serial queue, as do scheduled-task and heartbeat runs and the completion reports of background jobs. There is no explicit queue command. The pending limit includes both queued and undelivered steering messages. `/abort` and `/new` discard both kinds of pending work.
+Ordinary messages sent from Telegram or the terminal while the chat agent is running **steer the current task** via the Pi SDK. The bot acknowledges them with “↪️ Steering current task.” They are delivered after the current assistant turn finishes its tool calls, before the next model call; running tools are not cancelled. Text, transcribed voice, and attachments use the same route. Messages arriving during startup or after the run stops accepting steering fall back to the serial queue, as do scheduled-task and heartbeat runs and the completion reports of background jobs. There is no explicit queue command. The pending limit includes both queued and undelivered steering messages. `/abort` and `/new` discard both kinds of pending work.
 
 The Pi SDK automatically retries transient provider and transport failures, with backoff, up to `retry.maxRetries` times (4, set in `files/settings.json`; Pi's default is 3). The bot keeps only the final attempt's text/error and announces the first retry of a chat turn once. Authentication, quota and context errors are not retried.
 

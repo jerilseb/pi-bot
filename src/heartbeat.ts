@@ -97,7 +97,7 @@ function readHeartbeatInstructions(): string {
 
 function buildHeartbeatPrompt(instructions: string): string {
   return buildAgentEnvelope({
-    preamble: 'This is a scheduled heartbeat run for the Telegram assistant.',
+    preamble: 'This is a scheduled heartbeat run for the assistant.',
     meta: [['Heartbeat file', HEARTBEAT_FILE_PATH]],
     sections: [
       {
@@ -108,7 +108,7 @@ function buildHeartbeatPrompt(instructions: string): string {
     ],
     guidance: [
       `If you need durable heartbeat state, create or update ${HEARTBEAT_STATE_PATH}.`,
-      'Only notify the Telegram user when there is something important, actionable, or explicitly requested by the heartbeat instructions.',
+      'Only notify the user when there is something important, actionable, or explicitly requested by the heartbeat instructions.',
     ],
     noopSentinel: HEARTBEAT_NOOP,
   });

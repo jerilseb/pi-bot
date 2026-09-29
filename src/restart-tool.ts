@@ -23,9 +23,7 @@ const RestartBotParams = Type.Object({
 
 type RestartBotParamsType = Static<typeof RestartBotParams>;
 
-export function telegramRestartToolExtension(
-  restart: () => Promise<void>,
-): (pi: ExtensionAPI) => void {
+export function restartToolExtension(restart: () => Promise<void>): (pi: ExtensionAPI) => void {
   let restartRequested = false;
 
   return (pi: ExtensionAPI) => {
@@ -33,9 +31,8 @@ export function telegramRestartToolExtension(
       name: 'restart_bot',
       label: 'Restart Bot',
       description:
-        'Restart the Telegram bot process. Use only when the user explicitly asks the assistant to restart itself or restart the bot. Optionally stores a self-contained task to run automatically after systemd brings the bot back up.',
-      promptSnippet:
-        'Restart the Telegram bot process when the user explicitly asks for a restart.',
+        'Restart the bot process. Use only when the user explicitly asks the assistant to restart itself or restart the bot. Optionally stores a self-contained task to run automatically after systemd brings the bot back up.',
+      promptSnippet: 'Restart the bot process when the user explicitly asks for a restart.',
       promptGuidelines: [
         "Use restart_bot only for explicit restart requests, such as 'restart yourself' or 'restart the bot'.",
         'Do not use restart_bot for vague troubleshooting, normal code changes, reloads, updates, model switches, or status checks unless the user explicitly requests a restart.',

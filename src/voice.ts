@@ -18,8 +18,7 @@ import type { SessionKind } from './types.ts';
 
 const SendVoiceNoteParams = Type.Object({
   text: Type.String({
-    description:
-      'Text to synthesize and send as a Telegram voice note. Keep it concise and conversational.',
+    description: 'Text to synthesize and send as a voice note. Keep it concise and conversational.',
   }),
 });
 
@@ -28,7 +27,7 @@ export function voiceStatusText(): string {
 }
 
 /** send_voice_note for one of the bot's sessions; the background session's sends are held. */
-export function telegramVoiceNoteExtension(session: SessionKind): (pi: ExtensionAPI) => void {
+export function sendVoiceNoteExtension(session: SessionKind): (pi: ExtensionAPI) => void {
   return (pi) => registerSendVoiceNote(pi, session);
 }
 
@@ -37,8 +36,8 @@ function registerSendVoiceNote(pi: ExtensionAPI, session: SessionKind): void {
     name: 'send_voice_note',
     label: 'Send Voice Note',
     description:
-      'Send the Telegram user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.',
-    promptSnippet: 'Send a Telegram voice note to the user using the configured TTS provider',
+      'Send the user a voice note using the configured text-to-speech provider. Use when the user asks for a voice/audio reply, or when a brief spoken response is clearly more appropriate than text. Avoid using for long code, long lists, or dense technical details unless explicitly requested.',
+    promptSnippet: 'Send a voice note to the user using the configured TTS provider',
     promptGuidelines: [
       'Use send_voice_note when the user asks for a voice note, audio reply, spoken summary, or says to reply by voice.',
       'You may use it proactively for short personal or time-sensitive messages where voice is clearly helpful.',

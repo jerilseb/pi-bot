@@ -83,12 +83,12 @@ export interface BackgroundBashReport {
   origin: JobOrigin;
   outcome: string;
   output: string;
-  /** The user stopped it from Telegram, which the report tells the agent not to undo. */
+  /** The user stopped it, which the report tells the agent not to undo. */
   stoppedByUser: boolean;
 }
 
-/** How a session the user stopped from Telegram reads in reads, waits, and the report. */
-const USER_STOP_DETAIL = 'stopped by the user from Telegram';
+/** How a session the user stopped reads in reads, waits, and the report. */
+const USER_STOP_DETAIL = 'stopped by the user';
 
 const registry = new JobRegistry<
   BackgroundBashTerminalStatus,
@@ -639,7 +639,7 @@ function formatBackgroundBashReportPrompt(report: BackgroundBashReport): string 
       'This is an internal report from a background bash session you started earlier, not a message from the user.',
       ...(report.stoppedByUser
         ? [
-            'The user stopped this command from Telegram on purpose. Do not start it again unless they ask. A short acknowledgement is enough, if anything needs saying at all.',
+            'The user stopped this command on purpose. Do not start it again unless they ask. A short acknowledgement is enough, if anything needs saying at all.',
           ]
         : [
             'The user has not been notified separately. Review the result, continue any follow-up work yourself, and only send a user-visible message if it is useful.',

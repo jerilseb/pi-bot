@@ -49,7 +49,7 @@ function ctx(
       getAvailable: () => [...known].map((id) => ({ provider: 'test', id })),
     },
     sessionManager: {
-      getSessionId: () => 'telegram-chat-1',
+      getSessionId: () => 'chat-1',
       getSessionFile: () => overrides.sessionFile ?? '/sessions/chat.jsonl',
       getLeafId: () => 'leaf-1',
     },
@@ -185,7 +185,7 @@ test('tasks that finish within the yield are returned inline and the job is forg
   const text = resolved.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n');
   assert.match(text, /succeeded \(1\/1 tasks\)/);
   assert.match(text, /There are 3 files\./);
-  assert.match(text, /Transcript: \/sub\/telegram-subagent-sub_[0-9a-f]+-1\.jsonl/);
+  assert.match(text, /Transcript: \/sub\/subagent-sub_[0-9a-f]+-1\.jsonl/);
   const details = resolved.details as { jobId: string; tasks: Array<{ sessionFile: string }> };
   assert.equal(details.tasks[0]?.sessionFile, `/sub/${request.sessionId}.jsonl`);
 
@@ -385,7 +385,7 @@ test('the interrupted note names running jobs of the given session only', async 
   const note = interruptedSubagentsNote('background') ?? '';
   assert.match(note, /1 sub-agent job you started was still running/);
   assert.match(note, new RegExp(`- ${jobId}: long research`));
-  assert.match(note, /task 1 \(running\): \/sub\/telegram-subagent-sub_[0-9a-f]+-1\.jsonl/);
+  assert.match(note, /task 1 \(running\): \/sub\/subagent-sub_[0-9a-f]+-1\.jsonl/);
 
   await stopAllSubagents();
   assert.equal(interruptedSubagentsNote('background'), null);
@@ -505,9 +505,9 @@ test('a stop from Telegram ends that task alone, and the report says the user st
   assert.match(report.outcome, /^succeeded \(2\/3 tasks; 1 stopped by the user\) after /);
   assert.equal(report.tasks[1]?.status, 'stopped');
   assert.equal(report.tasks[1]?.stoppedByUser, true);
-  assert.equal(report.tasks[1]?.output, 'Stopped by the user from Telegram before it finished.');
+  assert.equal(report.tasks[1]?.output, 'Stopped by the user before it finished.');
   const prompt = subagentReportPrompt(report).text;
-  assert.match(prompt, /The user stopped task 2 from Telegram on purpose\. Do not start it again/);
+  assert.match(prompt, /The user stopped task 2 on purpose\. Do not start it again/);
 
   const final = f.telegram.at(-1);
   assert.match(final?.text ?? '', /^🤖 <b>Sub-agents<\/b> · 2 done · 1 stopped · ⏱ /);
@@ -531,10 +531,7 @@ test('a job whose every task the user stopped settles stopped, and still reports
   await until(() => f.reports.length === 1);
   assert.match(f.reports[0]?.outcome ?? '', /^stopped \(every task, by the user\) after /);
   const prompt = subagentReportPrompt(f.reports[0] as SubagentReport).text;
-  assert.match(
-    prompt,
-    /The user stopped every task from Telegram on purpose\. Do not start them again/,
-  );
+  assert.match(prompt, /The user stopped every task on purpose\. Do not start them again/);
 });
 
 test('a failed task and a stopped one are counted apart', async (t) => {

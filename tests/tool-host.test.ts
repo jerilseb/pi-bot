@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import type { ExtensionAPI, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { ChoiceSpec } from '../src/choices.ts';
 import type { ChannelRef, Receipt, UserInput } from '../src/contract.ts';
-import { telegramMenuExtension } from '../src/telegram-menu.ts';
+import { sendMenuExtension } from '../src/menu-tool.ts';
 import {
   type DeliveryDraft,
   describeReceipts,
@@ -11,7 +11,7 @@ import {
   type ToolHost,
 } from '../src/tool-host.ts';
 import type { SessionKind } from '../src/types.ts';
-import { telegramVoiceNoteExtension } from '../src/voice.ts';
+import { sendVoiceNoteExtension } from '../src/voice.ts';
 
 /**
  * The agent's tools reach the user only through the core's ToolHost, so they
@@ -107,7 +107,7 @@ test('receipts: silent when every channel took it, named when some did not, an e
 
 test('a menu goes to every channel, and its answer comes back as the answering user', async (t) => {
   const f = fakeHost(t);
-  const send = tool(telegramMenuExtension('chat'), 'send_telegram_menu');
+  const send = tool(sendMenuExtension('chat'), 'send_menu');
   const result = await send({
     text: 'Deploy now?',
     options: [{ label: '✅ Yes', value: 'yes' }, { label: '❌ No' }],
@@ -134,20 +134,20 @@ test('a menu goes to every channel, and its answer comes back as the answering u
 test('a menu no channel could show is closed again, and the agent is told', async (t) => {
   const f = fakeHost(t);
   f.setReceipts([{ channel: TELEGRAM, ok: false, error: 'chat not found' }]);
-  const send = tool(telegramMenuExtension('chat'), 'send_telegram_menu');
+  const send = tool(sendMenuExtension('chat'), 'send_menu');
   await assert.rejects(send({ text: 'Pick', options: [{ label: 'A' }] }), /chat not found/);
   assert.deepEqual(f.closed, ['choice-1']);
 });
 
 test('a held menu tells the agent the answer will come later', async (t) => {
   fakeHost(t, { held: true });
-  const send = tool(telegramMenuExtension('background'), 'send_telegram_menu');
+  const send = tool(sendMenuExtension('background'), 'send_menu');
   assert.match(await send({ text: 'Pick', options: [{ label: 'A' }] }), /queued: the user is busy/);
 });
 
 test('with no channel that plays voice notes, a voice note goes out as its text', async (t) => {
   const f = fakeHost(t, { voice: false });
-  const send = tool(telegramVoiceNoteExtension('chat'), 'send_voice_note');
+  const send = tool(sendVoiceNoteExtension('chat'), 'send_voice_note');
   const result = await send({ text: 'Hello **there**, see `code`.' });
   assert.match(result, /^Voice note sent \(\d+ characters\)\.$/);
   assert.deepEqual(f.delivered, [{ kind: 'voice', text: 'Hello **there**, see code.' }]);

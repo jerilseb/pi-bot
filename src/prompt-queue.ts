@@ -347,11 +347,11 @@ function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): 
  */
 function backgroundRunTranscript(prompt: IncomingPrompt): RunTranscript {
   if (prompt.origin.kind === 'heartbeat') {
-    return { dir: HEARTBEAT_SESSIONS_DIR, prefix: 'telegram-heartbeat', name: 'heartbeat' };
+    return { dir: HEARTBEAT_SESSIONS_DIR, prefix: 'heartbeat', name: 'heartbeat' };
   }
   return {
     dir: SCHEDULED_TASKS_SESSIONS_DIR,
-    prefix: 'telegram-scheduled-task',
+    prefix: 'scheduled-task',
     name: prompt.label ?? 'scheduled task',
   };
 }

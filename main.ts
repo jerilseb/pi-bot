@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Standalone Telegram → Pi chat bridge, with a terminal UI on the same chat.
+ * pi-bot: one Pi agent chat, reached from Telegram and from a terminal UI.
  *
  * Serves the single Telegram chat in TELEGRAM_ALLOWED_CHAT_ID, and with
  * ENABLE_TUI any terminal that connects to its socket (`npm run tui`): keeps one
@@ -113,7 +113,7 @@ const WORKER_EXTENSION_FACTORIES = [protectedEnvToolAccessExtension];
 const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: MODEL,
-  sessionPrefix: 'telegram-chat',
+  sessionPrefix: 'chat',
   sessionKind: 'chat',
   getExtensionPaths: () => EXTENSION_PATHS,
   systemPromptOverride: () => readSystemPrompt(),
@@ -128,7 +128,7 @@ const CHAT_PI_RUNTIME: PiRuntime = await createPiRuntime({
 const BACKGROUND_PI_RUNTIME: PiRuntime = await createPiRuntime({
   cwd: process.cwd(),
   model: null,
-  sessionPrefix: 'telegram-background',
+  sessionPrefix: 'background',
   sessionKind: 'background',
   // The fallback only: each run's transcript goes to the heartbeat or
   // scheduled-tasks directory (see backgroundRunTranscript in prompt-queue).
@@ -317,7 +317,7 @@ async function startTuiServer(): Promise<void> {
 }
 
 function logStartupBanner(): void {
-  console.log('Telegram → Pi bridge started');
+  console.log('pi-bot started');
   console.log(`Allowed chat: ${ALLOWED_CHAT_ID}`);
   console.log(`Chat model: ${CHAT_PI_RUNTIME.modelName ?? NO_MODEL_NAME}`);
   console.log('Pi runtime: SDK');
@@ -368,7 +368,7 @@ async function enqueuePostRestartTasks(): Promise<void> {
 
 function buildPostRestartPrompt(task: PostRestartTask): string {
   return buildAgentEnvelope({
-    preamble: 'This is a post-restart task for the Telegram assistant.',
+    preamble: 'This is a post-restart task for the assistant.',
     meta: [
       ['Task ID', task.id],
       ['Title', task.title],
@@ -382,9 +382,7 @@ function buildPostRestartPrompt(task: PostRestartTask): string {
         body: task.prompt,
       },
     ],
-    guidance: [
-      'Notify the Telegram user with the result, unless the instructions explicitly say not to.',
-    ],
+    guidance: ['Notify the user with the result, unless the instructions explicitly say not to.'],
   });
 }
 

@@ -270,7 +270,7 @@ export function defineCommandChoices(registry: ChoiceRegistry, session: ChatSess
 
 function helpText(commands: CommandInfo[]): string {
   return [
-    escapeMarkdown('Telegram → Pi bridge commands:'),
+    escapeMarkdown('Commands:'),
     ...commands
       .filter((command) => !command.hideFromHelp)
       .map(

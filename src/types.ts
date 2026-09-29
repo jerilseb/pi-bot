@@ -9,7 +9,7 @@ export interface Attachment {
 }
 
 /**
- * The bot's two Pi sessions: the Telegram chat and the unattended background
+ * The bot's two Pi sessions: the chat and the unattended background
  * one, which starts a fresh transcript for every run.
  */
 export type SessionKind = 'chat' | 'background';
