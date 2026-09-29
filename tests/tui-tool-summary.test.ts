@@ -4,7 +4,8 @@ import { summarizeTool, type ToolOutcome, toolOutput } from '../src/tui/tool-sum
 
 /**
  * What a tool call's row says it came to, from results shaped as Pi's own
- * tools return them, and from the first line of any other tool's output.
+ * tools and the web tools return them, and from the first line of any other
+ * tool's output.
  */
 
 const ok = (text: string, details?: unknown): ToolOutcome => ({
@@ -100,9 +101,46 @@ test('a search counts what it found, with a + when it hit its limit', () => {
   assert.deepEqual(summary('ls', ok('(empty directory)')), { text: 'empty' });
 });
 
+test('a web search or fetch says how many lines it returned, not what they said', () => {
+  const search = 'Query: weather in Delhi\nTopic: general\nDepth: basic\nResults returned: 5';
+  assert.deepEqual(summary('web_search', ok(search)), { text: '4 lines' });
+  assert.deepEqual(
+    summary(
+      'web_search',
+      ok(
+        `${search}\n\n[Output truncated: showing 4 of 2600 lines (50KB of 90KB). Full output saved to: /tmp/x]`,
+      ),
+    ),
+    { text: '2600 lines' },
+  );
+  const status = 'HTTP 200 OK\nContent-Type: text/html; charset=utf-8';
+  assert.deepEqual(summary('web_fetch', ok(`${status}\n\n# Title\n\nBody`)), { text: '3 lines' });
+  assert.deepEqual(
+    summary(
+      'web_fetch',
+      ok(
+        `${status}\n\n# Title\n\n[Response cut off: only the first 5MB was read.]\n\n[Output truncated: showing 1 of 9000 lines (50KB of 5MB). Full output saved to: /tmp/y]`,
+      ),
+    ),
+    { text: '9000 lines' },
+  );
+  assert.deepEqual(summary('web_fetch', ok(`${status}\n\n`)), { text: 'no output' });
+  assert.deepEqual(
+    summary(
+      'web_fetch',
+      ok('HTTP 200 OK\nContent-Type: application/pdf\n\n[Binary content (2 MB) not shown.]'),
+    ),
+    { text: 'binary' },
+  );
+  assert.deepEqual(summary('web_fetch', failed('HTTP 404 Not Found\nContent-Type: text/html')), {
+    text: '',
+    error: 'HTTP 404 Not Found',
+  });
+});
+
 test("any other tool says its output's first line; a failure goes under the row", () => {
-  assert.deepEqual(summary('web_search', ok('\n  Found 5 results\n\n1. …')), {
-    text: 'Found 5 results',
+  assert.deepEqual(summary('background_bash_start', ok('\n  Started bg_1\n\nOutput: …')), {
+    text: 'Started bg_1',
   });
   assert.deepEqual(summary('send_image', failed('No channel took the image.')), {
     text: '',

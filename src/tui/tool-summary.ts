@@ -4,9 +4,10 @@ import { imageFallback, stripTerminalSequences } from '@earendil-works/pi-tui';
 /**
  * What a tool call came to, in a few words, for the one row the terminal gives
  * it: `412 lines` for a read, `6 matches` for a grep, `exit 1` for a command
- * that failed. Pi's own tools are summarised from the shape of their results;
- * any other tool by the first line of its output, which the bot's tools write
- * as a sentence saying what happened. Plain text: the row styles it.
+ * that failed. Pi's own tools are summarised from the shape of their results,
+ * and the web tools by how many lines they returned; any other tool by the
+ * first line of its output, which the bot's tools write as a sentence saying
+ * what happened. Plain text: the row styles it.
  */
 
 export interface ToolOutcome {
@@ -79,8 +80,24 @@ export function summarizeTool(name: string, args: unknown, outcome: ToolOutcome)
         text: plural(entries, 'entry', 'entries', limitReached(outcome, 'entryLimitReached')),
       };
     }
+    case 'web_search':
+      return { text: webLines(output) };
+    case 'web_fetch':
+      if (/\n\n\[Binary content\b/.test(output)) return { text: 'binary' };
+      // The page, after the status and content type the tool heads it with.
+      return { text: webLines(output.replace(/^HTTP [^\n]*\nContent-Type: [^\n]*\n*/, '')) };
   }
   return { text: firstLine(output) };
+}
+
+/**
+ * How many lines a web tool (extensions/) returned: all of them, which its
+ * notice gives when it cut the output short.
+ */
+function webLines(output: string): string {
+  const total = /\[Output truncated: showing \d+ of (\d+) lines\b/.exec(output)?.[1];
+  const lines = total ? Number(total) : lineCount(withoutNotice(output));
+  return lines ? plural(lines, 'line') : 'no output';
 }
 
 /** An edit's diff as Pi's edit tool reports it, for /expand to show in place of its output. */

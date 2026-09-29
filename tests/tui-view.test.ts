@@ -179,7 +179,7 @@ test('a tool call is one row saying what it came to, a failure two, until /expan
     [
       '❯ Read the page',
       '',
-      '● web_fetch https://x.test · Paragraph 1 word word word word word word word w…',
+      '● web_fetch https://x.test · 4 lines',
       '✗ bash npm test · exit 1',
       '  ⎿ ✖ cron.test.ts',
       '',
