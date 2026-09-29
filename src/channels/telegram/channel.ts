@@ -37,6 +37,7 @@ import {
   answerTelegramCallbackQuery,
   editTelegramMessageHtml,
   registerBotCommands,
+  replaceTelegramMessage,
   sanitizeError,
   sendTelegramHtmlMessage,
   sendTelegramMessage,
@@ -116,6 +117,8 @@ export class TelegramChannel implements Channel {
   private readonly showTranscripts: () => boolean;
   private readonly jobs: TelegramJobProgress;
   private readonly turns = new Map<string, TurnView>();
+  /** Message IDs of placeholder notices still waiting for their outcome, by notice ID. */
+  private readonly placeholders = new Map<string, number>();
   /** The messages showing each open core menu, edited when it closes. */
   private readonly choiceCopies = new Map<string, number[]>();
   private readonly settingsMenus: CallbackMenu[] = [
@@ -168,7 +171,7 @@ export class TelegramChannel implements Channel {
         if (event.session === 'chat') this.endTurn(event);
         return;
       case 'notice':
-        void this.enqueue('notice', () => this.sendText(event.text, this.isPinged(event.ping)));
+        void this.enqueue('notice', () => this.sendNotice(event));
         return;
       case 'job': {
         const lastWrite = this.jobs.onJob(event);
@@ -424,6 +427,22 @@ export class TelegramChannel implements Channel {
       console.error('failed to send reply:', errorMessage(error));
       await sendTelegramMessage(`❌ ${sanitizeError(errorMessage(error))}`, { silent });
     }
+  }
+
+  /**
+   * A notice. A placeholder's message ID is kept until its outcome arrives,
+   * which is then edited into its place; the send queue keeps them in order.
+   */
+  private async sendNotice(event: Extract<CoreEvent, { type: 'notice' }>): Promise<void> {
+    const html = toTelegramHtml(event.text);
+    const silent = !this.isPinged(event.ping);
+    if (event.replaces !== undefined) {
+      const messageId = this.placeholders.get(event.replaces);
+      this.placeholders.delete(event.replaces);
+      if (messageId !== undefined) return replaceTelegramMessage(messageId, html, { silent });
+    }
+    if (event.id === undefined) return sendTelegramMessage(html, { silent });
+    this.placeholders.set(event.id, await sendTelegramHtmlMessage(html, { silent }));
   }
 
   private sendText(text: RichText, silent: boolean): Promise<void> {

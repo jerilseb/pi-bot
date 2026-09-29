@@ -54,6 +54,7 @@ function fakeHost(t: TestContext, options: { held?: boolean; voice?: boolean } =
     },
     anyChannelCan: (capability) => capability !== 'voice' || options.voice === true,
     notice: () => {},
+    status: () => ({ replace: () => {} }),
   };
   setToolHost(host);
   t.after(() => setToolHost(null));

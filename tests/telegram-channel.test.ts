@@ -379,6 +379,62 @@ test('a report that fails to send says so in its receipt', async (t) => {
   assert.match(receipt.error ?? '', /chat not found/);
 });
 
+function noticeEvent(
+  text: string,
+  link: { id: string } | { replaces: string } | Record<string, never> = {},
+  ping = pinged,
+) {
+  return {
+    type: 'notice',
+    text: { format: 'plain', text },
+    level: 'info',
+    to: 'all',
+    ping,
+    ...link,
+  } satisfies CoreEvent;
+}
+
+test('a notice alerts only when it pings this channel', async (t) => {
+  const { sent } = fakeTelegram(t);
+  const telegram = channel();
+  telegram.onEvent(noticeEvent('for you', {}, pinged));
+  telegram.onEvent(noticeEvent('for whoever', {}, []));
+  await telegram.drain(1_000);
+  assert.deepEqual(
+    sent().map((call) => [call.text, call.silent]),
+    [
+      ['for you', false],
+      ['for whoever', true],
+    ],
+  );
+});
+
+test("a placeholder notice is edited into its outcome's place", async (t) => {
+  const { calls } = fakeTelegram(t, { slow: /Fetching/ });
+  const telegram = channel();
+  telegram.onEvent(noticeEvent('Fetching usage...', { id: 'status-1' }));
+  telegram.onEvent(noticeEvent('Usage: 42%', { replaces: 'status-1' }));
+  await telegram.drain(1_000);
+  assert.deepEqual(
+    calls.map((call) => [call.method, call.text, call.messageId]),
+    [
+      ['sendMessage', 'Fetching usage...', undefined],
+      ['editMessageText', 'Usage: 42%', 1],
+    ],
+  );
+});
+
+test('an outcome whose placeholder this channel never showed is sent as its own message', async (t) => {
+  const { calls } = fakeTelegram(t);
+  const telegram = channel();
+  telegram.onEvent(noticeEvent('Usage: 42%', { replaces: 'status-9' }));
+  await telegram.drain(1_000);
+  assert.deepEqual(
+    calls.map((call) => [call.method, call.text]),
+    [['sendMessage', 'Usage: 42%']],
+  );
+});
+
 test('plain notices are escaped, and follow the order of events', async (t) => {
   const { sent } = fakeTelegram(t);
   const telegram = channel();

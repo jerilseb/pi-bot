@@ -29,14 +29,16 @@ import {
 import { runRestartGate } from './restart-flow.ts';
 import { configuredTextToSpeechProviders } from './speech.ts';
 import { renderStatus, type StatusSnapshot } from './status.ts';
+import type { StatusNotice } from './tool-host.ts';
 import { errorMessage } from './util.ts';
 
 /**
  * The core's slash commands, the same from every channel. A command answers
  * through its context rather than any one interface: `reply` sends Markdown to
  * the channel that asked, or to every channel for a change they all need to
- * know about (/new, /abort, the restart checks), and `offer` opens a menu for
- * the channel that asked. A channel's own commands (Telegram's display
+ * know about (/new, /abort, the restart checks), `status` sends a placeholder
+ * that its outcome replaces, and `offer` opens a menu for the channel that
+ * asked. A channel's own commands (Telegram's display
  * settings, say) are the channel's, listed alongside these in its command menu
  * and in /help.
  */
@@ -50,6 +52,8 @@ export interface CommandContext {
   restart(): Promise<void>;
   /** Sends Markdown to the channel that asked, or to every channel. */
   reply(markdown: string, options?: { to?: 'all' }): void;
+  /** As reply, for a placeholder such as "Fetching usage..." that its outcome replaces. */
+  status(markdown: string, options?: { to?: 'all' }): StatusNotice;
   /** Opens a menu for the channel that asked. */
   offer(choice: ChoiceSpec): Promise<void>;
   /** Tells every channel the conversation was reset. */
@@ -138,13 +142,15 @@ const CORE_COMMANDS: CoreCommand[] = [
         return;
       }
 
-      ctx.reply('Fetching OpenAI Codex usage...');
+      const status = ctx.status('Fetching OpenAI Codex usage...');
 
       try {
         const { usage, warnings } = await fetchOpenAIUsage(accessToken);
-        ctx.reply(buildOpenAIUsageMarkdown(usage, warnings));
+        status.replace(buildOpenAIUsageMarkdown(usage, warnings));
       } catch (error) {
-        ctx.reply(`❌ Failed to fetch OpenAI Codex usage: ${escapeMarkdown(errorMessage(error))}`);
+        status.replace(
+          `❌ Failed to fetch OpenAI Codex usage: ${escapeMarkdown(errorMessage(error))}`,
+        );
       }
     },
   },
@@ -161,13 +167,15 @@ const CORE_COMMANDS: CoreCommand[] = [
         return;
       }
 
-      ctx.reply('Fetching ElevenLabs usage...');
+      const status = ctx.status('Fetching ElevenLabs usage...');
 
       try {
         const usage = await fetchElevenLabsUsage(ELEVENLABS_API_KEY);
-        ctx.reply(buildElevenLabsUsageMarkdown(usage));
+        status.replace(buildElevenLabsUsageMarkdown(usage));
       } catch (error) {
-        ctx.reply(`❌ Failed to fetch ElevenLabs usage: ${escapeMarkdown(errorMessage(error))}`);
+        status.replace(
+          `❌ Failed to fetch ElevenLabs usage: ${escapeMarkdown(errorMessage(error))}`,
+        );
       }
     },
   },
@@ -224,7 +232,7 @@ const CORE_COMMANDS: CoreCommand[] = [
     description: 'Restart the bot process',
     help: 'exit this process so systemd can restart it',
     handler: async (ctx) => {
-      if (!(await runRestartGate((text) => ctx.reply(text, { to: 'all' })))) return;
+      if (!(await runRestartGate((text) => ctx.status(text, { to: 'all' })))) return;
       await ctx.restart();
     },
   },

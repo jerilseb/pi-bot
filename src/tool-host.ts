@@ -23,6 +23,12 @@ export type DeliveryDraft = Deliverable extends infer Item
     : never
   : never;
 
+/** A placeholder notice, such as "Fetching usage...", waiting for its outcome. */
+export interface StatusNotice {
+  /** Shows the outcome in the placeholder's place, where the channel can edit. Call it once. */
+  replace(markdown: string): void;
+}
+
 export type DeliveryResult = { outcome: 'held' } | { outcome: 'delivered'; receipts: Receipt[] };
 
 export interface ToolHost {
@@ -47,6 +53,8 @@ export interface ToolHost {
   anyChannelCan(capability: keyof ChannelCaps): boolean;
   /** A notice in Markdown for every channel. */
   notice(markdown: string, level?: 'info' | 'warn' | 'error'): void;
+  /** A placeholder notice for every channel, replaced by its outcome later. */
+  status(markdown: string): StatusNotice;
 }
 
 let host: ToolHost | null = null;

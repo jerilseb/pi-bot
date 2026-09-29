@@ -66,6 +66,25 @@ test('a notice for one channel reaches only that channel', () => {
   assert.deepEqual(second.notices(), ['just for you', 'for everyone']);
 });
 
+test('a status notice and its outcome are tied by an ID, and reach the same channels', () => {
+  const c = core();
+  const first = telegram();
+  const second = tui(1);
+  c.attach(first);
+  c.attach(second);
+  c.toolHost.status('Checking...').replace('Checked.');
+  c.toolHost.status('Again...');
+  for (const channel of [first, second]) {
+    const [placeholder, outcome, next] = channel.of('notice');
+    assert.equal(placeholder?.text.text, 'Checking...');
+    assert.equal(outcome?.text.text, 'Checked.');
+    assert.ok(placeholder?.id);
+    assert.equal(outcome?.replaces, placeholder.id);
+    assert.equal(outcome?.id, undefined);
+    assert.notEqual(next?.id, placeholder.id);
+  }
+});
+
 test('a channel that throws does not keep events or deliveries from the rest', async (t) => {
   t.mock.method(console, 'error', () => {});
   const c = core();

@@ -125,6 +125,27 @@ export async function editTelegramMessageHtml(
 }
 
 /**
+ * Turns a placeholder message into its final content: the first piece in its
+ * place, and any further pieces after it. When Telegram rejects the edit (the
+ * placeholder was deleted, say), all of it is sent anew.
+ */
+export async function replaceTelegramMessage(
+  messageId: number,
+  html: string,
+  options: SendMessageOptions = {},
+): Promise<void> {
+  const [first = '', ...rest] = splitTelegramMessage(html || '(empty)');
+  try {
+    await editTelegramMessageHtml(messageId, first);
+  } catch (error) {
+    console.error('failed to replace a message; sending it anew:', errorMessage(error));
+    await sendTelegramMessage(html, options);
+    return;
+  }
+  for (const piece of rest) await sendTelegramHtmlMessage(piece, options);
+}
+
+/**
  * Sends one chunk that fits in a single Telegram message and returns its ID, so
  * the caller can edit it later. A degraded fallback (sanitized or escaped) can
  * grow past the limit — escaping turns every `<` into four characters — so each

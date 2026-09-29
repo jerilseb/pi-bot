@@ -3,6 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { TELEGRAM_MAX_MESSAGE } from '../src/config.ts';
 import {
   editTelegramMessageHtml,
+  replaceTelegramMessage,
   sendTelegramHtmlMessage,
   sendTelegramMessage,
 } from '../src/channels/telegram/telegram.ts';
@@ -114,4 +115,55 @@ test('an edit passes its buttons along, and an empty keyboard clears them', asyn
     calls.map((call) => call.markup),
     [{ inline_keyboard: STOP }, { inline_keyboard: [] }, undefined],
   );
+});
+
+/** Records each call's method, target and text; `failEdits` rejects every edit. */
+function recordReplacement(t: TestContext, failEdits = false) {
+  const calls: Array<{ method: string; messageId?: number; text: string }> = [];
+  t.mock.method(console, 'error', () => {});
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    const payload = JSON.parse(String(init?.body)) as { text: string; message_id?: number };
+    const method = String(url).split('/').at(-1) ?? '';
+    calls.push({
+      method,
+      text: payload.text,
+      ...(payload.message_id !== undefined ? { messageId: payload.message_id } : {}),
+    });
+    if (failEdits && method === 'editMessageText') {
+      return new Response('{"ok":false,"description":"Bad Request: message to edit not found"}', {
+        status: 400,
+      });
+    }
+    return Response.json({ ok: true, result: { message_id: calls.length } });
+  });
+  return calls;
+}
+
+test('a replacement that fits is edited into the placeholder', async (t) => {
+  const calls = recordReplacement(t);
+  await replaceTelegramMessage(7, '✅ done');
+  assert.deepEqual(calls, [{ method: 'editMessageText', messageId: 7, text: '✅ done' }]);
+});
+
+test('a replacement too long for one message fills the placeholder, then follows it', async (t) => {
+  const calls = recordReplacement(t);
+  const html = 'word '.repeat(Math.ceil((TELEGRAM_MAX_MESSAGE * 1.5) / 5));
+
+  await replaceTelegramMessage(7, html);
+
+  assert.ok(calls.length > 1);
+  assert.equal(calls[0]?.method, 'editMessageText');
+  assert.equal(calls[0]?.messageId, 7);
+  for (const call of calls.slice(1)) assert.equal(call.method, 'sendMessage');
+  assert.equal(calls.map((call) => call.text).join(''), html);
+});
+
+test('a replacement whose edit Telegram rejects is sent anew', async (t) => {
+  const calls = recordReplacement(t, true);
+  await replaceTelegramMessage(7, '✅ done');
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ['editMessageText', 'sendMessage'],
+  );
+  assert.equal(calls[1]?.text, '✅ done');
 });

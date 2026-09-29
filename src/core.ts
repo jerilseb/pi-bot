@@ -35,7 +35,7 @@ import type {
 import { beginIngestion, isStaleTicket } from './ingestion.ts';
 import { createPromptQueue, type PromptQueue, type QueueSink } from './prompt-queue.ts';
 import { stopSubagentTask } from './subagent.ts';
-import type { DeliveryDraft, DeliveryResult, ToolHost } from './tool-host.ts';
+import type { DeliveryDraft, DeliveryResult, StatusNotice, ToolHost } from './tool-host.ts';
 import type { IncomingPrompt, SessionKind } from './types.ts';
 import { errorMessage } from './util.ts';
 
@@ -80,6 +80,7 @@ export class LocalCore implements AgentCore, QueueSink {
   private readonly activeWindowMs: number;
   /** Where the chat turn under way came from, so what it sends alerts the same channel. */
   private chatTurnOrigin: PromptOrigin | null = null;
+  private statusCount = 0;
 
   constructor(options: LocalCoreOptions) {
     this.options = options;
@@ -100,6 +101,7 @@ export class LocalCore implements AgentCore, QueueSink {
       submit: (input) => this.submit(input),
       anyChannelCan: (capability) => this.anyChannelCan(capability),
       notice: (markdown, level) => this.notice(markdown, level),
+      status: (markdown) => this.status(markdown, 'all', () => this.chatTurnPing()),
     };
   }
 
@@ -320,6 +322,8 @@ export class LocalCore implements AgentCore, QueueSink {
           to: options?.to === 'all' ? 'all' : from,
           ping: [from],
         }),
+      status: (markdown, options) =>
+        this.status(markdown, options?.to === 'all' ? 'all' : from, () => [from]),
       offer: (choice) => this.offer(choice, from),
       announceReset: () => this.emit({ type: 'reset' }),
       commandList: () => this.commands(from),
@@ -329,6 +333,25 @@ export class LocalCore implements AgentCore, QueueSink {
           channel.status ? [channel.status()] : [],
         ),
     };
+  }
+
+  /**
+   * A placeholder notice and, through the handle, its outcome: two notices tied
+   * by an ID, so a channel that can edit turns the first into the second.
+   */
+  private status(markdown: string, to: 'all' | ChannelRef, ping: () => ChannelRef[]): StatusNotice {
+    const id = `status-${++this.statusCount}`;
+    const send = (text: string, link: { id: string } | { replaces: string }): void =>
+      this.emit({
+        type: 'notice',
+        text: { format: 'markdown', text },
+        level: 'info',
+        to,
+        ping: ping(),
+        ...link,
+      });
+    send(markdown, { id });
+    return { replace: (outcome) => send(outcome, { replaces: id }) };
   }
 
   /** Opens a menu for one channel; one it could not be shown on is forgotten. */

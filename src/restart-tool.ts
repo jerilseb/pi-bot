@@ -58,7 +58,7 @@ export function telegramRestartToolExtension(
         // once the checks pass, never on a blocked restart.
         const host = toolHost();
         const passed = await runRestartGate(
-          (text) => host.notice(text),
+          (text) => host.status(text),
           () => {
             if (!afterRestartPrompt) return [];
 

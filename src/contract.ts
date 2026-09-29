@@ -156,6 +156,10 @@ export type CoreEvent =
       level: 'info' | 'warn' | 'error';
       to: 'all' | ChannelRef;
       ping: ChannelRef[];
+      /** Set on a placeholder, such as "Fetching usage...", that a later notice replaces. */
+      id?: string;
+      /** The placeholder this notice is the outcome of; a channel that can edit shows it there. */
+      replaces?: string;
     }
   | { type: 'state'; state: CoreState }
   /** /new started a fresh conversation. */
