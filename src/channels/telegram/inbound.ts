@@ -12,7 +12,13 @@ import {
 import { transcribeAudio } from '../../speech.ts';
 import type { Attachment } from '../../types.ts';
 import { errorMessage } from '../../util.ts';
-import { sendChatAction, sendTelegramMessage, telegram } from './telegram.ts';
+import {
+  replaceTelegramMessage,
+  sendChatAction,
+  sendTelegramHtmlMessage,
+  sendTelegramMessage,
+  telegram,
+} from './telegram.ts';
 import { escapeTelegramHtml } from './telegram-html.ts';
 import type { TelegramMessage } from './types.ts';
 
@@ -78,44 +84,15 @@ async function toTelegramInput(message: TelegramMessage): Promise<TelegramInput 
   if (file) {
     const filename = getTelegramFilename(message, file);
     const mimeType = 'mime_type' in file ? file.mime_type : undefined;
+    if (isTranscribableAudio(message, mimeType, filename)) {
+      return toTranscribedInput(message, file, filename, mimeType, caption);
+    }
+
     const downloaded = await downloadTelegramFile(file.file_id, filename, file.file_size);
     if (!downloaded) {
       return {
         text: `⚠️ I could not download ${filename}.`,
         attachments: [],
-      };
-    }
-
-    if (isTranscribableAudio(message, mimeType, filename)) {
-      void sendChatAction();
-      const transcription = await transcribeAudio(downloaded.localPath, mimeType, filename);
-      if (transcription.ok && transcription.text) {
-        deleteLocalFile(downloaded.localPath);
-        const label = message.voice ? '🎤 Voice message' : `🎵 Audio: ${filename}`;
-        const prefix = caption ? `${caption}\n\n` : '';
-        if (showTranscriptsEnabled()) {
-          await sendTelegramMessage(`🎤 <i>${escapeTelegramHtml(transcription.text)}</i>`);
-        }
-        return {
-          text: `${prefix}${label}: ${transcription.text}`,
-          attachments: [],
-        };
-      }
-
-      const reason = transcription.error
-        ? ` Transcription failed: ${transcription.error}`
-        : ' Transcription is not configured.';
-      return {
-        text: `${caption || `Audio file uploaded: ${filename}.`}${reason}\nLocal file path: ${downloaded.localPath}`,
-        attachments: [
-          {
-            type: 'file',
-            path: downloaded.localPath,
-            filename,
-            mimeType,
-            size: downloaded.size,
-          },
-        ],
       };
     }
 
@@ -136,6 +113,89 @@ async function toTelegramInput(message: TelegramMessage): Promise<TelegramInput 
   }
 
   return null;
+}
+
+/**
+ * A voice note or audio file, downloaded and turned into text. With transcripts
+ * shown, a "🎤 …" message goes up before the download and becomes the
+ * transcript once there is one, or says why there is none.
+ */
+async function toTranscribedInput(
+  message: TelegramMessage,
+  file: { file_id: string; file_size?: number },
+  filename: string,
+  mimeType: string | undefined,
+  caption: string,
+): Promise<TelegramInput> {
+  const status = showTranscriptsEnabled() ? await showTranscribing() : null;
+  void sendChatAction();
+
+  const downloaded = await downloadTelegramFile(file.file_id, filename, file.file_size);
+  if (!downloaded) {
+    await status?.replace(`⚠️ <i>Could not download ${escapeTelegramHtml(filename)}.</i>`);
+    return {
+      text: `⚠️ I could not download ${filename}.`,
+      attachments: [],
+    };
+  }
+
+  const transcription = await transcribeAudio(downloaded.localPath, mimeType, filename);
+  if (transcription.ok && transcription.text) {
+    deleteLocalFile(downloaded.localPath);
+    await status?.replace(`🎤 <i>${escapeTelegramHtml(transcription.text)}</i>`);
+    const label = message.voice ? '🎤 Voice message' : `🎵 Audio: ${filename}`;
+    const prefix = caption ? `${caption}\n\n` : '';
+    return {
+      text: `${prefix}${label}: ${transcription.text}`,
+      attachments: [],
+    };
+  }
+
+  await status?.replace(
+    transcription.error
+      ? '🎤 ⚠️ <i>Transcription failed.</i>'
+      : '🎤 ⚠️ <i>Transcription is not configured.</i>',
+  );
+  const reason = transcription.error
+    ? ` Transcription failed: ${transcription.error}`
+    : ' Transcription is not configured.';
+  return {
+    text: `${caption || `Audio file uploaded: ${filename}.`}${reason}\nLocal file path: ${downloaded.localPath}`,
+    attachments: [
+      {
+        type: 'file',
+        path: downloaded.localPath,
+        filename,
+        mimeType,
+        size: downloaded.size,
+      },
+    ],
+  };
+}
+
+/**
+ * Puts up the "🎤 …" message, to be replaced once transcription ends. When it
+ * could not be sent, the replacement is sent as a new message instead. Showing
+ * any of this is best-effort: a Telegram error must not lose the voice note
+ * itself.
+ */
+async function showTranscribing(): Promise<{ replace(html: string): Promise<void> }> {
+  let messageId: number | null = null;
+  try {
+    messageId = await sendTelegramHtmlMessage('🎤 …');
+  } catch (error) {
+    console.error('failed to show the transcribing message:', errorMessage(error));
+  }
+  return {
+    async replace(html) {
+      try {
+        if (messageId === null) await sendTelegramMessage(html);
+        else await replaceTelegramMessage(messageId, html);
+      } catch (error) {
+        console.error('failed to show the transcript:', errorMessage(error));
+      }
+    },
+  };
 }
 
 function getTelegramFilename(
