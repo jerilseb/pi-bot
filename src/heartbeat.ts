@@ -11,6 +11,7 @@ import {
   HEARTBEAT_STATE_PATH,
 } from './config.ts';
 import type { IncomingPrompt } from './types.ts';
+import { errorMessage } from './util.ts';
 
 export interface HeartbeatController {
   start(): void;
@@ -57,7 +58,10 @@ export function createHeartbeatController(options: {
       console.log(
         `Heartbeat scheduler: every ${Math.round(HEARTBEAT_INTERVAL_MS / 1000)}s for chat ${ALLOWED_CHAT_ID}`,
       );
-      timer = setInterval(() => void runOnce(), HEARTBEAT_INTERVAL_MS);
+      timer = setInterval(() => {
+        // Unhandled, a failure such as an unreadable heartbeat file would take the bot down.
+        runOnce().catch((error) => console.error('Heartbeat failed:', errorMessage(error)));
+      }, HEARTBEAT_INTERVAL_MS);
     },
 
     stop(): void {

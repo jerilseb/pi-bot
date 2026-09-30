@@ -17,6 +17,7 @@ import {
   writeCronJobs,
   type CronJob,
 } from './cron-store.ts';
+import type { SubmitResult } from './contract.ts';
 import type { IncomingPrompt } from './types.ts';
 import { errorMessage } from './util.ts';
 
@@ -29,7 +30,7 @@ export interface CronController {
 }
 
 export function createCronController(options: {
-  handleIncoming: (prompt: IncomingPrompt) => Promise<unknown>;
+  handleIncoming: (prompt: IncomingPrompt) => Promise<SubmitResult>;
   /** True while the background session is running or has queued a prompt. */
   isBackgroundBusy: () => boolean;
   isRunning: () => boolean;
@@ -68,56 +69,46 @@ export function createCronController(options: {
 
   const runDueJobs = async (): Promise<void> => {
     if (!options.isRunning()) return;
-
-    const now = new Date();
-    let jobs: CronJob[];
     try {
-      jobs = refreshCronJobs(now);
+      await fireDueJob();
     } catch (error) {
+      // Nothing fired. Tried again a minute later rather than at once, since a
+      // file that cannot be read or written now would fail again straight away.
       console.error('Cron scheduler failed:', errorMessage(error));
-      scheduleNext();
+      if (!started) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(scheduleNext, MAX_TIMER_MS);
       return;
     }
-
-    let changed = false;
-    for (let index = 0; index < jobs.length; index++) {
-      const job = jobs[index];
-      if (!job.enabled || !job.nextRunAt) continue;
-      if (new Date(job.nextRunAt).getTime() > now.getTime()) continue;
-
-      // A job persisted under a previous TELEGRAM_ALLOWED_CHAT_ID must not fire here.
-      if (!isAllowedTelegramChat(job.chatId)) {
-        console.warn(`disabling cron ${job.id}; it belongs to chat ${job.chatId}`);
-        jobs[index] = disableCronJob(job, now);
-        changed = true;
-        continue;
-      }
-
-      // Background runs go one at a time. The chat is not waited for: what a
-      // run sends is held by the background outbox until the chat is idle.
-      if (options.isBackgroundBusy()) {
-        console.log(`cron ${job.id} deferred; background session is busy`);
-        jobs[index] = deferCronJob(job, BUSY_DEFER_MS);
-        changed = true;
-        continue;
-      }
-
-      console.log(`cron ${job.id} due on ${job.model}: ${job.title ?? job.prompt.slice(0, 80)}`);
-      await options.handleIncoming({
-        text: buildCronPrompt(job),
-        attachments: [],
-        origin: { kind: 'cron', taskId: job.id },
-        suppressNoop: true,
-        model: job.model,
-        label: job.title ?? job.id,
-      });
-
-      jobs[index] = markCronJobRan(job);
-      changed = true;
-    }
-
-    if (changed) writeCronJobs(jobs, { notify: false });
     scheduleNext();
+  };
+
+  /** Throws when the tasks file cannot be read or written, before anything fires. */
+  const fireDueJob = async (): Promise<void> => {
+    const now = new Date();
+    const pass = planCronPass(refreshCronJobs(now), {
+      now,
+      backgroundBusy: options.isBackgroundBusy(),
+      isAllowedChat: isAllowedTelegramChat,
+    });
+    // Recorded before the task fires, so one whose run cannot be recorded does
+    // not fire again every time the scheduler retries.
+    if (pass.changed) writeCronJobs(pass.jobs, { notify: false });
+
+    const job = pass.due;
+    if (!job) return;
+    console.log(`cron ${job.id} due on ${job.model}: ${job.title ?? job.prompt.slice(0, 80)}`);
+    const result = await options.handleIncoming({
+      text: buildCronPrompt(job),
+      attachments: [],
+      origin: { kind: 'cron', taskId: job.id },
+      suppressNoop: true,
+      model: job.model,
+      label: job.title ?? job.id,
+    });
+    if (result.status === 'rejected') {
+      console.warn(`cron ${job.id} was recorded as run but not queued: ${result.reason}`);
+    }
   };
 
   return {
@@ -152,6 +143,47 @@ export function cronStatusText(): string {
   } catch (error) {
     return `Cron: error reading ${CRON_JOBS_PATH}: ${errorMessage(error)}`;
   }
+}
+
+/**
+ * One scheduler pass over the tasks at `now`. Of the tasks that are due, one
+ * from another chat is disabled, and the first of the rest is marked as run
+ * and returned to fire. Background runs go one at a time, so the others, or
+ * all of them while a background run is under way, wait BUSY_DEFER_MS. The
+ * chat is not waited for: what a run sends is held by the background outbox
+ * until the chat is idle.
+ */
+export function planCronPass(
+  jobs: readonly CronJob[],
+  context: { now: Date; backgroundBusy: boolean; isAllowedChat: (chatId: string) => boolean },
+): { jobs: CronJob[]; due: CronJob | null; changed: boolean } {
+  const { now } = context;
+  const planned = [...jobs];
+  let due: CronJob | null = null;
+  let changed = false;
+  for (let index = 0; index < planned.length; index++) {
+    const job = planned[index];
+    if (!job.enabled || !job.nextRunAt) continue;
+    if (new Date(job.nextRunAt).getTime() > now.getTime()) continue;
+    changed = true;
+
+    // A job persisted under a previous TELEGRAM_ALLOWED_CHAT_ID must not fire here.
+    if (!context.isAllowedChat(job.chatId)) {
+      console.warn(`disabling cron ${job.id}; it belongs to chat ${job.chatId}`);
+      planned[index] = disableCronJob(job, now);
+      continue;
+    }
+
+    if (context.backgroundBusy || due) {
+      console.log(`cron ${job.id} deferred; background session is busy`);
+      planned[index] = deferCronJob(job, BUSY_DEFER_MS, now);
+      continue;
+    }
+
+    due = job;
+    planned[index] = markCronJobRan(job, now);
+  }
+  return { jobs: planned, due, changed };
 }
 
 function refreshCronJobs(fromDate: Date = new Date()): CronJob[] {
