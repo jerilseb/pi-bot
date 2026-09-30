@@ -460,6 +460,8 @@ export const ELEVENLABS_TTS_MODEL = 'eleven_v3';
 export const ELEVENLABS_TTS_OUTPUT_FORMAT = 'opus_48000_32';
 export const MAX_TTS_CHARS = 2500;
 export const TRANSCRIPTION_MAX_FILE_SIZE = 25 * 1024 * 1024;
+/** How long ffmpeg may take to encode a voice note before it is killed. */
+export const FFMPEG_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Generated local upload behavior

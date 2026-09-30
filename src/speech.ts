@@ -8,6 +8,7 @@ import {
   ELEVENLABS_TTS_MODEL,
   ELEVENLABS_TTS_OUTPUT_FORMAT,
   ELEVENLABS_TTS_VOICE_ID,
+  FFMPEG_TIMEOUT_MS,
   GOOGLE_GENAI_API_KEY,
   GOOGLE_GENAI_STT_MODEL,
   GOOGLE_GENAI_STT_PROMPT,
@@ -505,22 +506,57 @@ function parsePcmSampleRate(mimeType: string): number | null {
 }
 
 function runFfmpeg(args: string[], input: Buffer): Promise<Buffer> {
+  return pipeThroughProcess('ffmpeg', args, input, FFMPEG_TIMEOUT_MS);
+}
+
+/**
+ * Feeds `input` to a process's stdin and resolves with its stdout, rejecting
+ * when it fails, exits before reading all of its input, or outlives
+ * `timeoutMs`, at which point it is killed.
+ */
+export function pipeThroughProcess(
+  command: string,
+  args: string[],
+  input: Buffer,
+  timeoutMs: number,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args);
+    const child = spawn(command, args);
     const stdoutChunks: Buffer[] = [];
     let stderr = '';
+    let stdinError: Error | null = null;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => {
       stderr = `${stderr}${chunk.toString()}`.slice(-5_000);
     });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
+    // A process that exits before reading all of its input fails the write
+    // with EPIPE, which with no listener is an uncaught exception that takes
+    // the bot down. The exit code reports the failure.
+    child.stdin.on('error', (error) => {
+      stdinError = error;
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`${command} timed out after ${Math.round(timeoutMs / 1000)}s`));
+        return;
+      }
+      if (code === 0 && !stdinError) {
         resolve(Buffer.concat(stdoutChunks));
         return;
       }
-      reject(new Error(`ffmpeg failed (${code ?? 'unknown'}): ${stderr}`));
+      const detail = stderr.trim() || stdinError?.message || '';
+      reject(new Error(`${command} failed (${code ?? signal ?? 'unknown'}): ${detail}`));
     });
     child.stdin.end(input);
   });
