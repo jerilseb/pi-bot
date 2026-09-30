@@ -314,15 +314,24 @@ export class TelegramChannel implements Channel {
     if (outcome.submitted) this.showSubmitResult(outcome.submitted);
   }
 
-  /** Replaces every copy of a menu with its closing text, which also drops its buttons. */
+  /**
+   * Replaces every copy of a menu with its closing text, which also drops its
+   * buttons. Queued behind the sends before it, since a copy still being sent
+   * is recorded only once Telegram returns its message ID: a menu answered in
+   * a terminal meanwhile would otherwise keep its buttons here.
+   */
   private closeCopies(choiceId: string, text: RichText, copies?: number[]): void {
-    const messages = copies ?? this.choiceCopies.get(choiceId) ?? [];
-    this.choiceCopies.delete(choiceId);
-    for (const messageId of messages) {
-      void this.enqueue('menu close', () =>
-        editTelegramMessageHtml(messageId, toTelegramHtml(text)),
-      );
-    }
+    void this.enqueue('menu close', async () => {
+      const messages = copies ?? this.choiceCopies.get(choiceId) ?? [];
+      this.choiceCopies.delete(choiceId);
+      for (const messageId of messages) {
+        try {
+          await editTelegramMessageHtml(messageId, toTelegramHtml(text));
+        } catch (error) {
+          console.error('Telegram menu close failed:', errorMessage(error));
+        }
+      }
+    });
   }
 
   private async answerTap(queryId: string, toast: string): Promise<void> {

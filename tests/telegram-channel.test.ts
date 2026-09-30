@@ -669,6 +669,27 @@ test('a core menu is a keyboard whose taps go to the core, and every copy closes
   assert.equal(sent().at(-1)?.text, '↪️ Steering current task.');
 });
 
+test('a menu answered elsewhere while its copy here is still sending is closed once it lands', async (t) => {
+  const { calls } = fakeTelegram(t, { slow: /Pick/ });
+  const telegram = channel();
+  const delivered = telegram.deliver({ kind: 'choice', choice: MENU, ping: pinged });
+  // A terminal answers before Telegram has returned the copy's message ID.
+  telegram.onEvent({
+    type: 'choice_closed',
+    choiceId: MENU.id,
+    text: { format: 'plain', text: '✅ Picked <B>' },
+    by: { id: 'tui:1', kind: 'tui' },
+  });
+  await delivered;
+  await telegram.drain(1_000);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === 'editMessageText')
+      .map((call) => [call.messageId, call.text, call.buttons]),
+    [[1, '✅ Picked &lt;B&gt;', undefined]],
+  );
+});
+
 test('a tap on a menu the core no longer knows closes only the copy tapped', async (t) => {
   const { calls } = fakeTelegram(t);
   const core: AgentCore = {
