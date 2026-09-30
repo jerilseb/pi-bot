@@ -17,6 +17,16 @@ function delta(text: string): AgentSessionEvent {
   } as never;
 }
 
+function thinkingEvent(
+  type: 'thinking_start' | 'thinking_delta' | 'thinking_end',
+): AgentSessionEvent {
+  return {
+    type: 'message_update',
+    message: { role: 'assistant', content: [] },
+    assistantMessageEvent: { type, contentIndex: 0, delta: 'weighing it up' },
+  } as never;
+}
+
 function retry(): AgentSessionEvent {
   return { type: 'auto_retry_start', attempt: 1, maxAttempts: 4, delayMs: 0 } as never;
 }
@@ -72,6 +82,28 @@ test("the draft holds each of the turn's messages, and drops one that is retried
   draft.observe(start());
   draft.observe(delta('The answer'));
   await until(() => sends.at(-1)?.html === 'Checking.\n\nThe answer');
+});
+
+test('thinking drafts "Thinking…", never its words, until the text takes over', async (t) => {
+  const { draft, sends } = recordedDraft(t);
+  draft.observe(start());
+  draft.observe(thinkingEvent('thinking_start'));
+  draft.observe(thinkingEvent('thinking_delta'));
+  await until(() => sends.length === 1);
+  draft.observe(thinkingEvent('thinking_end'));
+  draft.observe(delta('Checked.'));
+  await until(() => sends.length === 2);
+  draft.observe(start());
+  draft.observe(thinkingEvent('thinking_start'));
+  await until(() => sends.length === 3);
+  draft.observe(thinkingEvent('thinking_end'));
+  draft.observe(delta('Done'));
+  await until(() => sends.length === 4);
+
+  assert.deepEqual(
+    sends.map((send) => send.html),
+    ['<i>Thinking…</i>', 'Checked.', 'Checked.\n\n<i>Thinking…</i>', 'Checked.\n\nDone'],
+  );
 });
 
 test('each turn has a draft of its own', async (t) => {

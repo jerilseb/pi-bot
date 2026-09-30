@@ -191,7 +191,7 @@ The same file also holds how tool calls reach the chat, switched from Telegram w
 
 Unlike `heartbeat` and `cronJobs`, this one is read fresh at the start of every prompt, so a switch applies from the next prompt and needs no restart.
 
-A reply to a message sent from Telegram is shown as it is written, as a draft at the bottom of the chat (Telegram's `sendMessageDraft`), and the finished reply replaces it. The draft is updated about once a second and holds the reply's whole text so far; past one message's length it shows the last piece, the one being written. Telegram shows drafts only in private chats, so in a group replies arrive whole. The bot's own turns in the chat, such as a job's report, are not drafted. `/stream_replies` switches it, and it is read at the start of every prompt:
+A reply to a message sent from Telegram is shown as it is written, as a draft at the bottom of the chat (Telegram's `sendMessageDraft`), and the finished reply replaces it. The draft is updated about once a second and holds the reply's whole text so far, with an italic "Thinking…" under it while the model thinks (never the thinking itself); past one message's length it shows the last piece, the one being written. Telegram shows drafts only in private chats, so in a group replies arrive whole. The bot's own turns in the chat, such as a job's report, are not drafted. `/stream_replies` switches it, and it is read at the start of every prompt:
 
 ```json
 {

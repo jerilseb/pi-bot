@@ -10,6 +10,9 @@ import { sendTelegramDraft, telegramRetryAfterMs } from './telegram.ts';
  * holds the text the reply will have, built by the same RunText from the same
  * events, so the reply replaces it with the same words.
  *
+ * While the model thinks, the draft says so in an italic "Thinking…", under
+ * the text so far, never with the thinking's words.
+ *
  * Updates are paced: the first text goes out at once, and later changes at most
  * one per `intervalMs`, each with all the text so far, so a burst of tokens
  * costs one call. While the text holds still (tools running), the same draft is
@@ -53,8 +56,10 @@ export function createReplyDraft(options: ReplyDraftOptions = {}): ReplyDraft {
   } = options;
   const draftId = ++lastDraftId;
   const text = new RunText();
-  /** The text the draft shows, as Markdown; empty until the first is sent. */
+  /** What the draft shows, as HTML; empty until the first is sent. */
   let shown = '';
+  /** Whether the model is in a thinking block. */
+  let thinking = false;
   /** Set by every event, cleared when one is sent: the text may have moved on. */
   let changed = false;
   let lastSentAt = Number.NEGATIVE_INFINITY;
@@ -66,6 +71,7 @@ export function createReplyDraft(options: ReplyDraftOptions = {}): ReplyDraft {
 
   function observe(event: AgentSessionEvent): void {
     if (stopped) return;
+    thinking = thinkingAfter(event, thinking);
     text.observe(event);
     changed = true;
     if (!sending) scheduleNext();
@@ -111,15 +117,13 @@ export function createReplyDraft(options: ReplyDraftOptions = {}): ReplyDraft {
   async function sendLatest(): Promise<void> {
     try {
       if (after) await after.catch(() => undefined);
-      const markdown = text.result().text;
+      const html = draftHtml(text.result().text, thinking);
       changed = false;
-      if (stopped || !markdown) return;
-      if (markdown === shown && Date.now() - lastSentAt < keepAliveMs) return;
-      const html = markdownToTelegramHtml(markdown);
-      if (!html.trim()) return;
+      if (stopped || !html) return;
+      if (html === shown && Date.now() - lastSentAt < keepAliveMs) return;
       try {
         await send(draftId, html);
-        shown = markdown;
+        shown = html;
       } finally {
         lastSentAt = Date.now();
       }
@@ -142,4 +146,25 @@ export function createReplyDraft(options: ReplyDraftOptions = {}): ReplyDraft {
   }
 
   return { observe, stop };
+}
+
+const THINKING_HTML = '<i>Thinking…</i>';
+
+/** The draft for the text so far, with "Thinking…" under it while the model thinks. */
+function draftHtml(markdown: string, thinking: boolean): string {
+  const html = markdown ? markdownToTelegramHtml(markdown) : '';
+  const shown = html.trim() ? html : '';
+  if (!thinking) return shown;
+  return shown ? `${shown.trimEnd()}\n\n${THINKING_HTML}` : THINKING_HTML;
+}
+
+/** Whether the model is thinking after `event`: from a thinking block's start until what follows it. */
+function thinkingAfter(event: AgentSessionEvent, thinking: boolean): boolean {
+  if (event.type === 'message_update') {
+    const { type } = event.assistantMessageEvent;
+    if (type === 'thinking_start' || type === 'thinking_delta') return true;
+    return type === 'start' ? thinking : false;
+  }
+  if (event.type === 'message_end' || event.type === 'auto_retry_start') return false;
+  return thinking;
 }
