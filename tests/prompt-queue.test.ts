@@ -559,6 +559,21 @@ test('post-restart tasks queue behind an active run instead of steering it', asy
   assert.deepEqual(f.runs, ['first task', 'second task']);
 });
 
+test('the task a finished run hands on runs next, ahead of anything queued', async (t) => {
+  const f = setup(t);
+  t.mock.method(f.chat.pi, 'runPrompt', async (text: string) => {
+    f.runs.push(text);
+    if (text !== 'start fresh') return { text: `answer: ${text}` };
+    await f.gate.promise;
+    return { text: 'Starting fresh.', newSessionTask: 'draft the release notes' };
+  });
+  await f.send('start fresh');
+  await f.enqueue('queued behind', { kind: 'post-restart', taskId: 'a' });
+  f.gate.resolve();
+  await until(() => !f.core.isAssistantBusy());
+  assert.deepEqual(f.runs, ['start fresh', 'draft the release notes', 'queued behind']);
+});
+
 test('a background report waits for the chat cooldown, and is noted only once delivered', async (t) => {
   const f = setup(t);
   t.mock.method(f.background.pi, 'useModel', async () => {});

@@ -70,6 +70,11 @@ export interface PiPromptResult {
    * runPrompt always sets it; without it, checks fall back to `text`.
    */
   finalText?: string;
+  /**
+   * The task the run asked start_new_session to begin the new conversation
+   * with. Only a run that finished carries it: a failed or aborted one drops it.
+   */
+  newSessionTask?: string;
 }
 
 export interface TranscriptionResult {

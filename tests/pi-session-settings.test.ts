@@ -137,13 +137,12 @@ test('temporary background model selection leaves chat defaults untouched', asyn
   assert.deepEqual(f.calls, ['dispose']);
 });
 
-test('requesting a new session with a task queues the task for the new conversation', async () => {
+test('a new session requested with a task says the task runs after this response', async () => {
   const { pi } = fixture();
   assert.equal(
     await pi.requestNewSession('follow-up'),
     'Fresh session queued using test/old (reasoning: low). The provided task will run automatically in the new Pi conversation after the current response finishes.',
   );
-  assert.equal(pi.consumePendingNewSessionTask(), 'follow-up');
 });
 
 test('new session without a task reports the effective reasoning level', async () => {

@@ -573,7 +573,8 @@ export class SdkPiSession {
         promptError ||= getErrorMessage(error);
       }
       if (promptError) throw new Error(promptError);
-      return reply.result();
+      const newSessionTask = aborted() ? null : this.pendingNewSessionTask;
+      return { ...reply.result(), ...(newSessionTask ? { newSessionTask } : {}) };
     } finally {
       unsubscribe();
       steering.finish();
@@ -612,12 +613,6 @@ export class SdkPiSession {
     return this.pendingNewSessionTask
       ? `Fresh session queued using ${this.modelName} (reasoning: ${level}). The provided task will run automatically in the new Pi conversation after the current response finishes.`
       : `Fresh session queued using ${this.modelName} (reasoning: ${level}). The next user message will start a new Pi conversation.`;
-  }
-
-  consumePendingNewSessionTask(): string | null {
-    const task = this.pendingNewSessionTask;
-    this.pendingNewSessionTask = null;
-    return task;
   }
 
   async getApiKeyForProvider(provider: string): Promise<string | undefined> {
@@ -857,6 +852,9 @@ export class SdkPiSession {
     if (!this.pendingNewSessionRequest) return;
 
     this.pendingNewSessionRequest = false;
+    // The task goes with its request: a run that finished has already handed
+    // it on in its result, and one that did not must not leave it for the next.
+    this.pendingNewSessionTask = null;
     this.cleanup();
     this.forceNewSessionOnNextStart = true;
   }

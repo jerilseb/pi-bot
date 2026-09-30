@@ -240,7 +240,7 @@ export function createPromptQueue(options: {
             deliverBackgroundResponse(prompt, response),
           );
         }
-        enqueuePendingNewSessionTask(chat, prompt);
+        enqueueNewSessionTask(chat, prompt, response.newSessionTask);
       } catch (error) {
         const message = errorMessage(error);
         console.error('error:', message);
@@ -326,8 +326,11 @@ export function createPromptQueue(options: {
  * A session swap requested mid-turn (start_new_session with a follow-up task)
  * runs next, ahead of anything queued behind it.
  */
-function enqueuePendingNewSessionTask(chat: ChatState, prompt: IncomingPrompt): void {
-  const task = chat.pi.consumePendingNewSessionTask();
+function enqueueNewSessionTask(
+  chat: ChatState,
+  prompt: IncomingPrompt,
+  task: string | undefined,
+): void {
   if (!task) return;
 
   chat.queue.unshift({
