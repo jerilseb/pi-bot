@@ -4,9 +4,12 @@ import { TELEGRAM_MAX_MESSAGE } from '../src/config.ts';
 import {
   editTelegramMessageHtml,
   replaceTelegramMessage,
+  sendTelegramDraft,
   sendTelegramHtmlMessage,
   sendTelegramMessage,
+  telegramRetryAfterMs,
 } from '../src/channels/telegram/telegram.ts';
+import { splitTelegramMessage } from '../src/channels/telegram/telegram-html.ts';
 
 const PARSE_ERROR = "Bad Request: can't parse entities: Unsupported start tag";
 
@@ -166,4 +169,37 @@ test('a replacement whose edit Telegram rejects is sent anew', async (t) => {
     ['editMessageText', 'sendMessage'],
   );
   assert.equal(calls[1]?.text, '✅ done');
+});
+
+test('a draft longer than one message shows the piece still being written', async (t) => {
+  const { sent } = fakeTelegram(t, /never/);
+  const html = `${'done '.repeat(TELEGRAM_MAX_MESSAGE / 5)}\n\nstill <b>writing</b>`;
+
+  await sendTelegramDraft(1, html);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], splitTelegramMessage(html).at(-1));
+  assert.match(sent[0] ?? '', /still <b>writing<\/b>$/);
+  assert.ok((sent[0]?.length ?? 0) < html.length);
+});
+
+test('a draft Telegram cannot parse goes down the same ladder as a message', async (t) => {
+  const { sent, warnings } = fakeTelegram(t, /<b>/);
+  await sendTelegramDraft(1, '<b>bold</b>');
+  assert.deepEqual(sent, ['&lt;b&gt;bold&lt;/b&gt;']);
+  assert.equal(warnings.length, 2);
+});
+
+test("a rate limit's wait is read from Telegram's refusal", () => {
+  const refusal = (status: number, body: string) =>
+    new Error(`Telegram sendMessageDraft failed (${status}): ${body}`);
+  assert.equal(
+    telegramRetryAfterMs(
+      refusal(429, '{"ok":false,"error_code":429,"parameters":{"retry_after":7}}'),
+    ),
+    7_000,
+  );
+  assert.equal(telegramRetryAfterMs(refusal(429, '')), 1_000);
+  assert.equal(telegramRetryAfterMs(refusal(400, '{"ok":false,"error_code":400}')), null);
+  assert.equal(telegramRetryAfterMs(new Error('fetch failed')), null);
 });

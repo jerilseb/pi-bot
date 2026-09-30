@@ -113,6 +113,7 @@ That means it can remember stable context without stuffing every temporary detai
 - Heartbeat loop for proactive monitoring instructions (off by default).
 - Long-term memory plus daily/session notes.
 - Model switching with Telegram inline buttons.
+- Replies shown in Telegram as they are written, as a live draft (private chats).
 - Tool calls folded into one expandable message per prompt, or streamed, or off.
 - Usage commands for OpenAI Codex and ElevenLabs.
 - Graceful self-restart through `/restart` or an explicit natural-language restart request.
@@ -189,6 +190,14 @@ The same file also holds how tool calls reach the chat, switched from Telegram w
 - `off` — nothing is sent.
 
 Unlike `heartbeat` and `cronJobs`, this one is read fresh at the start of every prompt, so a switch applies from the next prompt and needs no restart.
+
+A reply to a message sent from Telegram is shown as it is written, as a draft at the bottom of the chat (Telegram's `sendMessageDraft`), and the finished reply replaces it. The draft is updated about once a second and holds the reply's whole text so far; past one message's length it shows the last piece, the one being written. Telegram shows drafts only in private chats, so in a group replies arrive whole. The bot's own turns in the chat, such as a job's report, are not drafted. `/stream_replies` switches it, and it is read at the start of every prompt:
+
+```json
+{
+  "streamReplies": true
+}
+```
 
 Sub-agent jobs the chat starts get a live progress message of their own, with a Stop button per unfinished task. By default it is one line per task, since the agent's reply carries the results. `/subagent_toolcalls` switches on `subagentToolCalls`, which folds each worker's recent tool calls into a quote under its task, replaced by its result when it finishes:
 
@@ -300,6 +309,7 @@ Inside Telegram:
 | `/models` | Choose an allowed chat model |
 | `/reasoning` | Choose the chat reasoning level |
 | `/toolcalls` | Choose how tool calls are shown: collapsed, stream, or off |
+| `/stream_replies` | Choose whether replies are shown as a draft while they are written |
 | `/subagent_toolcalls` | Choose whether sub-agent progress messages show each worker's tool calls |
 | `/openaiusage` | Show OpenAI Codex usage windows and reset times |
 | `/elevenlabsusage` | Show ElevenLabs character/credit usage and subscription details |

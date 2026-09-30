@@ -1,10 +1,16 @@
-import { ALLOWED_CHAT_ID, TELEGRAM_API, TELEGRAM_API_TIMEOUT_MS } from '../../config.ts';
+import {
+  ALLOWED_CHAT_ID,
+  REPLY_DRAFT_TIMEOUT_MS,
+  TELEGRAM_API,
+  TELEGRAM_API_TIMEOUT_MS,
+} from '../../config.ts';
 import { escapeTelegramHtml, sanitizeTelegramHtml, splitTelegramMessage } from './telegram-html.ts';
 import { errorMessage, summarizeError } from '../../util.ts';
 
 /**
  * Telegram Bot API transport for the single allowed chat: sending messages,
- * inline keyboards, typing actions, and the command menu.
+ * drafts of a reply being written, inline keyboards, typing actions, and the
+ * command menu.
  *
  * Every send goes out in HTML parse mode. Telegram rejects the whole message on
  * malformed markup, so sendTelegramMessage walks a fallback ladder — raw, then
@@ -219,6 +225,33 @@ async function postTelegramHtmlMessage(
   return messageId;
 }
 
+/**
+ * Shows a draft of a message still being written. Telegram animates each change
+ * to the same `draftId`, and drops the draft when the next message arrives or
+ * 30 seconds after its last update, so the finished text must still be sent.
+ * A draft is one message, so a longer text shows its last piece, the one being
+ * written: the piece the finished text will end with once it is split. Only
+ * private chats take drafts.
+ */
+export async function sendTelegramDraft(draftId: number, html: string): Promise<void> {
+  await withHtmlParseFallback(html, async (candidate) => {
+    await telegram(
+      'sendMessageDraft',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: ALLOWED_CHAT_ID,
+          draft_id: draftId,
+          text: splitTelegramMessage(candidate).at(-1) ?? '',
+          parse_mode: 'HTML',
+        }),
+      },
+      REPLY_DRAFT_TIMEOUT_MS,
+    );
+  });
+}
+
 export async function sendChatAction(): Promise<void> {
   try {
     await telegram('sendChatAction', {
@@ -245,6 +278,18 @@ export async function telegram<T = unknown>(
     throw new Error(`Telegram ${methodAndQuery} failed (${res.status}): ${body}`);
   }
   return (await res.json()) as T;
+}
+
+/**
+ * How long Telegram asked to wait before the next call, when it refused one for
+ * going too fast (429); null for any other failure.
+ */
+export function telegramRetryAfterMs(error: unknown): number | null {
+  const message = errorMessage(error);
+  if (!message.includes(' failed (429)')) return null;
+  const seconds = Number(/"retry_after":\s*(\d+)/.exec(message)?.[1]);
+  // Telegram always says how long; a second, should it not.
+  return seconds > 0 ? seconds * 1000 : 1000;
 }
 
 function isTelegramHtmlParseError(error: unknown): boolean {

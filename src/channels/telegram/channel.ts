@@ -2,7 +2,9 @@ import {
   isAllowedTelegramChat,
   MAX_QUEUED_PROMPTS,
   showTranscriptsEnabled,
+  streamRepliesEnabled,
   subagentToolCallsEnabled,
+  TELEGRAM_PRIVATE_CHAT,
   type ToolCallMode,
   toolCallMode,
 } from '../../config.ts';
@@ -32,6 +34,8 @@ import { TelegramJobProgress } from './jobs.ts';
 import { markdownToTelegramHtml } from './markdown.ts';
 import { sendTelegramDocument, sendTelegramImage, sendTelegramVoice } from './media.ts';
 import { pollTelegramUpdates } from './polling.ts';
+import { createReplyDraft, type ReplyDraft } from './reply-draft.ts';
+import { streamRepliesCallbackMenu } from './stream-replies-menu.ts';
 import { subagentToolCallCallbackMenu } from './subagent-tool-call-menu.ts';
 import {
   answerTelegramCallbackQuery,
@@ -63,8 +67,9 @@ import type { TelegramCallbackQuery, TelegramMessage } from './types.ts';
  * before the message shows how the job ended.
  *
  * Only chat turns are shown as they happen, with a typing indicator and tool
- * calls. A background run shows nothing until the background outbox releases
- * what it sent, which arrives here as deliveries.
+ * calls, and the reply to a message sent here as a draft while it is written,
+ * which the reply then replaces. A background run shows nothing until the
+ * background outbox releases what it sent, which arrives here as deliveries.
  *
  * What someone types in another channel (a terminal) is mirrored here without
  * a notification, labelled with where it came from, and so is its turn: its
@@ -82,6 +87,7 @@ export const TELEGRAM_CHANNEL: ChannelRef = { id: 'telegram', kind: 'telegram' }
 interface TurnView {
   typing: { stop(): void } | null;
   tools: ToolNotifications;
+  draft: ReplyDraft | null;
 }
 
 export interface TelegramChannelOptions {
@@ -93,6 +99,11 @@ export interface TelegramChannelOptions {
   subagentToolCalls?: () => boolean;
   /** The `showTranscripts` setting, for /status; tests pass their own. */
   showTranscripts?: () => boolean;
+  /**
+   * Whether replies stream as drafts: the `streamReplies` setting, in a private
+   * chat only. Read at the start of each turn; tests pass their own.
+   */
+  streamReplies?: () => boolean;
   /** Overrides the job progress transport, intervals and write gate; for tests. */
   progressOptions?: ProgressMessageOptions;
 }
@@ -115,6 +126,7 @@ export class TelegramChannel implements Channel {
   private readonly toolCallMode: () => ToolCallMode;
   private readonly subagentToolCalls: () => boolean;
   private readonly showTranscripts: () => boolean;
+  private readonly streamReplies: () => boolean;
   private readonly jobs: TelegramJobProgress;
   private readonly turns = new Map<string, TurnView>();
   /** Message IDs of placeholder notices still waiting for their outcome, by notice ID. */
@@ -123,6 +135,7 @@ export class TelegramChannel implements Channel {
   private readonly choiceCopies = new Map<string, number[]>();
   private readonly settingsMenus: CallbackMenu[] = [
     toolCallCallbackMenu,
+    streamRepliesCallbackMenu,
     transcriptCallbackMenu,
     subagentToolCallCallbackMenu,
   ];
@@ -135,6 +148,8 @@ export class TelegramChannel implements Channel {
     this.toolCallMode = options.toolCallMode ?? toolCallMode;
     this.subagentToolCalls = options.subagentToolCalls ?? subagentToolCallsEnabled;
     this.showTranscripts = options.showTranscripts ?? showTranscriptsEnabled;
+    this.streamReplies =
+      options.streamReplies ?? (() => TELEGRAM_PRIVATE_CHAT && streamRepliesEnabled());
     this.jobs = new TelegramJobProgress({
       subagentToolCalls: this.subagentToolCalls,
       ...(options.progressOptions ? { progressOptions: options.progressOptions } : {}),
@@ -145,6 +160,7 @@ export class TelegramChannel implements Channel {
     return {
       title: 'Telegram',
       settings: [
+        { label: 'Streamed replies', on: this.streamReplies() },
         { label: 'Sub-agent tool calls', on: this.subagentToolCalls() },
         { label: 'Voice transcripts', on: this.showTranscripts() },
         { label: '🛠 Tool calls', detail: describeToolCallMode(this.toolCallMode()) },
@@ -158,15 +174,17 @@ export class TelegramChannel implements Channel {
         if (event.from.id !== this.ref.id) void this.enqueue('mirror', () => this.mirror(event));
         return;
       case 'turn_start':
-        if (event.session === 'chat') this.startTurn(event.turnId, this.isMirrored(event.origin));
+        if (event.session === 'chat') this.startTurn(event.turnId, event.origin);
         return;
-      case 'agent':
-        if (event.turnId && event.event.type === 'tool_execution_start') {
-          this.turns
-            .get(event.turnId)
-            ?.tools.notify(formatToolStartNotification(event.event, this.cwd));
+      case 'agent': {
+        const turn = event.turnId ? this.turns.get(event.turnId) : undefined;
+        if (!turn) return;
+        if (event.event.type === 'tool_execution_start') {
+          turn.tools.notify(formatToolStartNotification(event.event, this.cwd));
         }
+        turn.draft?.observe(event.event);
         return;
+      }
       case 'turn_end':
         if (event.session === 'chat') this.endTurn(event);
         return;
@@ -375,12 +393,18 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  private startTurn(turnId: string, mirrored: boolean): void {
+  private startTurn(turnId: string, origin: PromptOrigin): void {
+    const mirrored = this.isMirrored(origin);
     // Where the turn begins in the send queue: its tool calls wait for everything before it.
     const begun = this.enqueue('turn start', async () => {});
+    // Only a reply to a message sent here is drafted. Nobody here waits on a
+    // terminal's turn, and the bot's own (a job's report, a post-restart task)
+    // may end in silence, which would leave a draft that cannot be taken back.
+    const drafted = origin.kind === 'user' && !mirrored && this.streamReplies();
     this.turns.set(turnId, {
       typing: mirrored ? null : startTyping(),
       tools: createToolNotifications(this.toolCallMode(), { after: begun, silent: mirrored }),
+      draft: drafted ? createReplyDraft({ after: begun }) : null,
     });
   }
 
@@ -407,10 +431,13 @@ export class TelegramChannel implements Channel {
     const turn = this.turns.get(event.turnId);
     this.turns.delete(event.turnId);
     const silent = !this.isPinged(event.ping);
+    const drafted = turn?.draft?.stop();
     void this.enqueue('reply', async () => {
       try {
         // Flushed before the reply, so notifications cannot arrive after the answer they describe.
         await turn?.tools.finish();
+        // A draft still in flight could land after the reply and stay under it.
+        await drafted;
         if (event.outcome === 'replied') {
           await this.sendReply(event.reply, silent);
         } else if (event.outcome === 'error') {

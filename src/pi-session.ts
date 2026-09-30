@@ -36,6 +36,7 @@ import {
 } from './session-notes.ts';
 import type { Attachment, IncomingPrompt, PiPromptResult, SessionKind } from './types.ts';
 import { PromptSteering } from './prompt-steering.ts';
+import { RunText } from './run-text.ts';
 import { notifySteeringMessage } from './steering-signal.ts';
 import {
   errorMessage as getErrorMessage,
@@ -256,10 +257,8 @@ export async function driveWorkerSession(
       if (event.type === 'tool_execution_start') {
         request.onToolStart?.({ toolName: event.toolName, args: event.args });
       }
-      if (event.type === 'auto_retry_start') {
-        reply.dropLast();
-        promptError = '';
-      }
+      // The failed attempt's error goes before the SDK retries; RunText drops its text.
+      if (event.type === 'auto_retry_start') promptError = '';
       collectResponseEvent(event, reply, (message) => {
         promptError = message;
       });
@@ -346,42 +345,6 @@ export async function loadResources(
   });
   await resourceLoader.reload();
   return resourceLoader;
-}
-
-/**
- * The text of a run's assistant messages, kept per message: narration before a
- * tool call and the answer after it are separate paragraphs rather than one run
- * of text, and the last message can be checked on its own for a sentinel.
- */
-class RunText {
-  private messages: string[] = [];
-
-  observe(event: AgentSessionEvent): void {
-    if (event.type === 'message_start' && event.message.role === 'assistant') {
-      this.messages.push('');
-    } else if (
-      event.type === 'message_update' &&
-      event.assistantMessageEvent.type === 'text_delta'
-    ) {
-      if (this.messages.length === 0) this.messages.push('');
-      this.messages[this.messages.length - 1] += event.assistantMessageEvent.delta;
-    }
-  }
-
-  /**
-   * Drops the message a failed attempt left, before the SDK retries it. Every
-   * assistant message, a failed one included, starts with message_start, so the
-   * failed one is always the last; what came before it stands.
-   */
-  dropLast(): void {
-    this.messages.pop();
-  }
-
-  /** Raw, with no placeholder: a blank reply is for the caller to judge. */
-  result(): PiPromptResult {
-    const texts = this.messages.map((message) => message.trim()).filter(Boolean);
-    return { text: texts.join('\n\n'), finalText: texts.at(-1) ?? '' };
-  }
 }
 
 /**
@@ -582,8 +545,7 @@ export class SdkPiSession {
       abortOnRunStart(session, event, aborted());
       steering.observe(event);
       if (event.type === 'auto_retry_start') {
-        // Discard the failed attempt's partial text and error before the SDK retries.
-        reply.dropLast();
+        // Discard the failed attempt's error before the SDK retries; RunText drops its text.
         promptError = '';
         if (!retryAnnounced) {
           retryAnnounced = true;

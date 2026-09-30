@@ -1,5 +1,15 @@
-import { showTranscriptsEnabled, subagentToolCallsEnabled, toolCallMode } from '../../config.ts';
+import {
+  showTranscriptsEnabled,
+  streamRepliesEnabled,
+  subagentToolCallsEnabled,
+  TELEGRAM_PRIVATE_CHAT,
+  toolCallMode,
+} from '../../config.ts';
 import type { CommandInfo } from '../../contract.ts';
+import {
+  buildStreamRepliesInlineKeyboard,
+  describeStreamRepliesSetting,
+} from './stream-replies-menu.ts';
 import {
   buildSubagentToolCallInlineKeyboard,
   describeSubagentToolCallSetting,
@@ -10,7 +20,8 @@ import { buildTranscriptInlineKeyboard, describeTranscriptSetting } from './tran
 
 /**
  * Telegram's own commands: the conventional /start, and the settings for how
- * Telegram shows things (tool calls, voice transcripts, sub-agent progress).
+ * Telegram shows things (tool calls, replies as they are written, voice
+ * transcripts, sub-agent progress).
  * The core lists them with its own, in the command menu and in /help.
  */
 
@@ -38,6 +49,22 @@ export const TELEGRAM_COMMANDS: readonly TelegramCommand[] = [
           'Choose how tool calls are shown:',
         ].join('\n'),
         buildToolCallInlineKeyboard(),
+      ),
+  },
+  {
+    name: 'stream_replies',
+    description: 'Choose whether replies are shown as they are written',
+    help: 'choose whether a reply is shown as a draft while Pi writes it, then sent',
+    handler: () =>
+      sendTelegramInlineKeyboard(
+        [
+          `Current: ${describeStreamRepliesSetting(streamRepliesEnabled())}`,
+          ...(TELEGRAM_PRIVATE_CHAT
+            ? []
+            : ['Telegram shows drafts only in private chats, so replies here arrive whole.']),
+          'Show each reply as it is written?',
+        ].join('\n'),
+        buildStreamRepliesInlineKeyboard(),
       ),
   },
   {
@@ -85,6 +112,7 @@ const MENU_ORDER = [
   'help',
   'status',
   'toolcalls',
+  'stream_replies',
   'subagent_toolcalls',
   'transcripts',
   'elevenlabsusage',

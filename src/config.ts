@@ -116,6 +116,7 @@ interface BotSettings {
   toolCalls?: unknown;
   showTranscripts?: unknown;
   subagentToolCalls?: unknown;
+  streamReplies?: unknown;
 }
 
 function readBotSettings(): BotSettings {
@@ -169,6 +170,7 @@ export function ensureBotSettingsFile(): void {
         toolCalls: DEFAULT_TOOL_CALL_MODE,
         showTranscripts: false,
         subagentToolCalls: false,
+        streamReplies: DEFAULT_STREAM_REPLIES,
       },
       null,
       2,
@@ -266,6 +268,35 @@ export function setSubagentToolCalls(enabled: boolean): void {
   updateBotSettings({ subagentToolCalls: enabled });
 }
 
+/**
+ * Whether a reply to a Telegram message is shown as a draft while it is
+ * written, then replaced by the reply itself. On by default, so a file written
+ * before the key existed streams too. Persisted in files/settings.json as
+ * `streamReplies` and switched from Telegram with /stream_replies; read at the
+ * start of each turn, so a switch applies from the next reply.
+ */
+export const DEFAULT_STREAM_REPLIES = true;
+
+export function streamRepliesEnabled(): boolean {
+  try {
+    const { streamReplies } = readBotSettings();
+    return typeof streamReplies === 'boolean' ? streamReplies : DEFAULT_STREAM_REPLIES;
+  } catch (error) {
+    console.error('failed to read the reply streaming setting:', error);
+    return DEFAULT_STREAM_REPLIES;
+  }
+}
+
+export function setStreamReplies(enabled: boolean): void {
+  updateBotSettings({ streamReplies: enabled });
+}
+
+/**
+ * Whether the allowed chat is a private one, the only kind Telegram shows
+ * drafts in: a user's ID is positive, a group's negative.
+ */
+export const TELEGRAM_PRIVATE_CHAT = /^[1-9]\d*$/.test(ALLOWED_CHAT_ID);
+
 export const TOOL_CALL_BATCH_MS = 10_000;
 export const TOOL_CALL_BATCH_MAX_ITEMS = 10;
 /**
@@ -296,6 +327,26 @@ export const JOB_PROGRESS_MIN_EDIT_MS = 3_000;
  * protection.
  */
 export const JOB_PROGRESS_GLOBAL_MIN_GAP_MS = 1_000;
+
+/**
+ * Shortest gap between two updates of a reply's draft
+ * (src/channels/telegram/reply-draft.ts); text written in between goes out
+ * with the next one, and Telegram animates the change. Drafts and the typing
+ * indicator share a budget of 40 calls per chat in 30 seconds: 24 drafts and
+ * the indicator's 7.5 leave room to spare.
+ */
+export const REPLY_DRAFT_INTERVAL_MS = 1_250;
+/**
+ * How often a draft whose text has not changed is sent again while the reply
+ * is under way: Telegram drops a draft 30 seconds after its last update, and at
+ * once when a message arrives, such as a batch of tool calls.
+ */
+export const REPLY_DRAFT_KEEPALIVE_MS = 10_000;
+/**
+ * Deadline for one draft update. The reply waits for a draft in flight, so a
+ * late one cannot land after it, and this bounds that wait.
+ */
+export const REPLY_DRAFT_TIMEOUT_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Interfaces: the channels (Telegram, the terminal UI) that use the core

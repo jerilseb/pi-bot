@@ -137,8 +137,17 @@ function fakeCore(options: { submit?: SubmitResult; command?: boolean } = {}) {
   return { core, submitted, commands };
 }
 
-function channel(core: AgentCore = fakeCore().core, mode: ToolCallMode = 'collapsed') {
-  return new TelegramChannel({ core, cwd: '/unused', toolCallMode: () => mode });
+function channel(
+  core: AgentCore = fakeCore().core,
+  mode: ToolCallMode = 'collapsed',
+  streamReplies = false,
+) {
+  return new TelegramChannel({
+    core,
+    cwd: '/unused',
+    toolCallMode: () => mode,
+    streamReplies: () => streamReplies,
+  });
 }
 
 const user: PromptOrigin = { kind: 'user', channel: TELEGRAM_CHANNEL };
@@ -156,6 +165,26 @@ function toolCall(turnId: string, command: string, session: 'chat' | 'background
       args: { command },
     } as AgentSessionEvent,
   } satisfies CoreEvent;
+}
+
+/** The SDK events of an assistant message starting, then of each piece of its text. */
+function assistantText(turnId: string, ...deltas: string[]): CoreEvent[] {
+  const agent = (event: unknown): CoreEvent => ({
+    type: 'agent',
+    turnId,
+    session: 'chat',
+    event: event as AgentSessionEvent,
+  });
+  return [
+    agent({ type: 'message_start', message: { role: 'assistant', content: [] } }),
+    ...deltas.map((delta) =>
+      agent({
+        type: 'message_update',
+        message: { role: 'assistant', content: [] },
+        assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta },
+      }),
+    ),
+  ];
 }
 
 function reply(turnId: string, text: string, ping = pinged) {
@@ -244,6 +273,51 @@ test('a chat turn shows typing until its reply is sent', async (t) => {
     calls.map((call) => call.method),
     ['sendChatAction', 'sendMessage'],
   );
+});
+
+test('a reply to a message sent here is drafted as it is written, then sent', async (t) => {
+  // The draft is slow to answer, so the reply is seen waiting for it.
+  const { calls, sent } = fakeTelegram(t, { slow: /^Hello$/ });
+  const telegram = channel(undefined, 'off', true);
+  telegram.onEvent({ type: 'turn_start', turnId: 'chat-1', session: 'chat', origin: user });
+  for (const event of assistantText('chat-1', 'Hel', 'lo')) telegram.onEvent(event);
+  await until(() => calls.some((call) => call.method === 'sendMessageDraft'));
+  // Within the draft's interval, so this goes out only with the reply.
+  for (const event of assistantText('chat-1', 'world')) telegram.onEvent(event);
+  telegram.onEvent(reply('chat-1', 'Hello\n\nworld'));
+  await telegram.drain(1_000);
+
+  assert.deepEqual(
+    calls.map((call) => [call.method, call.text]),
+    [
+      ['sendChatAction', undefined],
+      ['sendMessageDraft', 'Hello'],
+      ['sendMessage', 'Hello\n\nworld'],
+    ],
+  );
+  assert.equal(sent()[0]?.afterEarlierDone, true, 'the reply must wait for the draft in flight');
+});
+
+test("a terminal's turn, the bot's own, or one with streaming off is not drafted", async (t) => {
+  const { calls } = fakeTelegram(t);
+  const terminal: ChannelRef = { id: 'tui:1', kind: 'tui' };
+  const turns: Array<[TelegramChannel, PromptOrigin]> = [
+    [channel(undefined, 'off', true), { kind: 'user', channel: terminal }],
+    [channel(undefined, 'off', true), { kind: 'post-restart', taskId: 'task-1' }],
+    [channel(undefined, 'off', false), user],
+  ];
+  for (const [telegram, origin] of turns) {
+    telegram.onEvent({ type: 'turn_start', turnId: 'chat-1', session: 'chat', origin });
+    for (const event of assistantText('chat-1', 'Hello')) telegram.onEvent(event);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    telegram.onEvent(reply('chat-1', 'Hello'));
+    await telegram.drain(1_000);
+  }
+  assert.equal(
+    calls.some((call) => call.method === 'sendMessageDraft'),
+    false,
+  );
+  assert.equal(calls.filter((call) => call.method === 'sendMessage').length, 3);
 });
 
 test('input typed in a terminal is mirrored silently, labelled, with its attachments', async (t) => {
@@ -524,6 +598,7 @@ test("the command menu interleaves the core's commands and Telegram's own, /abor
     'help',
     'status',
     'toolcalls',
+    'stream_replies',
     'subagent_toolcalls',
     'transcripts',
     'elevenlabsusage',
@@ -714,10 +789,12 @@ test("Telegram's /status section lists its own display settings", () => {
     toolCallMode: () => 'stream',
     subagentToolCalls: () => true,
     showTranscripts: () => false,
+    streamReplies: () => true,
   });
   assert.deepEqual(telegram.status(), {
     title: 'Telegram',
     settings: [
+      { label: 'Streamed replies', on: true },
       { label: 'Sub-agent tool calls', on: true },
       { label: 'Voice transcripts', on: false },
       { label: '🛠 Tool calls', detail: 'Stream — a message per batch' },

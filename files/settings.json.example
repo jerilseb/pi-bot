@@ -10,5 +10,6 @@
   "cronJobs": false,
   "toolCalls": "collapsed",
   "showTranscripts": false,
-  "subagentToolCalls": false
+  "subagentToolCalls": false,
+  "streamReplies": true
 }
