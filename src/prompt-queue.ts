@@ -176,6 +176,8 @@ export function createPromptQueue(options: {
           `${originLabel(prompt.origin)} skipped, already handled: ${prompt.label ?? ''}`,
         );
         cleanupAttachments(prompt);
+        // The last turn's state still counted this prompt as queued.
+        sink.emitState();
         continue;
       }
       chat.processing = true;

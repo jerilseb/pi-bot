@@ -371,6 +371,21 @@ test('a queued report whose result was read meanwhile is dropped when its turn c
   assert.deepEqual(f.runs, ['poll the command', 'bg_2 finished']);
 });
 
+test('skipping a handled report leaves the last state idle', async (t) => {
+  const f = setup(t);
+  await f.send('poll the command');
+  let read = false;
+  await f.enqueue('bg_1 finished', bashReport, { suppressNoop: true, isSuperseded: () => read });
+  read = true;
+  f.gate.resolve();
+  await until(() => !f.core.isAssistantBusy());
+  const states = f.channel.events.filter((event) => event.type === 'state');
+  const last = states.at(-1);
+  assert.ok(last?.type === 'state');
+  assert.equal(last.state.chat.busy, false);
+  assert.equal(last.state.chat.queued, 0);
+});
+
 test('rejected steering reports an error without retrying it as a new prompt', async (t) => {
   const f = setup(t);
   await f.send('first');
