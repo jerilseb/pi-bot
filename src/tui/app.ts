@@ -1,6 +1,3 @@
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import type { Duplex } from 'node:stream';
 import { getSelectListTheme } from '@earendil-works/pi-coding-agent';
 import {
@@ -35,6 +32,12 @@ import { errorMessage } from '../util.ts';
 import { ChatView } from './chat-view.ts';
 import { type FooterState, footerLine } from './footer.ts';
 import { JobsWidget, jobSummary } from './jobs.ts';
+import {
+  imageAttachment,
+  imageMarker,
+  pastedImagePaths,
+  resolveImageMarkers,
+} from './pasted-images.ts';
 import { Picker } from './picker.ts';
 import { ConnectionLostError, RemoteCore } from './remote-core.ts';
 import { cyan, dim, levelColor, red, yellow } from './style.ts';
@@ -55,8 +58,9 @@ import { WorkingIndicator } from './working-indicator.ts';
  * the channel used last, but not for the answer to a command typed here.
  *
  * Its own commands are handled here before anything reaches the core: /quit,
- * /expand, /jobs, and /attach for files, which it can name by path since it
- * shares the bot's filesystem.
+ * /expand and /jobs. Images pasted as paths show as `[Image N]` and go with
+ * the message; any other file is named by its path, which the agent can read
+ * since the terminal shares the bot's filesystem.
  */
 
 interface TerminalCommand extends CommandInfo {
@@ -64,12 +68,6 @@ interface TerminalCommand extends CommandInfo {
 }
 
 const TERMINAL_COMMANDS: TerminalCommand[] = [
-  {
-    name: 'attach',
-    description: 'Attach a file to your next message',
-    help: 'attach a local file to your next message; with no path, drop what is attached',
-    run: (app, args) => app.attach(args),
-  },
   {
     name: 'jobs',
     description: 'Stop a running job',
@@ -90,19 +88,11 @@ const TERMINAL_COMMANDS: TerminalCommand[] = [
   },
 ];
 
-const IMAGE_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-};
-
 export interface TerminalAppOptions {
   terminal: Terminal;
   /** Opens a connection to the bot's socket. */
   connect: () => Promise<Duplex>;
-  /** For tool renderers and /attach paths. */
+  /** Where the editor completes paths from. */
   cwd: string;
   onQuit: () => void;
 }
@@ -145,7 +135,12 @@ export class TerminalApp implements Channel {
   private menus: ChoiceView[] = [];
   /** The menu open in the input area, or null for the editor. */
   private open: { id: string | null; picker: Picker } | null = null;
-  private staged: Attachment[] = [];
+  /**
+   * Every image pasted in this terminal, by the N of its `[Image N]`. Kept for
+   * the session and never numbered twice, so a marker still means its image
+   * once its message is sent, recalled from history, undone or put back.
+   */
+  private readonly images = new Map<number, Attachment>();
   /** Commands sent from here that have yet to answer: what they send is expected, not rung for. */
   private commandsInFlight = 0;
 
@@ -161,6 +156,8 @@ export class TerminalApp implements Channel {
       selectList: getSelectListTheme(),
     });
     this.editor.onSubmit = (text) => this.submitLine(text);
+    this.editor.onPaste = (text) => this.pasteImages(text);
+    this.editor.isImageMarker = (n) => this.images.has(n);
     this.core = new RemoteCore({
       connect: options.connect,
       onConnect: (welcome) => this.connected(welcome),
@@ -275,36 +272,22 @@ export class TerminalApp implements Channel {
 
   async drain(): Promise<void> {}
 
-  attach(args: string): void {
-    const target = args.trim();
-    if (!target) {
-      this.staged = [];
-      this.chat.note(dim('📎 Nothing attached.'));
-      this.refreshPending();
-      return;
-    }
-    const resolved = path.resolve(this.cwd, target.replace(/^~(?=$|\/)/, os.homedir()));
-    let size: number;
-    try {
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile()) throw new Error('not a file');
-      size = stat.size;
-    } catch (error) {
-      const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
-      this.chat.note(
-        red(`❌ Cannot attach ${resolved}: ${missing ? 'no such file' : errorMessage(error)}`),
-      );
-      return;
-    }
-    const mimeType = IMAGE_TYPES[path.extname(resolved).toLowerCase()];
-    this.staged.push({
-      type: mimeType ? 'image' : 'file',
-      path: resolved,
-      filename: path.basename(resolved),
-      size,
-      ...(mimeType ? { mimeType } : {}),
+  /** A paste of image paths becomes an `[Image N]` for each, the images kept for the message. */
+  private pasteImages(text: string): boolean {
+    const paths = pastedImagePaths(text);
+    if (!paths) return false;
+    const markers = paths.map((file) => {
+      const n = this.images.size + 1;
+      this.images.set(n, imageAttachment(file));
+      return imageMarker(n);
     });
-    this.refreshPending();
+    const { line, col } = this.editor.getCursor();
+    const row = this.editor.getLines()[line] ?? '';
+    const before = col > 0 && !/\s/.test(row[col - 1] ?? '') ? ' ' : '';
+    // A space after it, to type on from, unless one is there.
+    const after = /\s/.test(row[col] ?? '') ? '' : ' ';
+    this.editor.insertTextAtCursor(`${before}${markers.join(' ')}${after}`);
+    return true;
   }
 
   pickJobToStop(): void {
@@ -390,7 +373,7 @@ export class TerminalApp implements Channel {
 
   private submitLine(text: string): void {
     const line = text.trim();
-    if (!line && this.staged.length === 0) return;
+    if (!line) return;
     this.editor.addToHistory(text);
     const [first = ''] = line.split(/\s+/, 1);
     const own = TERMINAL_COMMANDS.find((command) => `/${command.name}` === first.toLowerCase());
@@ -398,8 +381,9 @@ export class TerminalApp implements Channel {
       own.run(this, line.slice(first.length));
       return;
     }
-    // With a file attached, a line starting with a slash is its caption, as in Telegram.
-    if (line.startsWith('/') && this.staged.length === 0) {
+    // With an image in it, a line starting with a slash is its caption, as in Telegram.
+    const captioned = resolveImageMarkers(text, this.images).attachments.length > 0;
+    if (line.startsWith('/') && !captioned) {
       this.runCommand(line)
         .then((handled) => {
           if (!handled) this.submitText(text);
@@ -425,26 +409,28 @@ export class TerminalApp implements Channel {
   }
 
   private submitText(text: string): void {
-    const attachments = this.staged;
-    this.staged = [];
-    this.refreshPending();
+    const { text: sent, attachments } = resolveImageMarkers(text, this.images);
     this.core
-      .submit({ from: this.ref, text, attachments })
-      .then((result) => this.showSubmitResult(result, text, attachments))
-      .catch((error: unknown) => {
-        this.staged = attachments;
-        this.failed(text, error);
-      });
+      .submit({ from: this.ref, text: sent, attachments })
+      .then((result) => this.showSubmitResult(result, text))
+      .catch((error: unknown) => this.failed(text, error));
   }
 
   /** A message that did not reach the bot goes back in the editor, so it is not lost. */
   private failed(text: string, error: unknown): void {
     this.chat.note(red(`❌ ${errorMessage(error)}`));
-    if (!this.editor.getText().trim()) this.editor.setText(text);
-    this.refreshPending();
+    this.restore(text);
   }
 
-  private showSubmitResult(result: SubmitResult, text: string, attachments: Attachment[]): void {
+  /**
+   * The message back in the editor, its markers with it, unless something new
+   * is being written there; it is in the history either way.
+   */
+  private restore(text: string): void {
+    if (!this.editor.getText().trim()) this.editor.setText(text);
+  }
+
+  private showSubmitResult(result: SubmitResult, text: string): void {
     if (result.status === 'steered') {
       this.chat.note(dim('↪️ Steering the task under way.'));
       return;
@@ -463,9 +449,7 @@ export class TerminalApp implements Channel {
       case 'stale':
         return;
     }
-    this.staged = attachments;
-    if (!this.editor.getText().trim()) this.editor.setText(text);
-    this.refreshPending();
+    this.restore(text);
   }
 
   /** Ctrl+C clears the editor, or quits from an empty one; Esc stops a reply. */
@@ -522,7 +506,7 @@ export class TerminalApp implements Channel {
       .then((outcome) => {
         // A menu the core had forgotten closes nowhere else, so its text shows here.
         if (!outcome.closed) this.show(outcome.text, dim);
-        if (outcome.submitted) this.showSubmitResult(outcome.submitted, '', []);
+        if (outcome.submitted) this.showSubmitResult(outcome.submitted, '');
       })
       .catch((error: unknown) => this.chat.note(red(`❌ ${errorMessage(error)}`)));
   }
@@ -589,7 +573,6 @@ export class TerminalApp implements Channel {
           `⏳ ${from.id === this.ref.id ? '' : `${from.kind === 'telegram' ? '📱 ' : '🖥️ '}`}${oneLine(text)}`,
         ),
       ),
-      ...this.staged.map((attachment) => dim(`📎 ${attachment.filename ?? attachment.path}`)),
     ];
     this.pending.setText(lines.join('\n'));
     this.tui.requestRender();

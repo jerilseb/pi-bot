@@ -6,6 +6,7 @@ import type { ChannelRef, PromptOrigin, SessionState } from '../contract.ts';
 import { AssistantReply } from './assistant-reply.ts';
 import { ChatLog } from './chat-log.ts';
 import { CustomNote } from './custom-note.ts';
+import { imageMarker, markedImages } from './pasted-images.ts';
 import { dim, promptBand } from './style.ts';
 import { ToolCall } from './tool-call.ts';
 import type { ToolOutcome } from './tool-summary.ts';
@@ -297,11 +298,20 @@ export function channelName(ref: ChannelRef): string {
   return ref.kind === 'telegram' ? 'Telegram' : `terminal ${ref.id.replace(/^tui:/, '#')}`;
 }
 
+/**
+ * A user message's text, its images named `[Image N]` as the terminal pastes
+ * them: by the markers the text already has, and in front of it for any it
+ * does not, as a photo from Telegram, so the text still ends as it was sent.
+ */
 function userText(content: string | Array<TextContent | ImageContent>): string {
   if (typeof content === 'string') return content;
-  return content
-    .map((part) => (part.type === 'text' ? part.text : `🖼️ image (${part.mimeType})`))
-    .join('\n');
+  const text = content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n');
+  const images = content.filter((part) => part.type === 'image').length;
+  const marked = markedImages(text);
+  const unmarked = Array.from({ length: images }, (_, i) => i + 1)
+    .filter((n) => !marked.has(n))
+    .map(imageMarker);
+  return [...unmarked, text].filter(Boolean).join(' ');
 }
 
 /**

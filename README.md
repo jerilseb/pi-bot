@@ -339,6 +339,7 @@ What to expect:
 - **Menus** (`/models`, `/reasoning`, questions from the agent) take the editor's place: arrow keys and Enter to choose, Esc to cancel.
 - **Running jobs** show live above the editor. `/jobs` picks one to stop.
 - **Herdr tabs are renamed to `TUI`** when launched inside Herdr (`HERDR_ENV=1`). Renaming is best-effort and does not delay startup.
+- **Pasted images show as `[Image 1]`**: paste or drop the path of an image file on the bot's machine (or several) and the editor takes the image, leaving a marker in its place. Backspace deletes a marker whole, which drops the image. The marker goes to the model with the image beside it, and keeps its image when the message is recalled from history. Any other file is named by its path, which the agent reads itself.
 - **Reconnecting is automatic**, so a `/restart` or a crash only interrupts the terminal until the bot is back.
 
 Keys and commands of its own, besides the bot's commands (`/help` lists both):
@@ -348,7 +349,6 @@ Keys and commands of its own, besides the bot's commands (`/help` lists both):
 | `Enter` | Send; `Alt+Enter` for a new line |
 | `Esc` | Stop the reply under way (`/abort`) |
 | `Ctrl+C` | Clear the editor; on an empty one, quit |
-| `/attach <path>` | Attach a local file to your next message; `/attach` alone drops it |
 | `/jobs` | Stop a running command or sub-agent task |
 | `/expand` | Show or hide full tool output, thinking and notes |
 | `/quit` | Close the terminal; the bot keeps running |

@@ -231,7 +231,10 @@ function parseCommands(value: unknown): CommandInfo[] | null {
   return commands;
 }
 
-/** Local files, by absolute path: the client and the bot share one filesystem. */
+/**
+ * Local files, by absolute path: the client and the bot share one filesystem.
+ * Never temporary, so the bot deletes nothing a terminal names.
+ */
 function parseAttachments(value: unknown): Attachment[] | null {
   if (!Array.isArray(value)) return null;
   const attachments: Attachment[] = [];

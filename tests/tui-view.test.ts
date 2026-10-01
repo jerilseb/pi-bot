@@ -131,6 +131,35 @@ test('a message typed in Telegram is labelled; one typed here is not', () => {
   assert.match(shown(), /❯ from here/);
 });
 
+test('images in a message are its [Image N] markers, or named in front of a photo caption', () => {
+  const { chat, shown } = view();
+  chat.setSelf(self);
+  const image = { type: 'image', data: 'AA==', mimeType: 'image/png' };
+  chat.input(self, 'compare [Image 1] and [Image 2]');
+  chat.input(telegram, 'from my phone');
+  chat.turnStart({ kind: 'user', channel: self });
+  chat.agentEvent({
+    type: 'message_start',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: 'compare [Image 1] and [Image 2]' }, image, image],
+      timestamp: 1,
+    },
+  } as never);
+  chat.agentEvent({
+    type: 'message_start',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: 'from my phone' }, image],
+      timestamp: 2,
+    },
+  } as never);
+  assert.equal(chat.unseen.length, 0);
+  assert.match(shown(), /❯ compare \[Image 1\] and \[Image 2\]\n/);
+  assert.equal(shown().match(/\[Image 2\]/g)?.length, 1);
+  assert.match(shown(), /❯ Telegram: \[Image 1\] from my phone/);
+});
+
 test('input /abort dropped stops waiting once nothing runs, waits or steers', () => {
   const { chat } = view();
   chat.setSelf(self);

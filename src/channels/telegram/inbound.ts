@@ -75,6 +75,7 @@ async function toTelegramInput(message: TelegramMessage): Promise<TelegramInput 
           filename: 'photo.jpg',
           mimeType: 'image/jpeg',
           size: downloaded.size,
+          temporary: true,
         },
       ],
     };
@@ -107,6 +108,7 @@ async function toTelegramInput(message: TelegramMessage): Promise<TelegramInput 
           filename,
           mimeType,
           size: downloaded.size,
+          temporary: true,
         },
       ],
     };
@@ -168,6 +170,7 @@ async function toTranscribedInput(
         filename,
         mimeType,
         size: downloaded.size,
+        temporary: true,
       },
     ],
   };

@@ -6,6 +6,12 @@ export interface Attachment {
   filename?: string;
   mimeType?: string;
   size?: number;
+  /**
+   * A download the channel made for this prompt alone, deleted once the prompt
+   * is done with. Unset for a file that was already there, such as a path a
+   * terminal named, which is never deleted.
+   */
+  temporary?: boolean;
 }
 
 /**
