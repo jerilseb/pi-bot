@@ -20,6 +20,7 @@ const { tuiSocketPath } = await import('./src/config.ts');
 const { initTheme } = await import('@earendil-works/pi-coding-agent');
 const { ProcessTerminal } = await import('@earendil-works/pi-tui');
 const { TerminalApp } = await import('./src/tui/app.ts');
+const { renameHerdrTab } = await import('./src/tui/herdr.ts');
 
 const socketPath = socketArgument() ?? tuiSocketPath();
 
@@ -34,6 +35,7 @@ const app = new TerminalApp({
   },
 });
 app.start();
+void renameHerdrTab();
 
 function connect(target: string): Promise<Duplex> {
   return new Promise((resolve, reject) => {

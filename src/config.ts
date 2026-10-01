@@ -411,6 +411,8 @@ export const TUI_RECONNECT_MAX_MS = 5_000;
  * does not answer keeps Pi's own prompt colours.
  */
 export const TUI_BACKGROUND_QUERY_MS = 1_000;
+/** Deadline for the best-effort Herdr tab rename when the terminal UI starts. */
+export const TUI_HERDR_RENAME_TIMEOUT_MS = 2_000;
 
 // ---------------------------------------------------------------------------
 // Queueing and response behavior

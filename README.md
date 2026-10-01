@@ -338,6 +338,7 @@ What to expect:
 - **Unprompted messages** (scheduled reports, heartbeat output, job reports) ring the bell in the terminal if it is the interface you used in the last 10 minutes. Otherwise Telegram notifies you. Background runs show only what they send, as in Telegram.
 - **Menus** (`/models`, `/reasoning`, questions from the agent) take the editor's place: arrow keys and Enter to choose, Esc to cancel.
 - **Running jobs** show live above the editor. `/jobs` picks one to stop.
+- **Herdr tabs are renamed to `TUI`** when launched inside Herdr (`HERDR_ENV=1`). Renaming is best-effort and does not delay startup.
 - **Reconnecting is automatic**, so a `/restart` or a crash only interrupts the terminal until the bot is back.
 
 Keys and commands of its own, besides the bot's commands (`/help` lists both):
