@@ -7,7 +7,10 @@ import { LocalCore } from '../src/core.ts';
 import type { PiRuntime } from '../src/pi-session.ts';
 import { RecordingChannel } from './recording-channel.ts';
 
-function core(now = () => 0) {
+function core(
+  now = () => 0,
+  history: unknown[] = [{ role: 'user', content: 'stored', timestamp: 1 }],
+) {
   const runtime = {
     modelName: 'test/model',
     sessionPerPrompt: false,
@@ -17,7 +20,7 @@ function core(now = () => 0) {
   // Nothing here may start a real Pi session, or read a stored one.
   Object.assign(chatSession.get().pi, {
     runPrompt: async () => ({ text: 'ok' }),
-    history: async () => [{ role: 'user', content: 'stored', timestamp: 1 }],
+    history: async () => history,
   });
   return new LocalCore({
     chatSession,
@@ -288,6 +291,20 @@ test('a snapshot holds the conversation as the chat would resume it', async () =
   assert.deepEqual((await c.snapshot()).history, [
     { role: 'user', content: 'stored', timestamp: 1 },
   ]);
+});
+
+test('a snapshot leaves out the replies that were only a noop sentinel', async () => {
+  const text = (t: string) => ({ role: 'assistant', content: [{ type: 'text', text: t }] });
+  const c = core(undefined, [
+    { role: 'user', content: '[background-bash-report] stopped', timestamp: 1 },
+    text('BACKGROUND_BASH_NOOP'),
+    text('`__SUBAGENT_NOOP__`.'),
+    text('Mentions BACKGROUND_BASH_NOOP in passing.'),
+  ]);
+  assert.deepEqual(
+    (await c.snapshot()).history.map((m) => m.role),
+    ['user', 'assistant'],
+  );
 });
 
 test('input carries the names of its attachments, for channels that mirror it', async () => {

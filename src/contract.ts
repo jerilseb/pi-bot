@@ -289,7 +289,8 @@ export interface CoreState {
 export interface CoreSnapshot {
   /**
    * The chat conversation: the live session's messages, or those of the
-   * transcript it would resume when none is loaded; empty after /new.
+   * transcript it would resume when none is loaded; empty after /new. Without
+   * the replies that were only a noop sentinel, which showed nothing live.
    */
   history: AgentMessage[];
   /** Jobs the chat started that are still running. */

@@ -187,6 +187,35 @@ test('a reply that is already streaming when the terminal connects is still draw
   assert.match(shown(), /Half a reply\./);
 });
 
+test('a turn that ends silent takes back the reply it streamed, and only that', () => {
+  const { chat, shown } = view();
+  chat.turnStart({ kind: 'job-report', source: 'background-bash-report' });
+  chat.agentEvent({ type: 'message_start', message: reply([], 'toolUse') } as never);
+  chat.agentEvent({
+    type: 'message_end',
+    message: reply([{ type: 'text', text: 'Checking.' }, call('c1', 'bash', { command: 'ls' })]),
+  } as never);
+  chat.agentEvent({ type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash' } as never);
+  chat.agentEvent({
+    type: 'tool_execution_end',
+    toolCallId: 'c1',
+    result: { content: [{ type: 'text', text: 'a.txt' }] },
+    isError: false,
+  } as never);
+  chat.agentEvent({ type: 'message_start', message: assistant('') } as never);
+  chat.agentEvent({ type: 'message_end', message: assistant('BACKGROUND_BASH_NOOP') } as never);
+  chat.turnEnd(true);
+  assert.doesNotMatch(shown(), /NOOP/);
+  assert.match(shown(), /Checking\./);
+  assert.match(shown(), /bash/);
+
+  chat.turnStart({ kind: 'user', channel: self });
+  chat.agentEvent({ type: 'message_start', message: assistant('') } as never);
+  chat.agentEvent({ type: 'message_end', message: assistant('Done.') } as never);
+  chat.turnEnd(false);
+  assert.match(shown(), /Done\./);
+});
+
 test('a tool call is one row saying what it came to, a failure two, until /expand', () => {
   const { chat, rows, shown } = view();
   const paragraph = (n: number): string => `Paragraph ${n} ${'word '.repeat(60)}`;
@@ -517,7 +546,10 @@ test('while the chat works, a line above the editor says so, as Pi draws it', (t
   const [line, ...below] = rows();
   assert.match(line ?? '', /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working$/, "in the column of the editor's ❯");
   assert.deepEqual(below, [''], 'a margin from the editor');
-  assert.ok(working.render(4).every((row) => visibleWidth(row) <= 4), 'cut to a narrow width');
+  assert.ok(
+    working.render(4).every((row) => visibleWidth(row) <= 4),
+    'cut to a narrow width',
+  );
   working.setWorking(false);
   assert.deepEqual(rows(), []);
 });

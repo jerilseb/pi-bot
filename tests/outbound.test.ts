@@ -15,6 +15,8 @@ test('a sentinel wrapped in fences, backticks, bold, or a full stop is still a n
     `\`${CRON_NOOP}\``,
     `**${CRON_NOOP}**`,
     `${CRON_NOOP}.`,
+    `\`${CRON_NOOP}\`.`,
+    `**${CRON_NOOP}.**`,
     CRON_NOOP.replace(/^_+|_+$/g, ''),
     '   ',
   ]) {

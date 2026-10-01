@@ -31,6 +31,8 @@ export class ChatView {
   private readonly ui: TUI;
   private readonly markdownTheme = getMarkdownTheme();
   private streaming: AssistantReply | null = null;
+  /** The chat turn's latest reply, taken back out if the turn ends silent. */
+  private turnReply: AssistantReply | null = null;
   private readonly pendingTools = new Map<string, ToolCall>();
   /** Everything /expand opens and closes, besides the replies' thinking. */
   private readonly expandable: Array<{ setExpanded(expanded: boolean): void }> = [];
@@ -73,6 +75,7 @@ export class ChatView {
     this.prompts.length = 0;
     this.pendingTools.clear();
     this.streaming = null;
+    this.turnReply = null;
     this.turnOrigin = null;
     this.unseenInputs.length = 0;
     const results = new Map<string, ToolCall>();
@@ -118,9 +121,16 @@ export class ChatView {
 
   turnStart(origin: PromptOrigin): void {
     this.turnOrigin = origin;
+    this.turnReply = null;
   }
 
-  turnEnd(): void {
+  /**
+   * A silent turn's last reply was a noop sentinel the core will not send, so
+   * the terminal takes back what it streamed of it.
+   */
+  turnEnd(silent = false): void {
+    if (silent && this.turnReply) this.removeReply(this.turnReply);
+    this.turnReply = null;
     this.turnOrigin = null;
     this.streaming = null;
     this.pendingTools.clear();
@@ -244,6 +254,16 @@ export class ChatView {
     return reply;
   }
 
+  private addTurnReply(): AssistantReply {
+    this.turnReply = this.addAssistant();
+    return this.turnReply;
+  }
+
+  private removeReply(reply: AssistantReply): void {
+    this.container.remove(reply);
+    this.replies.splice(this.replies.indexOf(reply), 1);
+  }
+
   private addTool(name: string, id: string, args: unknown): ToolCall {
     const tool = new ToolCall(name, args);
     tool.setExpanded(this.expanded);
@@ -254,13 +274,13 @@ export class ChatView {
   }
 
   private startStreaming(message: AssistantMessage): void {
-    this.streaming = this.addAssistant();
+    this.streaming = this.addTurnReply();
     this.streaming.update(message, true);
   }
 
   /** Also starts one: a terminal that connects mid-reply first hears it as an update. */
   private updateStreaming(message: AssistantMessage): void {
-    if (!this.streaming) this.streaming = this.addAssistant();
+    if (!this.streaming) this.streaming = this.addTurnReply();
     this.streaming.update(message, true);
     for (const content of message.content) {
       if (content.type !== 'toolCall') continue;
@@ -271,7 +291,7 @@ export class ChatView {
   }
 
   private endStreaming(message: AssistantMessage): void {
-    const streaming = this.streaming ?? this.addAssistant();
+    const streaming = this.streaming ?? this.addTurnReply();
     streaming.update(message, false);
     this.streaming = null;
     if (message.stopReason !== 'aborted' && message.stopReason !== 'error') return;

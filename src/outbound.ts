@@ -1,3 +1,4 @@
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { BACKGROUND_BASH_NOOP, CRON_NOOP, HEARTBEAT_NOOP, SUBAGENT_NOOP } from './config.ts';
 import type { PiPromptResult } from './types.ts';
 
@@ -23,6 +24,22 @@ export function isSilentResponse(
   );
 }
 
+/**
+ * The conversation without the replies that were only a sentinel: a turn that
+ * ended silent showed nothing when it ran, so a channel drawing the history
+ * shows nothing for it either.
+ */
+export function withoutNoopReplies(history: AgentMessage[]): AgentMessage[] {
+  return history.filter(
+    (message) =>
+      message.role !== 'assistant' ||
+      message.content.some((part) => part.type === 'toolCall') ||
+      !isNoopResponse(
+        message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join(''),
+      ),
+  );
+}
+
 // Compared against the bare sentinel name so a model that drops the __ wrapper —
 // e.g. emits "HEARTBEAT_NOOP" instead of "__HEARTBEAT_NOOP__" — still counts.
 const NOOP_MARKERS = new Set(
@@ -44,8 +61,8 @@ function isNoopResponse(text: string): boolean {
     .replace(/^```(?:text)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim()
-    .replace(/^[`*]+|[`*]+$/g, '')
-    .replace(/\.$/, '')
+    // A full stop may come after the backticks or bold as well as inside them.
+    .replace(/^[`*]+|[`*.]+$/g, '')
     .trim();
 
   return NOOP_MARKERS.has(stripSentinelWrapper(normalized));

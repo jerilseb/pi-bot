@@ -33,6 +33,7 @@ import type {
   UserInput,
 } from './contract.ts';
 import { beginIngestion, isStaleTicket } from './ingestion.ts';
+import { withoutNoopReplies } from './outbound.ts';
 import { createPromptQueue, type PromptQueue, type QueueSink } from './prompt-queue.ts';
 import { stopSubagentTask } from './subagent.ts';
 import type { DeliveryDraft, DeliveryResult, StatusNotice, ToolHost } from './tool-host.ts';
@@ -181,7 +182,7 @@ export class LocalCore implements AgentCore, QueueSink {
 
   async snapshot(): Promise<CoreSnapshot> {
     return {
-      history: await this.options.chatSession.get().pi.history(),
+      history: withoutNoopReplies(await this.options.chatSession.get().pi.history()),
       jobs: this.options.runningJobs?.() ?? [],
       choices: this.choices.views(),
       state: this.readState(),

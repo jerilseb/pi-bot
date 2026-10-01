@@ -15,6 +15,10 @@ export class ChatLog implements Component {
     this.blocks.push({ kind, component });
   }
 
+  remove(component: Component): void {
+    this.blocks = this.blocks.filter((block) => block.component !== component);
+  }
+
   clear(): void {
     this.blocks = [];
   }

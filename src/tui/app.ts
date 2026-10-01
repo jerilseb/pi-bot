@@ -214,7 +214,7 @@ export class TerminalApp implements Channel {
         break;
       case 'turn_end':
         if (event.session !== 'chat') break;
-        this.chat.turnEnd();
+        this.chat.turnEnd(event.outcome === 'silent');
         // An intentional abort already has its own reply/transcript markers.
         if (event.outcome === 'error' && event.error !== 'Request was aborted') {
           this.chat.note(red(`❌ ${event.error}`));
