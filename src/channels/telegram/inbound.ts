@@ -240,13 +240,19 @@ async function downloadTelegramFile(
       ok: boolean;
       result?: { file_path?: string; file_size?: number };
     }>(`getFile?file_id=${encodeURIComponent(fileId)}`);
-    if (!info.ok || !info.result?.file_path) return null;
+    if (!info.ok || !info.result?.file_path) {
+      console.error(`Telegram getFile gave no path for ${fileId}`);
+      return null;
+    }
     if ((info.result.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) return null;
 
     const res = await fetch(`${TELEGRAM_FILE_API}/${info.result.file_path}`, {
       signal: AbortSignal.timeout(TELEGRAM_MEDIA_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`Failed to download Telegram file ${fileId}: HTTP ${res.status}`);
+      return null;
+    }
 
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.length > TELEGRAM_DOWNLOAD_LIMIT) return null;
@@ -256,6 +262,9 @@ async function downloadTelegramFile(
       path.basename(suggestedName, path.extname(suggestedName)).replace(/[^a-zA-Z0-9._-]/g, '_') ||
       'file';
     const localPath = path.join(TMP_DIR, `${Date.now()}-${safeBase}${ext}`);
+    // Recreate before each save: systemd-tmpfiles can remove this directory
+    // while the bot is running, so creating it only at startup is not enough.
+    fs.mkdirSync(TMP_DIR, { recursive: true });
     fs.writeFileSync(localPath, buffer);
     return { localPath, size: buffer.length };
   } catch (error) {
